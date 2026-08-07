@@ -1210,7 +1210,8 @@ loja, resumo, preco/promocao e cashback; o toque abre `ProductDetails`.
 - Sem motoboy vinculado, a loja usa `Chamar motoboy`; o primeiro profissional
   elegivel da cidade que aceitar entra no chat. A interface nao mostra lista
   nem contagem de profissionais externos.
-- Nenhuma migration foi criada para estes ajustes.
+- Privacidade da busca e ajuste do teclado nao exigem migration; a fila de
+  aceite descrita abaixo exige `chamadas_motoboy_aceite`.
 
 ### Despacho e aceite da corrida
 

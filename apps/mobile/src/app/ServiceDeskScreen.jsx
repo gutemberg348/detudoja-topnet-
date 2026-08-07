@@ -92,6 +92,15 @@ export function ServiceDeskScreen({ navigation }) {
   }, [session?.accessToken]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const nextExpiry = courierRequests
+      .map((request) => new Date(request.expiresAt).getTime())
+      .filter((value) => Number.isFinite(value) && value > Date.now())
+      .sort((left, right) => left - right)[0];
+    if (!nextExpiry) return undefined;
+    const timer = setTimeout(() => load({ silent: true }), Math.max(0, nextExpiry - Date.now()) + 250);
+    return () => clearTimeout(timer);
+  }, [courierRequests, load]);
 
   useEffect(() => {
     if (!session?.accessToken) return undefined;

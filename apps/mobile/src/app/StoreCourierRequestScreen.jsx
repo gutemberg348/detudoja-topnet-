@@ -45,6 +45,13 @@ export function StoreCourierRequestScreen({ navigation, route }) {
     const expiresAt = dispatch.currentRequest?.expiresAt;
     if (!expiresAt) return undefined;
     const delay = Math.max(0, new Date(expiresAt).getTime() - Date.now()) + 250;
+    const timer = setTimeout(() => load({ silent: true }), delay);
+    return () => clearTimeout(timer);
+  }, [dispatch.currentRequest?.expiresAt, load]);
+  useEffect(() => {
+    const expiresAt = dispatch.currentRequest?.expiresAt;
+    if (!expiresAt) return undefined;
+    const delay = Math.max(0, new Date(expiresAt).getTime() - Date.now()) + 250;
     const timeout = setTimeout(() => load({ silent: true }), delay);
     return () => clearTimeout(timeout);
   }, [dispatch.currentRequest?.expiresAt, load]);

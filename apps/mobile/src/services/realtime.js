@@ -6,8 +6,6 @@ export const realtimeEvents = {
   courierTeamUpdated: "courier.team.updated",
   courierRequestCreated: "courier.request.created",
   courierRequestUpdated: "courier.request.updated",
-  courierRequestCreated: "courier.request.created",
-  courierRequestUpdated: "courier.request.updated",
   orderCreated: "order.created",
   orderMessageCreated: "order.message.created",
   orderStatusUpdated: "order.status.updated",
