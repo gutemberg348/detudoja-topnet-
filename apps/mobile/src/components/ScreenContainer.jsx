@@ -1,0 +1,89 @@
+import {
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { colors, layout, spacing } from "../utils/theme";
+
+export function ScreenContainer({
+  children,
+  contentContainerStyle,
+  edges = ["top", "left", "right"],
+  keyboardVerticalOffset = 0,
+  onContentSizeChange,
+  padded = true,
+  scroll = true,
+  scrollViewRef,
+  style,
+}) {
+  const contentStyle = [styles.contentWidth, padded && styles.padded, contentContainerStyle];
+
+  return (
+    <SafeAreaView edges={edges} style={[styles.safeArea, style]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={keyboardVerticalOffset}
+        style={styles.keyboard}
+      >
+        {scroll ? (
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            onContentSizeChange={onContentSizeChange}
+            ref={scrollViewRef}
+            showsVerticalScrollIndicator={false}
+            style={styles.scroll}
+          >
+            <View style={contentStyle}>{children}</View>
+          </ScrollView>
+        ) : (
+          <View style={styles.staticShell}>
+            <View style={[...contentStyle, styles.staticContent]}>{children}</View>
+          </View>
+        )}
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  contentWidth: {
+    alignSelf: "center",
+    flexGrow: 1,
+    maxWidth: layout.contentMaxWidth,
+    minWidth: 0,
+    width: "100%",
+    ...Platform.select({
+      web: {
+        boxSizing: "border-box",
+      },
+    }),
+  },
+  keyboard: {
+    flex: 1,
+  },
+  padded: {
+    padding: spacing.lg,
+  },
+  safeArea: {
+    backgroundColor: colors.background,
+    flex: 1,
+  },
+  staticContent: {
+    flex: 1,
+  },
+  scroll: {
+    width: "100%",
+  },
+  scrollContent: {
+    flexGrow: 1,
+    width: "100%",
+  },
+  staticShell: {
+    flex: 1,
+    width: "100%",
+  },
+});

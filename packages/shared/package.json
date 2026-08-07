@@ -1,0 +1,12 @@
+{
+  "name": "shared",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./constants/roles": "./src/constants/roles.js",
+    "./constants/statuses": "./src/constants/statuses.js",
+    "./constants/wallet-types": "./src/constants/wallet-types.js",
+    "./utils/money": "./src/utils/money.js"
+  }
+}

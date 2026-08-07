@@ -1,0 +1,33 @@
+{
+  "name": "detudoja",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=20.19.4"
+  },
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev -w apps/api",
+    "dev:mobile": "npm run start -w apps/mobile",
+    "dev:web": "npm run dev -w apps/web-admin",
+    "build:web": "npm run build -w apps/web-admin",
+    "start:api": "npm run start -w apps/api",
+    "test:api": "npm run test -w apps/api",
+    "prisma:generate": "npm run prisma:generate -w apps/api",
+    "prisma:validate": "npm run prisma:validate -w apps/api",
+    "prisma:migrate": "npm run prisma:migrate -w apps/api",
+    "prisma:deploy": "npm run prisma:deploy -w apps/api",
+    "prisma:studio": "npm run prisma:studio -w apps/api",
+    "backfill:company-network": "npm run backfill:company-network -w apps/api",
+    "backfill:segment-classification": "npm run backfill:segment-classification -w apps/api",
+    "backfill:city-base": "npm run backfill:city-base -w apps/api",
+    "seed:admin": "npm run seed:admin -w apps/api",
+    "seed:demo": "npm run seed:demo -w apps/api",
+    "seed:service-types": "npm run seed:service-types -w apps/api",
+    "media:curated": "npm run media:curated -w apps/api"
+  }
+}
