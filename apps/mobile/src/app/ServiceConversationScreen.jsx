@@ -15,8 +15,10 @@ import {
   View,
 } from "react-native";
 import { AppButton } from "../components/AppButton";
+import { ChatComposer } from "../components/ChatComposer";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { StatePanel } from "../components/StatePanel";
+import { useConversationRealtime } from "../hooks/useConversationRealtime";
 import { getGeneratedChargeQr } from "../services/seller.api";
 import {
   acceptServiceProposal,
@@ -28,9 +30,10 @@ import {
   markServiceDelivered,
   sendServiceConversationMessage,
 } from "../services/service-chats.api";
-import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
+import { realtimeEvents } from "../services/realtime";
 import { useAuthStore } from "../stores/useAuthStore";
 import { resolveMediaUrl } from "../utils/media";
+import { formatarHora } from "../utils/date";
 import { formatarDinheiro } from "../utils/money";
 import {
   colors,
@@ -86,13 +89,17 @@ export function ServiceConversationScreen({ navigation, route }) {
     );
   const customerHasPendingProposal =
     !conversation?.isSeller && latestProposal?.status === "PENDENTE";
+  const isCourierRide = Boolean(
+    conversation?.request?.store
+    || conversation?.serviceType?.operationalType === "ENTREGA_LOCAL",
+  );
   const hasLockedPayment = (conversation?.proposals ?? []).some((proposal) => (
     ["PAGA", "CONCLUIDA"].includes(proposal.status)
     || ["PAGA", "PROCESSANDO"].includes(proposal.charge?.status)
     || ["PAGO", "LIQUIDADO", "EM_DISPUTA"].includes(proposal.charge?.paymentStatus)
   ));
   const canCancelRide = Boolean(
-    conversation?.request?.store
+    isCourierRide
     && ["ABERTA", "ACORDADA"].includes(conversation?.status)
     && !hasLockedPayment,
   );
@@ -124,30 +131,22 @@ export function ServiceConversationScreen({ navigation, route }) {
     return () => subscription.remove();
   }, []);
 
-  useEffect(() => {
-    if (!session?.accessToken || !conversation?.id) return undefined;
-    const socket = getRealtimeSocket(session.accessToken);
-    const refreshConversation = (payload = {}) => {
-      if (
-        Number(payload.conversationId) === Number(conversation.id)
-        && payload.reason !== "read"
-      ) {
-        load({ silent: true });
-      }
-    };
+  const refreshConversation = useCallback(() => {
+    load({ silent: true });
+  }, [load]);
 
-    socket?.on(realtimeEvents.serviceChatCreated, refreshConversation);
-    socket?.on(realtimeEvents.serviceChatMessageCreated, refreshConversation);
-    socket?.on(realtimeEvents.serviceChatUpdated, refreshConversation);
-    socket?.on(realtimeEvents.chargeUpdated, refreshConversation);
-
-    return () => {
-      socket?.off(realtimeEvents.serviceChatCreated, refreshConversation);
-      socket?.off(realtimeEvents.serviceChatMessageCreated, refreshConversation);
-      socket?.off(realtimeEvents.serviceChatUpdated, refreshConversation);
-      socket?.off(realtimeEvents.chargeUpdated, refreshConversation);
-    };
-  }, [conversation?.id, load, session?.accessToken]);
+  useConversationRealtime({
+    accessToken: session?.accessToken,
+    conversationId: conversation?.id,
+    events: [
+      realtimeEvents.serviceChatCreated,
+      realtimeEvents.serviceChatMessageCreated,
+      realtimeEvents.serviceChatUpdated,
+      realtimeEvents.chargeUpdated,
+    ],
+    ignoreReasons: ["read"],
+    onUpdate: refreshConversation,
+  });
 
   async function pickImage() {
     const Picker = await import("expo-image-picker");
@@ -350,6 +349,7 @@ export function ServiceConversationScreen({ navigation, route }) {
         </View>
         {canCreateProposal ? (
           <Pressable
+            accessibilityLabel="Propor valor"
             onPress={() => setProposalOpen(true)}
             style={({ pressed }) => [
               styles.proposalShortcut,
@@ -357,29 +357,38 @@ export function ServiceConversationScreen({ navigation, route }) {
             ]}
           >
             <Ionicons color={colors.card} name="cash-outline" size={18} />
-            <Text style={styles.proposalShortcutText}>Propor valor</Text>
+            <Text style={styles.proposalShortcutText}>Propor</Text>
           </Pressable>
         ) : null}
       </View>
 
-      {conversation.request?.store ? (
+      {isCourierRide ? (
         <View style={styles.deliveryContext}>
           <View style={styles.deliveryContextHeader}>
             <View style={styles.deliveryContextIcon}>
               <Ionicons color={colors.primaryDark} name="bicycle-outline" size={19} />
             </View>
             <View style={styles.deliveryContextCopy}>
-              <Text style={styles.deliveryContextEyebrow}>CORRIDA DA LOJA</Text>
-              <Text numberOfLines={1} style={styles.deliveryContextStore}>{conversation.request.store.name}</Text>
+              <Text style={styles.deliveryContextEyebrow}>
+                {conversation.request?.store ? "CORRIDA DA LOJA" : "CORRIDA LOCAL"}
+              </Text>
+              <Text numberOfLines={1} style={styles.deliveryContextStore}>{conversation.request?.store?.name ?? "Corrida em atendimento"}</Text>
+              {conversation.request.description ? (
+                <Text numberOfLines={1} style={styles.deliveryDescription}>
+                  {conversation.request.description}
+                </Text>
+              ) : null}
             </View>
-            <View style={styles.deliveryLive}><View style={styles.deliveryLiveDot} /><Text style={styles.deliveryLiveText}>Em negociacao</Text></View>
+            <View style={styles.deliveryLive}><View style={styles.deliveryLiveDot} /><Text style={styles.deliveryLiveText}>Ativa</Text></View>
           </View>
-          <View style={styles.deliveryRoute}>
-            <RoutePoint icon="location-outline" label="Retirada" value={conversation.request.origin} />
-            <View style={styles.deliveryRouteLine} />
-            <RoutePoint icon="flag-outline" label="Destino" value={conversation.request.destination} />
-          </View>
-          {conversation.request.description ? <Text numberOfLines={2} style={styles.deliveryDescription}>{conversation.request.description}</Text> : null}
+          {conversation.request?.origin || conversation.request?.destination ? (
+            <View style={styles.deliveryRouteCompact}>
+              <Ionicons color={colors.primaryDark} name="navigate-outline" size={15} />
+              <Text numberOfLines={1} style={styles.deliveryRouteText}>
+                {[conversation.request.origin, conversation.request.destination].filter(Boolean).join("  →  ")}
+              </Text>
+            </View>
+          ) : null}
           {canCancelRide ? (
             <Pressable
               onPress={() => setCancelOpen(true)}
@@ -406,6 +415,7 @@ export function ServiceConversationScreen({ navigation, route }) {
         <ProposalCard
           actionLoading={actionLoading}
           conversation={conversation}
+          isCourierRide={isCourierRide}
           onAccept={acceptProposal}
           onConfirmCompletion={confirmCompletion}
           onDecline={declineProposal}
@@ -418,7 +428,7 @@ export function ServiceConversationScreen({ navigation, route }) {
         <View style={styles.contextStrip}>
           <Ionicons color={colors.primaryDark} name="shield-checkmark-outline" size={18} />
           <Text style={styles.contextText}>
-            Combine os detalhes no chat. O valor so vira cobranca quando o cliente aceitar.
+            Combine os detalhes e envie uma proposta quando o valor estiver definido.
           </Text>
         </View>
       )}
@@ -449,8 +459,8 @@ export function ServiceConversationScreen({ navigation, route }) {
         )}
       </ScrollView>
 
-      <View style={styles.composer}>
-        {image ? (
+      <ChatComposer
+        accessory={image ? (
           <View style={styles.imageReady}>
             <Ionicons color={colors.primaryDark} name="image-outline" size={18} />
             <Text style={styles.imageReadyText}>Imagem pronta para enviar</Text>
@@ -459,7 +469,9 @@ export function ServiceConversationScreen({ navigation, route }) {
             </Pressable>
           </View>
         ) : null}
-        <View style={styles.inputRow}>
+        disabled={!canChat}
+        draft={draft}
+        leadingAction={(
           <Pressable
             accessibilityLabel="Enviar foto"
             disabled={!canChat}
@@ -472,36 +484,14 @@ export function ServiceConversationScreen({ navigation, route }) {
               size={22}
             />
           </Pressable>
-          <TextInput
-            editable={canChat}
-            multiline
-            onChangeText={setDraft}
-            onFocus={() => {
-              setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
-            }}
-            placeholder={canChat ? "Escreva uma mensagem" : "Atendimento encerrado"}
-            placeholderTextColor={colors.textMuted}
-            style={styles.input}
-            value={draft}
-          />
-          <Pressable
-            accessibilityLabel="Enviar mensagem"
-            disabled={(!draft.trim() && !image) || sending || !canChat}
-            onPress={send}
-            style={({ pressed }) => [
-              styles.send,
-              ((!draft.trim() && !image) || !canChat) && styles.sendDisabled,
-              pressed && styles.pressed,
-            ]}
-          >
-            {sending ? (
-              <ActivityIndicator color={colors.card} size="small" />
-            ) : (
-              <Ionicons color={colors.card} name="arrow-up" size={21} />
-            )}
-          </Pressable>
-        </View>
-      </View>
+        )}
+        onChangeDraft={setDraft}
+        onFocus={() => setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80)}
+        onSend={send}
+        placeholder={canChat ? "Escreva uma mensagem" : "Atendimento encerrado"}
+        sendEnabled={Boolean(draft.trim() || image)}
+        sending={sending}
+      />
 
       <ProposalModal
         form={proposalForm}
@@ -535,7 +525,7 @@ function MessageBubble({ message }) {
       <View style={styles.systemMessage}>
         <Ionicons color={colors.primaryDark} name="information-circle-outline" size={16} />
         <Text style={styles.systemText}>{message.text}</Text>
-        <Text style={styles.systemTime}>{formatTime(message.createdAt)}</Text>
+        <Text style={styles.systemTime}>{formatarHora(message.createdAt)}</Text>
       </View>
     );
   }
@@ -555,20 +545,8 @@ function MessageBubble({ message }) {
           </Text>
         ) : null}
         <Text style={[styles.messageTime, message.isMine && styles.mineTime]}>
-          {formatTime(message.createdAt)}
+          {formatarHora(message.createdAt)}
         </Text>
-      </View>
-    </View>
-  );
-}
-
-function RoutePoint({ icon, label, value }) {
-  return (
-    <View style={styles.routePoint}>
-      <View style={styles.routePointIcon}><Ionicons color={colors.primaryDark} name={icon} size={15} /></View>
-      <View style={styles.routePointCopy}>
-        <Text style={styles.routePointLabel}>{label}</Text>
-        <Text numberOfLines={2} style={styles.routePointValue}>{value || "Nao informado"}</Text>
       </View>
     </View>
   );
@@ -577,6 +555,7 @@ function RoutePoint({ icon, label, value }) {
 function ProposalCard({
   actionLoading,
   conversation,
+  isCourierRide,
   onAccept,
   onConfirmCompletion,
   onDecline,
@@ -629,13 +608,13 @@ function ProposalCard({
           <AppButton
             loading={actionLoading === "accept"}
             onPress={() => onAccept(proposal)}
-            style={styles.proposalAction}
+            style={[styles.proposalAction, styles.compactProposalButton]}
             title="Aceitar proposta"
           />
           <AppButton
             disabled={Boolean(actionLoading)}
             onPress={() => onDecline(proposal)}
-            style={styles.proposalAction}
+            style={[styles.proposalAction, styles.compactProposalButton]}
             title="Recusar"
             variant="outline"
           />
@@ -650,6 +629,7 @@ function ProposalCard({
         <AppButton
           icon="wallet-outline"
           onPress={() => onOpenPayment(proposal)}
+          style={styles.compactProposalButton}
           title="Pagar pela plataforma"
         />
       ) : null}
@@ -659,6 +639,7 @@ function ProposalCard({
           icon="qr-code-outline"
           loading={actionLoading === "qr"}
           onPress={() => onOpenQr(proposal)}
+          style={styles.compactProposalButton}
           title="Exibir QR presencial"
         />
       ) : null}
@@ -684,7 +665,8 @@ function ProposalCard({
           icon="checkmark-done-outline"
           loading={actionLoading === "delivered"}
           onPress={onDeliver}
-          title={conversation.request?.store ? "Finalizar corrida" : "Servico prestado"}
+          style={styles.compactProposalButton}
+          title={isCourierRide ? "Finalizar corrida" : "Servico prestado"}
         />
       ) : null}
 
@@ -693,7 +675,8 @@ function ProposalCard({
           icon="shield-checkmark-outline"
           loading={actionLoading === "completion"}
           onPress={onConfirmCompletion}
-          title={conversation.request?.store ? "Confirmar entrega" : "Confirmar servico recebido"}
+          style={styles.compactProposalButton}
+          title={isCourierRide ? "Confirmar entrega" : "Confirmar servico recebido"}
         />
       ) : null}
 
@@ -937,19 +920,11 @@ function parseMoneyToCents(value) {
   return Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) : 0;
 }
 
-function formatTime(value) {
-  if (!value) return "";
-  return new Intl.DateTimeFormat("pt-BR", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
-}
-
 const styles = StyleSheet.create({
   amountInput: { color: colors.textPrimary, flex: 1, fontFamily: fonts.extraBold, fontSize: 24, minHeight: 54 },
   amountInputShell: { alignItems: "center", backgroundColor: colors.cardMuted, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.md },
   amountPrefix: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: typography.h3 },
-  avatar: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 48, justifyContent: "center", overflow: "hidden", width: 48 },
+  avatar: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 42, justifyContent: "center", overflow: "hidden", width: 42 },
   avatarImage: { height: "100%", width: "100%" },
   avatarText: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: typography.h3 },
   bubble: { backgroundColor: colors.cardMuted, borderBottomLeftRadius: 4, borderRadius: radius.lg, gap: 5, maxWidth: "84%", paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
@@ -959,22 +934,22 @@ const styles = StyleSheet.create({
   cancelModalTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.h2, textAlign: "center" },
   cancelRideButton: { alignItems: "center", alignSelf: "flex-start", backgroundColor: "#FFF1F2", borderColor: "#FECDD3", borderRadius: radius.round, borderWidth: 1, flexDirection: "row", gap: 5, minHeight: 34, paddingHorizontal: spacing.sm },
   cancelRideText: { color: colors.danger, fontFamily: fonts.bold, fontSize: 10 },
-  composer: { backgroundColor: colors.card, borderTopColor: colors.border, borderTopWidth: 1, gap: spacing.sm, padding: spacing.md },
+  composer: { backgroundColor: colors.card, borderTopColor: colors.border, borderTopWidth: 1, gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   content: { backgroundColor: colors.background, flex: 1 },
-  contextStrip: { alignItems: "center", backgroundColor: colors.primarySoft, borderBottomColor: colors.primaryLight, borderBottomWidth: 1, flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  contextStrip: { alignItems: "center", backgroundColor: colors.primarySoft, borderBottomColor: colors.primaryLight, borderBottomWidth: 1, flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: 7 },
   contextText: { color: colors.primaryDark, flex: 1, fontFamily: fonts.medium, fontSize: typography.caption, lineHeight: 17 },
-  deliveryContext: { backgroundColor: colors.card, borderBottomColor: colors.border, borderBottomWidth: 1, gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  deliveryContext: { backgroundColor: "#FAFFFC", borderBottomColor: colors.border, borderBottomWidth: 1, gap: 7, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
   deliveryContextCopy: { flex: 1, gap: 2, minWidth: 0 },
   deliveryContextEyebrow: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 9, fontWeight: "700" },
   deliveryContextHeader: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
-  deliveryContextIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, height: 38, justifyContent: "center", width: 38 },
-  deliveryContextStore: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.small },
-  deliveryDescription: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption, lineHeight: 17 },
+  deliveryContextIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, height: 34, justifyContent: "center", width: 34 },
+  deliveryContextStore: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.caption },
+  deliveryDescription: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 11, lineHeight: 14 },
   deliveryLive: { alignItems: "center", backgroundColor: colors.warningSoft, borderRadius: radius.round, flexDirection: "row", gap: 4, paddingHorizontal: 7, paddingVertical: 4 },
   deliveryLiveDot: { backgroundColor: colors.warning, borderRadius: radius.round, height: 6, width: 6 },
   deliveryLiveText: { color: "#92400E", fontFamily: fonts.bold, fontSize: 9 },
-  deliveryRoute: { gap: 3 },
-  deliveryRouteLine: { backgroundColor: colors.primaryLight, height: 8, marginLeft: 15, width: 2 },
+  deliveryRouteCompact: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.primaryLight, borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: 6, minHeight: 29, paddingHorizontal: spacing.sm },
+  deliveryRouteText: { color: colors.textSecondary, flex: 1, fontFamily: fonts.medium, fontSize: 10 },
   decisionAmount: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: 30, fontWeight: "800" },
   decisionAmountCard: { alignItems: "center", backgroundColor: colors.primarySoft, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, gap: spacing.xs, padding: spacing.lg },
   decisionAmountLabel: { color: colors.textSecondary, fontFamily: fonts.medium, fontSize: typography.caption },
@@ -999,18 +974,18 @@ const styles = StyleSheet.create({
   errorText: { color: colors.danger, flex: 1, fontFamily: fonts.medium, fontSize: typography.caption },
   field: { gap: spacing.sm },
   fieldLabel: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small },
-  header: { alignItems: "center", backgroundColor: colors.card, borderBottomColor: colors.border, borderBottomWidth: 1, flexDirection: "row", gap: spacing.md, minHeight: 82, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  header: { alignItems: "center", backgroundColor: colors.card, borderBottomColor: colors.border, borderBottomWidth: 1, flexDirection: "row", gap: spacing.sm, minHeight: 64, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
   headerCopy: { flex: 1, gap: 2, minWidth: 0 },
   imageReady: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, flexDirection: "row", gap: spacing.xs, padding: spacing.sm },
   imageReadyText: { color: colors.primaryDark, flex: 1, fontFamily: fonts.bold, fontSize: typography.caption },
-  input: { color: colors.textPrimary, flex: 1, fontFamily: fonts.regular, fontSize: typography.small, maxHeight: 100, minHeight: 44, paddingHorizontal: spacing.sm, paddingVertical: spacing.sm },
+  input: { color: colors.textPrimary, flex: 1, fontFamily: fonts.regular, fontSize: typography.small, maxHeight: 92, minHeight: 40, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
   inputRow: { alignItems: "flex-end", backgroundColor: colors.cardMuted, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.xs, padding: spacing.xs },
   messageImage: { borderRadius: radius.md, height: 190, maxWidth: "100%", width: 240 },
   messageLine: { alignItems: "flex-start" },
   messageLineMine: { alignItems: "flex-end" },
   messageText: { color: colors.textPrimary, fontFamily: fonts.regular, fontSize: typography.small, lineHeight: 20 },
   messageTime: { alignSelf: "flex-end", color: colors.textMuted, fontFamily: fonts.medium, fontSize: 9 },
-  messages: { flexGrow: 1, gap: spacing.sm, padding: spacing.lg },
+  messages: { flexGrow: 1, gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   messagesScroll: { flex: 1 },
   mine: { backgroundColor: colors.primaryDark, borderBottomLeftRadius: radius.lg, borderBottomRightRadius: 4 },
   mineText: { color: colors.card },
@@ -1035,29 +1010,25 @@ const styles = StyleSheet.create({
   paymentPill: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.primaryLight, borderRadius: radius.round, borderWidth: 1, flexDirection: "row", gap: 4, paddingHorizontal: spacing.sm, paddingVertical: 5 },
   paymentPillText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 9 },
   personName: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.label },
-  photo: { alignItems: "center", height: 44, justifyContent: "center", width: 42 },
+  photo: { alignItems: "center", height: 40, justifyContent: "center", width: 40 },
   pressed: { opacity: 0.8, transform: [{ scale: 0.985 }] },
   proposalAction: { flex: 1 },
   proposalActions: { flexDirection: "row", gap: spacing.sm },
-  proposalAmount: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: typography.h3 },
-  proposalCard: { backgroundColor: "#F2FBF7", borderBottomColor: colors.primaryLight, borderBottomWidth: 1, gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  compactProposalButton: { minHeight: 40 },
+  proposalAmount: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: typography.label },
+  proposalCard: { backgroundColor: "#F2FBF7", borderBottomColor: colors.primaryLight, borderBottomWidth: 1, gap: 7, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
   proposalCardPaid: { backgroundColor: "#ECFDF5" },
   proposalCopy: { flex: 1, gap: 2, minWidth: 0 },
   proposalDescription: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption, lineHeight: 17 },
   proposalHint: { color: colors.textSecondary, fontFamily: fonts.medium, fontSize: typography.caption, lineHeight: 17 },
-  proposalIcon: { alignItems: "center", backgroundColor: colors.card, borderRadius: radius.round, height: 42, justifyContent: "center", width: 42 },
+  proposalIcon: { alignItems: "center", backgroundColor: colors.card, borderRadius: radius.round, height: 34, justifyContent: "center", width: 34 },
   proposalIconPaid: { backgroundColor: colors.primaryDark },
   proposalLabel: { color: colors.textSecondary, fontFamily: fonts.bold, fontSize: 10, textTransform: "uppercase" },
-  proposalShortcut: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.md, flexDirection: "row", gap: 5, minHeight: 40, paddingHorizontal: spacing.sm },
+  proposalShortcut: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.md, flexDirection: "row", gap: 4, height: 36, justifyContent: "center", paddingHorizontal: 10 },
   proposalShortcutText: { color: colors.card, fontFamily: fonts.bold, fontSize: 10 },
   proposalTopline: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
-  proposalWarning: { color: colors.danger, fontFamily: fonts.bold, fontSize: typography.caption },
-  routePoint: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
-  routePointCopy: { flex: 1, gap: 1, minWidth: 0 },
-  routePointIcon: { alignItems: "center", backgroundColor: colors.backgroundSoft, borderRadius: radius.round, height: 30, justifyContent: "center", width: 30 },
-  routePointLabel: { color: colors.textMuted, fontFamily: fonts.bold, fontSize: 9, textTransform: "uppercase" },
-  routePointValue: { color: colors.textPrimary, fontFamily: fonts.medium, fontSize: typography.caption },
-  send: { alignItems: "center", backgroundColor: colors.primary, borderRadius: radius.md, height: 42, justifyContent: "center", width: 42 },
+  proposalWarning: { color: colors.danger, fontFamily: fonts.bold, fontSize: 11 },
+  send: { alignItems: "center", backgroundColor: colors.primary, borderRadius: radius.md, height: 40, justifyContent: "center", width: 40 },
   sendDisabled: { backgroundColor: colors.textMuted },
   serviceName: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: 10, textTransform: "uppercase" },
   statusDot: { backgroundColor: colors.success, borderRadius: radius.round, height: 6, width: 6 },

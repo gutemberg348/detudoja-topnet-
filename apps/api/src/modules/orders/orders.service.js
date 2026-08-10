@@ -8,6 +8,8 @@ import {
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
 import { requireUserCpf } from "../../utils/cpf-required.js";
+import { parsePositiveId } from "../../utils/ids.js";
+import { formatMoney } from "../../utils/money.js";
 import { settleCompletedStoreOrderEarnings } from "../earnings/order-earnings.service.js";
 import {
   serializeOrder,
@@ -73,16 +75,6 @@ function formatCep(value) {
   return digits.length === 8 ? `${digits.slice(0, 5)}-${digits.slice(5)}` : digits;
 }
 
-function parsePositiveIntId(value, label = "ID invalido") {
-  const id = Number(value);
-
-  if (!Number.isInteger(id) || id <= 0) {
-    throw new AppError(label, 400);
-  }
-
-  return id;
-}
-
 function productPriceCents(product) {
   return cents(product.preco_promocional_centavos ?? product.preco_centavos);
 }
@@ -91,13 +83,6 @@ function generateOrderCode() {
   return `DTJ-${Date.now().toString(36).toUpperCase()}-${randomUUID()
     .slice(0, 4)
     .toUpperCase()}`;
-}
-
-function formatMoney(valueCents) {
-  return new Intl.NumberFormat("pt-BR", {
-    currency: "BRL",
-    style: "currency",
-  }).format(Number(valueCents) / 100);
 }
 
 function addressSnapshot(address, reference = "") {
@@ -480,7 +465,7 @@ export async function createCheckoutOrder(userId, data) {
 
 export async function listCustomerOrders(userId, { storeId } = {}) {
   const parsedStoreId = storeId
-    ? parsePositiveIntId(storeId, "Loja invalida")
+    ? parsePositiveId(storeId, "Loja invalida")
     : null;
   const orders = await prisma.pedidoLoja.findMany({
     include: orderInclude,
@@ -496,7 +481,7 @@ export async function listCustomerOrders(userId, { storeId } = {}) {
 }
 
 async function findCustomerOrder(userId, orderId, select = { id: true, loja_id: true, usuario_id: true }) {
-  const parsedOrderId = parsePositiveIntId(orderId, "Pedido invalido");
+  const parsedOrderId = parsePositiveId(orderId, "Pedido invalido");
   const order = await prisma.pedidoLoja.findFirst({
     select,
     where: {
@@ -617,7 +602,7 @@ export async function acceptCustomerOrderProposal(userId, orderId, proposalId) {
     status: true,
     usuario_id: true,
   });
-  const parsedProposalId = parsePositiveIntId(proposalId, "Proposta invalida");
+  const parsedProposalId = parsePositiveId(proposalId, "Proposta invalida");
 
   if (order.status !== "NEGOCIANDO") {
     throw new AppError("Este pedido nao esta aguardando uma proposta", 409);
@@ -695,7 +680,7 @@ export async function acceptCustomerOrderProposal(userId, orderId, proposalId) {
 
 export async function declineCustomerOrderProposal(userId, orderId, proposalId) {
   const order = await findCustomerOrder(userId, orderId);
-  const parsedProposalId = parsePositiveIntId(proposalId, "Proposta invalida");
+  const parsedProposalId = parsePositiveId(proposalId, "Proposta invalida");
 
   const result = await prisma.$transaction(async (database) => {
     const declinedProposal = await database.propostaPedidoLoja.updateMany({
@@ -752,8 +737,8 @@ export async function declineCustomerOrderProposal(userId, orderId, proposalId) 
 
 export async function payCustomerOrderProposal(userId, orderId, proposalId, data) {
   await requireUserCpf(prisma, userId);
-  const parsedOrderId = parsePositiveIntId(orderId, "Pedido invalido");
-  const parsedProposalId = parsePositiveIntId(proposalId, "Proposta invalida");
+  const parsedOrderId = parsePositiveId(orderId, "Pedido invalido");
+  const parsedProposalId = parsePositiveId(proposalId, "Proposta invalida");
   const currentOrder = await prisma.pedidoLoja.findFirst({
     include: {
       itens: { orderBy: { criado_em: "asc" } },

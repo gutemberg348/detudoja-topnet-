@@ -8,13 +8,14 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { StatePanel } from "../components/StatePanel";
+import { ChatComposer } from "../components/ChatComposer";
+import { useConversationRealtime } from "../hooks/useConversationRealtime";
 import { getMarketplaceStore } from "../services/marketplace.api";
-import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
+import { realtimeEvents } from "../services/realtime";
 import {
   getStoreConversation,
   openStoreConversation,
@@ -22,6 +23,7 @@ import {
 } from "../services/store-chats.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { resolveMediaUrl } from "../utils/media";
+import { formatarHora } from "../utils/date";
 import { formatarDinheiro } from "../utils/money";
 import {
   colors,
@@ -86,29 +88,20 @@ export function StoreConversationScreen({ navigation, route }) {
     load();
   }, [load]);
 
-  useEffect(() => {
-    if (!session?.accessToken || !conversation?.id) {
-      return undefined;
-    }
+  const refreshConversation = useCallback(() => {
+    load({ silent: true });
+  }, [load]);
 
-    const socket = getRealtimeSocket(session.accessToken);
-    const refresh = (payload = {}) => {
-      if (
-        Number(payload.conversationId) === Number(conversation.id)
-        && payload.reason !== "read"
-      ) {
-        load({ silent: true });
-      }
-    };
-
-    socket?.on(realtimeEvents.storeChatMessageCreated, refresh);
-    socket?.on(realtimeEvents.storeChatUpdated, refresh);
-
-    return () => {
-      socket?.off(realtimeEvents.storeChatMessageCreated, refresh);
-      socket?.off(realtimeEvents.storeChatUpdated, refresh);
-    };
-  }, [conversation?.id, load, session?.accessToken]);
+  useConversationRealtime({
+    accessToken: session?.accessToken,
+    conversationId: conversation?.id,
+    events: [
+      realtimeEvents.storeChatMessageCreated,
+      realtimeEvents.storeChatUpdated,
+    ],
+    ignoreReasons: ["read"],
+    onUpdate: refreshConversation,
+  });
 
   async function send() {
     const message = draft.trim();
@@ -339,8 +332,9 @@ export function StoreConversationScreen({ navigation, route }) {
         )}
       </ScrollView>
 
-      <View style={styles.composer}>
-        {conversation?.isStore ? (
+      <ChatComposer
+        draft={draft}
+        leadingAction={conversation?.isStore ? (
           <Pressable
             accessibilityLabel="Compartilhar produto ou catalogo"
             onPress={() => setShareOpen(true)}
@@ -352,37 +346,16 @@ export function StoreConversationScreen({ navigation, route }) {
             <Ionicons color={colors.primaryDark} name="add" size={23} />
           </Pressable>
         ) : null}
-        <TextInput
-          maxLength={2000}
-          multiline
-          onChangeText={setDraft}
-          onSubmitEditing={send}
-          placeholder={
-            conversation?.isStore
-              ? "Responder ao cliente"
-              : "Escreva sua duvida para a loja"
-          }
-          placeholderTextColor={colors.textMuted}
-          style={styles.input}
-          value={draft}
-        />
-        <Pressable
-          accessibilityLabel="Enviar mensagem"
-          disabled={!draft.trim() || sending}
-          onPress={send}
-          style={({ pressed }) => [
-            styles.send,
-            !draft.trim() && styles.sendDisabled,
-            pressed && styles.pressed,
-          ]}
-        >
-          {sending ? (
-            <ActivityIndicator color={colors.card} size="small" />
-          ) : (
-            <Ionicons color={colors.card} name="arrow-up" size={21} />
-          )}
-        </Pressable>
-      </View>
+        onChangeDraft={setDraft}
+        onSend={send}
+        placeholder={
+          conversation?.isStore
+            ? "Responder ao cliente"
+            : "Escreva sua duvida para a loja"
+        }
+        sending={sending}
+        submitOnEnter
+      />
 
       <ShareCatalogModal
         conversation={conversation}
@@ -415,7 +388,7 @@ function MessageBubble({ loading, message, onOpenContent }) {
           text={message.text}
           type={message.type}
         />
-        <Text style={styles.commercialTime}>{formatTime(message.createdAt)}</Text>
+        <Text style={styles.commercialTime}>{formatarHora(message.createdAt)}</Text>
       </View>
     );
   }
@@ -427,7 +400,7 @@ function MessageBubble({ loading, message, onOpenContent }) {
           {message.text}
         </Text>
         <Text style={[styles.messageTime, message.isMine && styles.messageTimeMine]}>
-          {formatTime(message.createdAt)}
+          {formatarHora(message.createdAt)}
         </Text>
       </View>
     </View>
@@ -670,13 +643,6 @@ function ShareOption({ description, icon, loading, onPress, title }) {
       )}
     </Pressable>
   );
-}
-
-function formatTime(value) {
-  return new Date(value).toLocaleTimeString("pt-BR", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 function getInitials(value = "") {

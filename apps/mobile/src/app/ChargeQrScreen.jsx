@@ -8,6 +8,7 @@ import { ScreenContainer } from "../components/ScreenContainer";
 import { useRealtimeCharge } from "../hooks/useRealtimeCharge";
 import { getStoreSignupQr } from "../services/seller.api";
 import { useAuthStore } from "../stores/useAuthStore";
+import { formatarHora } from "../utils/date";
 import { formatarDinheiro } from "../utils/money";
 import { colors, fonts, radius, shadow, spacing, typography } from "../utils/theme";
 
@@ -204,7 +205,7 @@ export function ChargeQrScreen({ navigation, route }) {
 }
 
 function formatExpiry(value) {
-  return new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+  return formatarHora(value);
 }
 
 const styles = StyleSheet.create({

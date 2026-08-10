@@ -238,8 +238,15 @@ export async function listCourierRequests(userId) {
           tipo_chamada: "PLATAFORMA",
           motoboy_direcionado_id: null,
           loja: {
-            endereco: { cidade: { equals: courier.cidade_base, mode: "insensitive" }, estado: { equals: courier.estado_base, mode: "insensitive" } },
-            motoboys: { none: { ativo: true, motoboy_id: courier.id } },
+            is: {
+              endereco: {
+                is: {
+                  cidade: { equals: courier.cidade_base, mode: "insensitive" },
+                  estado: { equals: courier.estado_base, mode: "insensitive" },
+                },
+              },
+              motoboys_equipe: { none: { ativo: true, motoboy_id: courier.id } },
+            },
           },
         },
       ],

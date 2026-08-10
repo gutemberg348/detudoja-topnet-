@@ -1256,3 +1256,11 @@ concluida.
 - `ChargeQrScreen` reage a `charge.updated`, cobre o QR com `Pagamento
   recebido` e volta automaticamente ao terminar a animacao.
 - Implementacao sem biblioteca adicional e sem migration.
+
+### Chat de corrida compacto
+
+`ServiceConversationScreen` prioriza a conversa: cabecalho do prestador,
+resumo da corrida e proposta usam faixas compactas; retirada e destino ficam em
+uma linha, e o compositor permanece preso ao rodape. A regra vale tanto para
+corridas de loja quanto para conversa direta com motoboy: antes do pagamento
+ha `Cancelar corrida`; depois, o motoboy finaliza e a outra parte confirma.

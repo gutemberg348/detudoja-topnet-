@@ -2,6 +2,7 @@ import { prisma } from "../../config/prisma.js";
 import { emitCourierTeamUpdated } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
 import { isValidCpf, normalizeCpf } from "../../utils/cpf.js";
+import { parsePositiveId } from "../../utils/ids.js";
 import { requireUserBaseAddress, sameCity } from "../../utils/location.js";
 
 function serializeCourierProfile(profile) {
@@ -24,12 +25,6 @@ function serializeCourierProfile(profile) {
     updatedAt: profile.atualizado_em.toISOString(),
     vehicleModel: profile.modelo_moto,
   };
-}
-
-function parsePositiveId(value, message) {
-  const id = Number(value);
-  if (!Number.isInteger(id) || id <= 0) throw new AppError(message, 400);
-  return id;
 }
 
 function matchesStoreCity(courier, address) {

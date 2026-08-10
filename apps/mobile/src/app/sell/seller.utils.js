@@ -1,4 +1,5 @@
 import { formatarDinheiro } from "../../utils/money";
+import { formatarDataHora } from "../../utils/date";
 import { activeOrderStatuses, productTimeUnits, statusCopy } from "./seller.constants";
 
 export function countNewStoreOrders(store, newOrderStatuses) {
@@ -129,12 +130,7 @@ export function compactOrderCode(value = "") {
 
 export function formatOrderDateTime(value) {
   if (!value) return "Agora";
-  return new Date(value).toLocaleString("pt-BR", {
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    month: "2-digit",
-  });
+  return formatarDataHora(value) || "Agora";
 }
 
 export function orderAddressText(order) {

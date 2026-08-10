@@ -27,40 +27,27 @@ export function useRealtimeOrders({
       return undefined;
     }
 
-    function handleOrderEvent(payload = {}) {
+    function matchesScope(payload = {}) {
       if (orderId && payload.orderId !== orderId) {
-        return;
+        return false;
       }
 
       if (storeId && payload.storeId !== storeId) {
-        return;
+        return false;
       }
 
-      onOrderEvent?.(payload);
-      onStoreEvent?.(payload);
+      return true;
     }
 
-    function handleStoreEvent(payload = {}) {
-      if (orderId && payload.orderId !== orderId) {
-        return;
-      }
-
-      if (storeId && payload.storeId !== storeId) {
-        return;
-      }
+    function handleOrderEvent(payload = {}) {
+      if (!matchesScope(payload)) return;
 
       onOrderEvent?.(payload);
       onStoreEvent?.(payload);
     }
 
     function handleMessageEvent(payload = {}) {
-      if (orderId && payload.orderId !== orderId) {
-        return;
-      }
-
-      if (storeId && payload.storeId !== storeId) {
-        return;
-      }
+      if (!matchesScope(payload)) return;
 
       onMessageEvent?.(payload);
       onStoreEvent?.(payload);
@@ -79,12 +66,12 @@ export function useRealtimeOrders({
       socket.emit("order:join", { orderId, storeId });
     }
 
-    socket.on(realtimeEvents.orderCreated, handleStoreEvent);
+    socket.on(realtimeEvents.orderCreated, handleOrderEvent);
     socket.on(realtimeEvents.orderStatusUpdated, handleOrderEvent);
     socket.on(realtimeEvents.orderMessageCreated, handleMessageEvent);
 
     return () => {
-      socket.off(realtimeEvents.orderCreated, handleStoreEvent);
+      socket.off(realtimeEvents.orderCreated, handleOrderEvent);
       socket.off(realtimeEvents.orderStatusUpdated, handleOrderEvent);
       socket.off(realtimeEvents.orderMessageCreated, handleMessageEvent);
 

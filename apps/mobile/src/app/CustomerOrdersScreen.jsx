@@ -9,6 +9,7 @@ import { getCustomerOrders } from "../services/orders.api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import { getServiceConversations } from "../services/service-chats.api";
 import { useAuthStore } from "../stores/useAuthStore";
+import { formatarDataHora } from "../utils/date";
 import { formatarDinheiro } from "../utils/money";
 import {
   colors,
@@ -112,12 +113,7 @@ function formatDateTime(value) {
     return "Agora";
   }
 
-  return new Date(value).toLocaleString("pt-BR", {
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    month: "2-digit",
-  });
+  return formatarDataHora(value) || "Agora";
 }
 
 function orderSubtitle(order) {

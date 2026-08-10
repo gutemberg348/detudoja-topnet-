@@ -1,6 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { formatarDataHora } from "../utils/date";
 import { formatarDinheiro } from "../utils/money";
 import { colors, fonts, radius, shadow, spacing, typography } from "../utils/theme";
 import { AppButton } from "./AppButton";
@@ -31,10 +32,7 @@ function formatDateTime(value) {
     return "Data nao informada";
   }
 
-  return new Intl.DateTimeFormat("pt-BR", {
-    dateStyle: "long",
-    timeStyle: "short",
-  }).format(new Date(value));
+  return formatarDataHora(value, { incluirAno: true }) || "Data nao informada";
 }
 
 function DetailRow({ label, value }) {

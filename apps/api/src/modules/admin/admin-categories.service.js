@@ -1,5 +1,6 @@
 import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../utils/errors.js";
+import { parsePositiveId } from "../../utils/ids.js";
 import {
   deleteUploadedImage,
   saveUploadedImage,
@@ -9,16 +10,6 @@ import { serializeCategory } from "./admin.serializer.js";
 const categoryInclude = {
   _count: { select: { lojas: true, segmentos_venda: true } },
 };
-
-function parsePositiveIntId(value, label = "ID invalido") {
-  const id = Number(value);
-
-  if (!Number.isInteger(id) || id <= 0) {
-    throw new AppError(label, 400);
-  }
-
-  return id;
-}
 
 async function ensureUniqueCategoryName(name, ignoredId) {
   const category = await prisma.categoriaLoja.findFirst({
@@ -102,7 +93,7 @@ export async function createAdminCategory(data, iconFile = null) {
 }
 
 export async function updateAdminCategory(categoryId, data, iconFile = null) {
-  const parsedCategoryId = parsePositiveIntId(categoryId, "Categoria invalida");
+  const parsedCategoryId = parsePositiveId(categoryId, "Categoria invalida");
   const existing = await prisma.categoriaLoja.findFirst({
     select: { icone_url: true, id: true },
     where: { excluido_em: null, id: parsedCategoryId },
@@ -158,7 +149,7 @@ export async function updateAdminCategory(categoryId, data, iconFile = null) {
 }
 
 export async function deleteAdminCategory(categoryId) {
-  const parsedCategoryId = parsePositiveIntId(categoryId, "Categoria invalida");
+  const parsedCategoryId = parsePositiveId(categoryId, "Categoria invalida");
   const existing = await prisma.categoriaLoja.findFirst({
     select: { icone_url: true, id: true },
     where: { excluido_em: null, id: parsedCategoryId },

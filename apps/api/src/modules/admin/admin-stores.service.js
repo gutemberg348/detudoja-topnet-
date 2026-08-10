@@ -1,5 +1,6 @@
 import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../utils/errors.js";
+import { parsePositiveId } from "../../utils/ids.js";
 import { getPagination } from "../../utils/pagination.js";
 import { serializeAdminStore } from "./admin.serializer.js";
 
@@ -31,16 +32,6 @@ const storeInclude = {
 
 function onlyDigits(value = "") {
   return String(value).replace(/\D/g, "");
-}
-
-function parsePositiveIntId(value, label = "ID invalido") {
-  const id = Number(value);
-
-  if (!Number.isInteger(id) || id <= 0) {
-    throw new AppError(label, 400);
-  }
-
-  return id;
 }
 
 function buildStoreWhere(query = {}) {
@@ -170,7 +161,7 @@ export async function listAdminStores(query = {}) {
 }
 
 export async function getAdminStore(storeId) {
-  const parsedStoreId = parsePositiveIntId(storeId, "Loja invalida");
+  const parsedStoreId = parsePositiveId(storeId, "Loja invalida");
   const store = await prisma.loja.findFirst({
     include: storeInclude,
     where: { excluido_em: null, id: parsedStoreId },
@@ -184,7 +175,7 @@ export async function getAdminStore(storeId) {
 }
 
 export async function updateAdminStore(adminId, storeId, data) {
-  const parsedStoreId = parsePositiveIntId(storeId, "Loja invalida");
+  const parsedStoreId = parsePositiveId(storeId, "Loja invalida");
   const currentStore = await prisma.loja.findFirst({
     include: { lojista: true },
     where: { excluido_em: null, id: parsedStoreId },
@@ -293,7 +284,7 @@ export async function updateAdminStore(adminId, storeId, data) {
 }
 
 export async function deleteAdminStore(storeId) {
-  const parsedStoreId = parsePositiveIntId(storeId, "Loja invalida");
+  const parsedStoreId = parsePositiveId(storeId, "Loja invalida");
   const store = await prisma.loja.findFirst({
     select: { id: true },
     where: { excluido_em: null, id: parsedStoreId },

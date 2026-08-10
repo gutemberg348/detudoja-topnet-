@@ -1,6 +1,6 @@
 # Codex Handoff - DeTudoJa
 
-Ultima atualizacao: 2026-07-30
+Ultima atualizacao: 2026-08-10
 
 Este arquivo e o resumo principal para qualquer novo Codex continuar o projeto
 sem precisar reconstruir todo o contexto pela conversa. Sempre que uma regra,
@@ -2691,3 +2691,48 @@ npm exec -w apps/api -- prisma migrate dev --name corrida_cancelamento_cobranca_
 ```
 
 O Codex nao executou a migration nem iniciou processos em segundo plano.
+
+### Chat de corrida compacto
+
+`ServiceConversationScreen` foi organizado como superficie de conversa:
+cabecalho, resumo de corrida e proposta consomem pouca altura; a lista de
+mensagens usa o espaco restante e o compositor fica fixo. Conversas diretas de
+motoboy tambem sao tratadas como corrida por `tipo_operacao = ENTREGA_LOCAL`.
+Propostas antigas ainda gravadas como `EXPIRADA`, sem pagamento, sao exibidas
+como ativas sem expiracao e normalizadas ao abrir a conversa.
+
+## Atualizacao 2026-08-10: base compartilhada e auditoria estrutural
+
+Esta etapa nao muda schema, dados ou migrations. O objetivo e reduzir codigo
+duplicado sem alterar os contratos atuais da API.
+
+- `components/ChatComposer.jsx` e o compositor unico para conversas de loja e
+  de servico. Ele mantem botao de envio, estado de carregamento, campo
+  multiline e espacos para acoes como foto ou compartilhar catalogo.
+- `hooks/useConversationRealtime.js` concentra a inscricao e limpeza dos
+  eventos Socket.IO das conversas. As telas de loja e servico continuam
+  recarregando somente a conversa que recebeu evento e ignoram evento `read`.
+- `utils/date.js` e a fonte unica para hora e data/hora do mobile. Chats,
+  pedidos, CRM e comprovante passaram a reutilizar a mesma formatacao.
+- No backend, `utils/ids.js` centraliza IDs inteiros positivos para modulos de
+  pedidos, marketplace, vendedor, motoboy, conversas e administracao.
+  `utils/money.js` centraliza dinheiro em centavos e sua formatacao. As copias
+  locais dessas funcoes foram removidas sem alterar mensagens ou status HTTP.
+- `useRealtimeOrders` passou a compartilhar o filtro de escopo por pedido e
+  loja entre os tres eventos de pedido, evitando tres implementacoes iguais.
+
+### Divisao da Central de Vendas - 2026-08-10
+
+`SellScreen.jsx` deixou de conter os dois fluxos que mais misturavam interface,
+estado local e comunicacao em tempo real:
+
+- `sell/StoreOrderChatModal.jsx` concentra o CRM de um pedido: carregamento,
+  Socket.IO, proposta, mensagens e rolagem para a mensagem recente. A tela pai
+  apenas entrega token, pedido, loja e callback de leitura.
+- `sell/SellerSaleModals.jsx` concentra venda autonoma, escolha entre venda
+  autonoma/loja e cobranca QR da loja. A tela pai continua dona das mutacoes e
+  decide abrir ou fechar cada modal.
+
+`SellScreen.jsx` caiu de 3.966 para cerca de 3.146 linhas sem alterar rota,
+contrato, schema ou migration. A proxima divisao continua sendo por dominio:
+painel interno da loja/CRM, catalogo de produtos e formularios de loja.

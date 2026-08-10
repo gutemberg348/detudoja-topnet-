@@ -2038,8 +2038,8 @@ Nao existe mudanca de schema nem migration nesta entrega.
 `id` inteiro autoincremental e referencia loja, usuario solicitante, tipo de
 servico, pedido opcional, motoboy direcionado, motoboy que aceitou e conversa
 criada. `TipoChamadaMotoboy` diferencia `PLATAFORMA` e `EQUIPE`;
-`StatusSolicitacaoMotoboy` controla `PENDENTE`, `ACEITA`, `CANCELADA` e
-`EXPIRADA`. A conclusao operacional fica na conversa criada apos o aceite.
+`StatusSolicitacaoMotoboy` controla `PENDENTE`, `ACEITA`, `CONCLUIDA`,
+`CANCELADA` e `EXPIRADA`.
 
 A chamada geral seleciona candidatos online da mesma cidade e exclui membros
 vinculados, pois estes possuem chamada direta. O servidor nao retorna a lista

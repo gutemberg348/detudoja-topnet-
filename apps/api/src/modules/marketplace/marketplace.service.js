@@ -1,5 +1,6 @@
 import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../utils/errors.js";
+import { parsePositiveId } from "../../utils/ids.js";
 import { cityAddressWhere, requireUserBaseAddress } from "../../utils/location.js";
 import {
   getOrderEarningsDistribution,
@@ -209,16 +210,6 @@ function cents(value) {
   return Number(value ?? 0);
 }
 
-function parsePositiveIntId(value, label = "ID invalido") {
-  const id = Number(value);
-
-  if (!Number.isInteger(id) || id <= 0) {
-    throw new AppError(label, 400);
-  }
-
-  return id;
-}
-
 function serializeCategory(category) {
   return {
     description: category.descricao,
@@ -346,7 +337,7 @@ async function marketplaceQuery(query = {}, baseAddress) {
   const categoryId =
     query.categoryId === undefined || query.categoryId === null || query.categoryId === ""
       ? null
-      : parsePositiveIntId(query.categoryId, "Categoria invalida");
+      : parsePositiveId(query.categoryId, "Categoria invalida");
 
   const matches = search ? await findMarketplaceSearchMatches(search) : null;
 
@@ -438,7 +429,7 @@ export async function listMarketplaceProducts(userId, query = {}) {
   const categoryId =
     query.categoryId === undefined || query.categoryId === null || query.categoryId === ""
       ? null
-      : parsePositiveIntId(query.categoryId, "Categoria invalida");
+      : parsePositiveId(query.categoryId, "Categoria invalida");
   const matches = search ? await findMarketplaceSearchMatches(search) : null;
 
   const [products, globalDistribution] = await Promise.all([
@@ -605,7 +596,7 @@ export async function listMarketplaceSuggestions(userId, query = {}) {
 }
 
 export async function getMarketplaceStore(userId, storeId) {
-  const parsedStoreId = parsePositiveIntId(storeId, "Loja invalida");
+  const parsedStoreId = parsePositiveId(storeId, "Loja invalida");
   const baseAddress = await requireUserBaseAddress(prisma, userId);
   const [store, globalDistribution] = await Promise.all([
     prisma.loja.findFirst({

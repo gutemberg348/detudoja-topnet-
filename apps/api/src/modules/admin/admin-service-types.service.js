@@ -1,17 +1,12 @@
 import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../utils/errors.js";
+import { parsePositiveId } from "../../utils/ids.js";
 import { serializeAdminServiceType } from "./admin.serializer.js";
 
 const serviceTypeInclude = {
   segmento_venda: { select: { id: true, nome: true } },
   _count: { select: { servicos_vendedor: true } },
 };
-
-function parsePositiveId(value, message = "ID invalido") {
-  const id = Number(value);
-  if (!Number.isInteger(id) || id <= 0) throw new AppError(message, 400);
-  return id;
-}
 
 function slugify(value) {
   return String(value)

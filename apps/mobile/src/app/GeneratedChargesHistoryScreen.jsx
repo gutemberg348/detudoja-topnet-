@@ -11,6 +11,7 @@ import { ScreenContainer } from "../components/ScreenContainer";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import { getGeneratedChargeQr, getGeneratedChargesHistory } from "../services/seller.api";
 import { useAuthStore } from "../stores/useAuthStore";
+import { formatarDataHora } from "../utils/date";
 import { formatarDinheiro } from "../utils/money";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
 
@@ -207,12 +208,7 @@ function SummaryMetric({ label, value }) {
 function ChargeHistoryCard({ charge, loading, onPress }) {
   const isActive = charge.status === "ATIVA";
   const isPaid = charge.status === "PAGA";
-  const createdAt = new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    month: "2-digit",
-  }).format(new Date(charge.createdAt));
+  const createdAt = formatarDataHora(charge.createdAt);
 
   return (
     <Pressable

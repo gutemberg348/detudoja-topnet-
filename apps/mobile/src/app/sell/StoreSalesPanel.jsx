@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { getRealtimeSocket, realtimeEvents } from "../../services/realtime";
 import { getStoreGeneratedCharges } from "../../services/seller.api";
+import { formatarDataHora } from "../../utils/date";
 import { formatarDinheiro } from "../../utils/money";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../../utils/theme";
 
@@ -48,13 +49,7 @@ function formatDateTime(value) {
     return "Data indisponivel";
   }
 
-  return new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(new Date(value));
+  return formatarDataHora(value, { incluirAno: true }) || "Data indisponivel";
 }
 
 export function StoreSalesPanel({ accessToken, onOpenCharge, store }) {

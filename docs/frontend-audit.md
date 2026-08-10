@@ -1,6 +1,6 @@
 # Auditoria Frontend Mobile
 
-Ultima atualizacao: 2026-07-16.
+Ultima atualizacao: 2026-08-10.
 
 ## Escopo
 
@@ -117,3 +117,25 @@ que nao seja compartilhado.
   `BackHeader`.
 - Botao apenas de icone deve usar `IconButton` e ter rotulo acessivel.
 - Validar web e mobile estreito antes de concluir alteracoes de layout.
+
+## Segunda fase - 2026-08-10
+
+Foram identificados e removidos tres grupos de duplicacao de alto uso:
+
+- O campo de mensagem de `StoreConversationScreen` e
+  `ServiceConversationScreen` foi unificado em `ChatComposer`. Os recursos
+  especificos continuam injetados pela tela: catalogo para loja e foto para
+  servico.
+- A assinatura Socket.IO dessas duas conversas passou para
+  `useConversationRealtime`, que sempre remove os listeners ao sair da tela e
+  filtra pelo ID da conversa.
+- Datas curtas passaram a usar `utils/date.js`; IDs validos e valores em reais
+  no backend usam `utils/ids.js` e `utils/money.js` nos modulos de operacao e
+  administracao.
+
+Em 2026-08-10, `SellScreen.jsx` foi reduzida de 3.966 para 3.147 linhas:
+`StoreOrderChatModal.jsx` agora possui o CRM de um pedido e
+`SellerSaleModals.jsx` possui os fluxos de venda autonoma e QR. Ainda restam
+como proximas fronteiras de dominio o painel interno/CRM da loja, catalogo de
+produtos e formularios de loja. `ProfileScreen.jsx` e os detalhes de pedido
+tambem continuam candidatos a dividir por fluxo, nao apenas por tamanho.

@@ -6,7 +6,9 @@ import {
   emitServiceChatUpdated,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
+import { parsePositiveId } from "../../utils/ids.js";
 import { cityAddressWhere, requireUserBaseAddress, sameCity } from "../../utils/location.js";
+import { formatMoney } from "../../utils/money.js";
 import {
   createServiceConversationCharge,
   serializeChargeWithQr,
@@ -18,12 +20,6 @@ import {
 
 const publicSellerStatuses = ["ATIVO", "PENDENTE"];
 const legacyServiceTypeSlugs = ["entregador"];
-
-function parsePositiveId(value, message = "ID invalido") {
-  const id = Number(value);
-  if (!Number.isInteger(id) || id <= 0) throw new AppError(message, 400);
-  return id;
-}
 
 function matchesStoreCity(courier, address) {
   return sameCity(
@@ -55,13 +51,6 @@ async function findStoreForCourierRequest(userId, storeId) {
   }
 
   return store;
-}
-
-function formatMoney(valueCents) {
-  return new Intl.NumberFormat("pt-BR", {
-    currency: "BRL",
-    style: "currency",
-  }).format(Number(valueCents) / 100);
 }
 
 const conversationInclude = {
@@ -140,8 +129,13 @@ function serializeMessage(message, viewerId) {
 
 function serializeProposal(proposal) {
   const charge = proposal.cobranca;
+  // Propostas de servico nao vencem. Mantem conversas antigas utilizaveis
+  // enquanto a leitura da conversa normaliza o registro persistido.
+  const isLegacyUnpaidServiceCharge = charge?.status === "EXPIRADA" && !charge.pagamento;
   const chargeStatus =
-    charge?.status === "ATIVA" && charge.expira_em && charge.expira_em <= new Date()
+    isLegacyUnpaidServiceCharge
+      ? "ATIVA"
+      : charge?.status === "ATIVA" && charge.expira_em && charge.expira_em <= new Date()
       ? "EXPIRADA"
       : charge?.status ?? null;
 
@@ -150,7 +144,7 @@ function serializeProposal(proposal) {
     charge: charge
       ? {
           code: charge.codigo_publico,
-          expiresAt: charge.expira_em?.toISOString() ?? null,
+          expiresAt: isLegacyUnpaidServiceCharge ? null : charge.expira_em?.toISOString() ?? null,
           id: charge.id,
           paidAt: charge.paga_em?.toISOString() ?? null,
           paymentStatus: charge.pagamento?.status ?? null,
@@ -559,7 +553,7 @@ export async function getServiceConversation(userId, conversationId) {
     where: {
       pagamento_id: null,
       proposta_servico: { conversa_servico_id: conversation.id },
-      status: "EXPIRADA",
+      status: { in: ["ATIVA", "EXPIRADA"] },
     },
   });
 
@@ -739,7 +733,11 @@ export async function declineServiceProposal(userId, conversationId, proposalId)
 
 export async function cancelServiceConversation(userId, conversationId) {
   const conversation = await findAccessibleConversation(userId, conversationId);
-  if (!conversation.loja_solicitante_id) {
+  const isCourierRide = Boolean(
+    conversation.loja_solicitante_id
+    || conversation.servico_vendedor?.tipo_servico?.tipo_operacao === "ENTREGA_LOCAL",
+  );
+  if (!isCourierRide) {
     throw new AppError("Este atendimento nao e uma corrida de loja", 409);
   }
   if (!["ABERTA", "ACORDADA"].includes(conversation.status)) {

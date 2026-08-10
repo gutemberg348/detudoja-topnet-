@@ -1,5 +1,6 @@
 import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../utils/errors.js";
+import { parsePositiveId } from "../../utils/ids.js";
 import { defaultSegmentFeePercent } from "../earnings/order-earnings.config.js";
 import { serializeSalesSegment } from "./admin.serializer.js";
 
@@ -7,16 +8,6 @@ const segmentInclude = {
   _count: { select: { lojas: true, vendedores: true, vendas_autonomas: true } },
   categoria_loja: { select: { id: true, nome: true } },
 };
-
-function parsePositiveIntId(value, label = "ID invalido") {
-  const id = Number(value);
-
-  if (!Number.isInteger(id) || id <= 0) {
-    throw new AppError(label, 400);
-  }
-
-  return id;
-}
 
 function slugify(value) {
   return value
@@ -106,7 +97,7 @@ export async function createAdminSalesSegment(data) {
 }
 
 export async function updateAdminSalesSegment(segmentId, data) {
-  const parsedSegmentId = parsePositiveIntId(segmentId, "Segmento invalido");
+  const parsedSegmentId = parsePositiveId(segmentId, "Segmento invalido");
   const existing = await prisma.segmentoVenda.findFirst({
     select: { id: true },
     where: { excluido_em: null, id: parsedSegmentId },
@@ -151,7 +142,7 @@ export async function updateAdminSalesSegment(segmentId, data) {
 }
 
 export async function deleteAdminSalesSegment(segmentId) {
-  const parsedSegmentId = parsePositiveIntId(segmentId, "Segmento invalido");
+  const parsedSegmentId = parsePositiveId(segmentId, "Segmento invalido");
   const existing = await prisma.segmentoVenda.findFirst({
     select: { id: true },
     where: { excluido_em: null, id: parsedSegmentId },

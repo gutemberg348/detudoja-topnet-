@@ -5,6 +5,7 @@ import {
   emitOrderStatusUpdated,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
+import { parsePositiveId } from "../../utils/ids.js";
 import { requireUserBaseAddress, sameCity } from "../../utils/location.js";
 import { requireUserCpf } from "../../utils/cpf-required.js";
 import {
@@ -71,16 +72,6 @@ function cents(value) {
 
 function onlyDigits(value = "") {
   return value.replace(/\D/g, "");
-}
-
-function parsePositiveIntId(value, label = "ID invalido") {
-  const id = Number(value);
-
-  if (!Number.isInteger(id) || id <= 0) {
-    throw new AppError(label, 400);
-  }
-
-  return id;
 }
 
 function hasValidDocumentShape(documentDigits, type) {
@@ -602,7 +593,7 @@ export async function createAutonomousSale(userId, data) {
 }
 
 async function findStoreForUser(userId, storeId) {
-  const parsedStoreId = parsePositiveIntId(storeId, "Loja invalida");
+  const parsedStoreId = parsePositiveId(storeId, "Loja invalida");
   const store = await prisma.loja.findFirst({
     include: {
       _count: {
@@ -900,7 +891,7 @@ export async function createStoreProduct(userId, storeId, data, imageFile = null
 
 async function findStoreProductForUser(userId, storeId, productId) {
   const store = await findStoreForUser(userId, storeId);
-  const parsedProductId = parsePositiveIntId(productId, "Produto invalido");
+  const parsedProductId = parsePositiveId(productId, "Produto invalido");
 
   const product = await prisma.produtoLoja.findFirst({
     where: {
@@ -1001,7 +992,7 @@ export async function deleteStoreProduct(userId, storeId, productId) {
 
 export async function updateStoreOrderStatus(userId, storeId, orderId, status) {
   const store = await findStoreForUser(userId, storeId);
-  const parsedOrderId = parsePositiveIntId(orderId, "Pedido invalido");
+  const parsedOrderId = parsePositiveId(orderId, "Pedido invalido");
 
   const currentOrder = await prisma.pedidoLoja.findFirst({
     where: {
@@ -1074,7 +1065,7 @@ export async function updateStoreOrderStatus(userId, storeId, orderId, status) {
 
 async function findStoreOrderForUser(userId, storeId, orderId) {
   const store = await findStoreForUser(userId, storeId);
-  const parsedOrderId = parsePositiveIntId(orderId, "Pedido invalido");
+  const parsedOrderId = parsePositiveId(orderId, "Pedido invalido");
 
   const order = await prisma.pedidoLoja.findFirst({
     select: { id: true, loja_id: true, usuario_id: true },
@@ -1141,7 +1132,7 @@ export async function createStoreOrderMessage(userId, storeId, orderId, data) {
 
 export async function createStoreOrderProposal(userId, storeId, orderId, data) {
   const store = await findStoreForUser(userId, storeId);
-  const parsedOrderId = parsePositiveIntId(orderId, "Pedido invalido");
+  const parsedOrderId = parsePositiveId(orderId, "Pedido invalido");
   const currentOrder = await prisma.pedidoLoja.findFirst({
     select: {
       id: true,

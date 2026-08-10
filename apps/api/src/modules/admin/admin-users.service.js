@@ -1,5 +1,6 @@
 import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../utils/errors.js";
+import { parsePositiveId } from "../../utils/ids.js";
 import { getPagination } from "../../utils/pagination.js";
 import { serializeAdminUser } from "./admin.serializer.js";
 import { creditUserWallet } from "../wallet/wallet.service.js";
@@ -19,16 +20,6 @@ const userInclude = {
   lojista: true,
   vendedor: true,
 };
-
-function parsePositiveIntId(value, label = "ID invalido") {
-  const id = Number(value);
-
-  if (!Number.isInteger(id) || id <= 0) {
-    throw new AppError(label, 400);
-  }
-
-  return id;
-}
 
 function buildUserWhere(query) {
   const search = String(query.search ?? "").trim();
@@ -81,7 +72,7 @@ export async function listAdminUsers(query) {
 }
 
 export async function getAdminUser(userId) {
-  const parsedUserId = parsePositiveIntId(userId, "Participante invalido");
+  const parsedUserId = parsePositiveId(userId, "Participante invalido");
   const user = await prisma.usuario.findFirst({
     include: userInclude,
     where: {
@@ -99,7 +90,7 @@ export async function getAdminUser(userId) {
 }
 
 export async function updateAdminUserStatus(userId, status) {
-  const parsedUserId = parsePositiveIntId(userId, "Participante invalido");
+  const parsedUserId = parsePositiveId(userId, "Participante invalido");
   const exists = await prisma.usuario.findFirst({
     select: { id: true },
     where: {
@@ -119,7 +110,7 @@ export async function updateAdminUserStatus(userId, status) {
 }
 
 export async function updateAdminUser(userId, data) {
-  const parsedUserId = parsePositiveIntId(userId, "Participante invalido");
+  const parsedUserId = parsePositiveId(userId, "Participante invalido");
   const exists = await prisma.usuario.findFirst({
     select: { id: true },
     where: {
@@ -147,7 +138,7 @@ export async function updateAdminUser(userId, data) {
 }
 
 export async function creditAdminUserWallet(adminId, userId, data) {
-  const parsedUserId = parsePositiveIntId(userId, "Participante invalido");
+  const parsedUserId = parsePositiveId(userId, "Participante invalido");
   const exists = await prisma.usuario.findFirst({
     select: { id: true },
     where: {

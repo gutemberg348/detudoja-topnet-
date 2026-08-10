@@ -5,6 +5,7 @@ import {
   emitStoreChatUpdated,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
+import { parsePositiveId } from "../../utils/ids.js";
 
 const storeSelect = {
   banner_url: true,
@@ -93,16 +94,6 @@ function ensureStoreChatPrismaClient() {
       503,
     );
   }
-}
-
-function parsePositiveId(value, message = "ID invalido") {
-  const id = Number(value);
-
-  if (!Number.isInteger(id) || id <= 0) {
-    throw new AppError(message, 400);
-  }
-
-  return id;
 }
 
 function storeAccessWhere(userId) {
