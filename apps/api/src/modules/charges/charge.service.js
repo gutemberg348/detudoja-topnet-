@@ -1,17 +1,20 @@
 import { randomUUID } from "node:crypto";
 import QRCode from "qrcode";
-import { prisma } from "../../config/prisma.js";
 import {
   emitChargeUpdated,
   emitServiceChatUpdated,
   emitWalletUpdated,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
-import { requireUserCpf } from "../../utils/cpf-required.js";
+import { chargeRepository, createChargeRepository } from "./charge.repository.js";
 import {
   settlePaidAutonomousChargeEarnings,
   settlePaidStoreChargeEarnings,
 } from "../earnings/order-earnings.service.js";
+import {
+  assertSellerMonthlyCpfLimit,
+  assertStoreMonthlyCpfLimit,
+} from "../earnings/commercial-limit.service.js";
 import {
   debitUserWallet,
   ensureUserWallets,
@@ -199,8 +202,8 @@ export async function serializeChargeWithQr(charge) {
   };
 }
 
-async function loadCharge(database, code) {
-  const charge = await database.cobranca.findUnique({
+async function loadCharge(repository, code) {
+  const charge = await repository.findUniqueCharge({
     include: chargeInclude,
     where: { codigo_publico: normalizePublicCode(code) },
   });
@@ -212,14 +215,14 @@ async function loadCharge(database, code) {
   return charge;
 }
 
-async function expireChargeIfNeeded(database, charge) {
+async function expireChargeIfNeeded(repository, charge) {
   if (
     charge.proposta_servico
     && !charge.pagamento
     && ["ATIVA", "EXPIRADA"].includes(charge.status)
     && (charge.expira_em || charge.status === "EXPIRADA")
   ) {
-    return database.cobranca.update({
+    return repository.updateCharge({
       data: { expira_em: null, status: "ATIVA" },
       include: chargeInclude,
       where: { id: charge.id },
@@ -227,7 +230,7 @@ async function expireChargeIfNeeded(database, charge) {
   }
 
   if (charge.status === "ATIVA" && charge.expira_em && charge.expira_em <= new Date()) {
-    return database.cobranca.update({
+    return repository.updateCharge({
       data: { status: "EXPIRADA" },
       include: chargeInclude,
       where: { id: charge.id },
@@ -260,7 +263,7 @@ async function findGeneratedCharge(userId, chargeId) {
     throw new AppError("Cobranca invalida", 400);
   }
 
-  const charge = await prisma.cobranca.findFirst({
+  const charge = await chargeRepository.findCharge({
     include: chargeInclude,
     where: { id, ...generatedChargeAccessWhere(userId) },
   });
@@ -269,7 +272,7 @@ async function findGeneratedCharge(userId, chargeId) {
     throw new AppError("Cobranca nao encontrada para este vendedor", 404);
   }
 
-  return expireChargeIfNeeded(prisma, charge);
+  return expireChargeIfNeeded(chargeRepository, charge);
 }
 
 async function findAccessibleStoreForCharges(userId, storeId) {
@@ -279,7 +282,7 @@ async function findAccessibleStoreForCharges(userId, storeId) {
     throw new AppError("Loja invalida", 400);
   }
 
-  const store = await prisma.loja.findFirst({
+  const store = await chargeRepository.findStore({
     select: { id: true },
     where: {
       excluido_em: null,
@@ -299,9 +302,9 @@ async function findAccessibleStoreForCharges(userId, storeId) {
 }
 
 export async function createStoreQrCharge(userId, storeId, data) {
-  await requireUserCpf(prisma, userId);
+  await chargeRepository.requireUserCpf(userId);
   const parsedStoreId = Number(storeId);
-  const store = await prisma.loja.findFirst({
+  const store = await chargeRepository.findStore({
     select: { id: true, nome: true, aceita_qrcode: true },
     where: {
       excluido_em: null,
@@ -322,11 +325,11 @@ export async function createStoreQrCharge(userId, storeId, data) {
     throw new AppError("Esta loja esta com o pagamento por QR desativado", 409);
   }
 
-  const seller = await prisma.vendedor.findUnique({
+  const seller = await chargeRepository.findSeller({
     select: { id: true },
     where: { usuario_id: userId },
   });
-  const charge = await prisma.cobranca.create({
+  const charge = await chargeRepository.createCharge({
     data: {
       codigo_publico: createPublicCode(),
       criador_usuario_id: userId,
@@ -351,7 +354,7 @@ export async function createAutonomousQrCharge(database, {
   title,
   saleId,
 }) {
-  return database.cobranca.create({
+  return createChargeRepository(database).createCharge({
     data: {
       codigo_publico: createPublicCode(),
       criador_usuario_id: seller.usuario_id,
@@ -376,7 +379,7 @@ export async function createServiceConversationCharge(database, {
   serviceName,
   valueCents,
 }) {
-  return database.cobranca.create({
+  return createChargeRepository(database).createCharge({
     data: {
       codigo_publico: createPublicCode(),
       criador_usuario_id: seller.usuario_id,
@@ -393,28 +396,28 @@ export async function createServiceConversationCharge(database, {
 }
 
 export async function listGeneratedCharges(userId) {
-  const charges = await prisma.cobranca.findMany({
+  const charges = await chargeRepository.findCharges({
     include: chargeInclude,
     orderBy: { criado_em: "desc" },
     take: 5,
     where: generatedChargeAccessWhere(userId),
   });
   const currentCharges = await Promise.all(
-    charges.map((charge) => expireChargeIfNeeded(prisma, charge)),
+    charges.map((charge) => expireChargeIfNeeded(chargeRepository, charge)),
   );
 
   return { charges: currentCharges.map(serializeGeneratedCharge) };
 }
 
 export async function listGeneratedChargesHistory(userId) {
-  const charges = await prisma.cobranca.findMany({
+  const charges = await chargeRepository.findCharges({
     include: chargeInclude,
     orderBy: { criado_em: "desc" },
     take: 100,
     where: generatedChargeAccessWhere(userId),
   });
   const currentCharges = await Promise.all(
-    charges.map((charge) => expireChargeIfNeeded(prisma, charge)),
+    charges.map((charge) => expireChargeIfNeeded(chargeRepository, charge)),
   );
 
   return { charges: currentCharges.map(serializeGeneratedCharge) };
@@ -431,7 +434,7 @@ export async function listStoreGeneratedCharges(userId, storeId, query = {}) {
     ? requestedCursor
     : null;
   const where = { loja_id: store.id };
-  await prisma.cobranca.updateMany({
+  await chargeRepository.updateCharges({
     data: { status: "EXPIRADA" },
     where: {
       ...where,
@@ -440,7 +443,7 @@ export async function listStoreGeneratedCharges(userId, storeId, query = {}) {
     },
   });
   const [charges, totals, paidTotals, activeTotals] = await Promise.all([
-    prisma.cobranca.findMany({
+    chargeRepository.findCharges({
       include: chargeInclude,
       orderBy: [{ criado_em: "desc" }, { id: "desc" }],
       skip: cursor ? 1 : 0,
@@ -448,17 +451,17 @@ export async function listStoreGeneratedCharges(userId, storeId, query = {}) {
       ...(cursor ? { cursor: { id: cursor } } : {}),
       where,
     }),
-    prisma.cobranca.aggregate({
+    chargeRepository.aggregateCharges({
       _count: { _all: true },
       _sum: { valor_centavos: true },
       where,
     }),
-    prisma.cobranca.aggregate({
+    chargeRepository.aggregateCharges({
       _count: { _all: true },
       _sum: { valor_centavos: true },
       where: { ...where, status: "PAGA" },
     }),
-    prisma.cobranca.aggregate({
+    chargeRepository.aggregateCharges({
       _count: { _all: true },
       _sum: { valor_centavos: true },
       where: { ...where, status: { in: ["ATIVA", "PROCESSANDO"] } },
@@ -467,7 +470,7 @@ export async function listStoreGeneratedCharges(userId, storeId, query = {}) {
   const hasMore = charges.length > limit;
   const pageCharges = hasMore ? charges.slice(0, limit) : charges;
   const currentCharges = await Promise.all(
-    pageCharges.map((charge) => expireChargeIfNeeded(prisma, charge)),
+    pageCharges.map((charge) => expireChargeIfNeeded(chargeRepository, charge)),
   );
 
   return {
@@ -491,8 +494,8 @@ export async function getGeneratedChargeQr(userId, chargeId) {
 }
 
 export async function getChargeForCustomer(userId, rawCode) {
-  let charge = await loadCharge(prisma, rawCode);
-  charge = await expireChargeIfNeeded(prisma, charge);
+  let charge = await loadCharge(chargeRepository, rawCode);
+  charge = await expireChargeIfNeeded(chargeRepository, charge);
 
   if (charge.criador_usuario_id === userId) {
     throw new AppError("Use outro usuario para ler a sua propria cobranca", 409);
@@ -535,9 +538,9 @@ function allocateWallets(wallets, totalCents) {
 }
 
 export async function payChargeWithWallet(userId, rawCode) {
-  await requireUserCpf(prisma, userId);
+  await chargeRepository.requireUserCpf(userId);
   const code = normalizePublicCode(rawCode);
-  await prisma.cobranca.updateMany({
+  await chargeRepository.updateCharges({
     data: { expira_em: null, status: "ATIVA" },
     where: {
       codigo_publico: code,
@@ -546,8 +549,9 @@ export async function payChargeWithWallet(userId, rawCode) {
       status: "EXPIRADA",
     },
   });
-  const result = await prisma.$transaction(async (database) => {
-    const claimed = await database.cobranca.updateMany({
+  const result = await chargeRepository.transaction(async (database) => {
+    const repository = createChargeRepository(database);
+    const claimed = await repository.updateCharges({
       data: { status: "PROCESSANDO" },
       where: {
         codigo_publico: code,
@@ -560,7 +564,7 @@ export async function payChargeWithWallet(userId, rawCode) {
       const currentCharge = await loadCharge(database, code);
 
       if (currentCharge.status === "ATIVA" && currentCharge.expira_em && currentCharge.expira_em <= new Date()) {
-        await database.cobranca.update({
+        await repository.updateCharge({
           data: { status: "EXPIRADA" },
           where: { id: currentCharge.id },
         });
@@ -570,7 +574,7 @@ export async function payChargeWithWallet(userId, rawCode) {
       throw new AppError("Esta cobranca nao esta mais disponivel para pagamento", 409);
     }
 
-    const charge = await database.cobranca.findUnique({
+    const charge = await repository.findUniqueCharge({
       include: chargeInclude,
       where: { codigo_publico: code },
     });
@@ -583,8 +587,14 @@ export async function payChargeWithWallet(userId, rawCode) {
       throw new AppError("Nao e possivel pagar uma cobranca criada por voce", 409);
     }
 
+    if (charge.loja_id) {
+      await assertStoreMonthlyCpfLimit(database, charge.loja_id, charge.valor_centavos);
+    } else if (charge.vendedor_id) {
+      await assertSellerMonthlyCpfLimit(database, charge.vendedor_id, charge.valor_centavos);
+    }
+
     await ensureUserWallets(userId, database);
-    const wallets = await database.carteira.findMany({
+    const wallets = await repository.findWallets({
       include: { tipo_carteira: true },
       where: {
         status: "ATIVA",
@@ -593,7 +603,7 @@ export async function payChargeWithWallet(userId, rawCode) {
       },
     });
     const allocations = allocateWallets(wallets, cents(charge.valor_centavos));
-    const payment = await database.pagamento.create({
+    const payment = await repository.createPayment({
       data: {
         gateway: "INTERNO",
         loja_id: charge.loja_id,
@@ -618,7 +628,7 @@ export async function payChargeWithWallet(userId, rawCode) {
         walletId: allocation.id,
       });
 
-      await database.pagamentoComposicao.create({
+      await repository.createPaymentComposition({
         data: {
           carteira_id: allocation.id,
           pagamento_id: payment.id,
@@ -629,7 +639,7 @@ export async function payChargeWithWallet(userId, rawCode) {
       });
     }
 
-    const paidCharge = await database.cobranca.update({
+    const paidCharge = await repository.updateCharge({
       data: {
         paga_em: new Date(),
         pagamento_id: payment.id,
@@ -640,7 +650,7 @@ export async function payChargeWithWallet(userId, rawCode) {
     });
 
     if (charge.venda_autonoma_id) {
-      await database.vendaAutonoma.update({
+      await repository.updateAutonomousSale({
         data: { pago_em: new Date(), status: "PAGA" },
         where: { id: charge.venda_autonoma_id },
       });
@@ -650,15 +660,15 @@ export async function payChargeWithWallet(userId, rawCode) {
 
     if (charge.proposta_servico_id && charge.proposta_servico?.conversa_servico) {
       const paidAt = new Date();
-      await database.propostaServico.update({
+      await repository.updateServiceProposal({
         data: { pago_em: paidAt, status: "PAGA" },
         where: { id: charge.proposta_servico_id },
       });
-      await database.conversaServico.update({
+      await repository.updateServiceConversation({
         data: { status: "ACORDADA" },
         where: { id: charge.proposta_servico.conversa_servico.id },
       });
-      await database.conversaServicoMensagem.create({
+      await repository.createServiceMessage({
         data: {
           conversa_servico_id: charge.proposta_servico.conversa_servico.id,
           lido_cliente_em: paidAt,

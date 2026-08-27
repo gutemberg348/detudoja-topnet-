@@ -1,7 +1,7 @@
 import * as Clipboard from "expo-clipboard";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Image, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, Modal, Pressable, Share, StyleSheet, Text, View } from "react-native";
 import { AppButton } from "../components/AppButton";
 import { PaymentFeedbackOverlay } from "../components/PaymentFeedbackOverlay";
 import { ScreenContainer } from "../components/ScreenContainer";
@@ -77,6 +77,20 @@ export function ChargeQrScreen({ navigation, route }) {
 
     await Clipboard.setStringAsync(signupQr.registrationUrl);
     setSignupCopied(true);
+  }
+
+  async function shareSignup() {
+    if (!signupQr) return;
+
+    try {
+      await Share.share({
+        message: signupQr.shareMessage,
+        title: `Convite da ${signupQr.store?.name ?? charge.merchant?.name}`,
+        url: signupQr.registrationUrl,
+      });
+    } catch {
+      await copySignupLink();
+    }
   }
 
   const isStoreCharge = charge.merchant?.type === "STORE";
@@ -177,6 +191,11 @@ export function ChargeQrScreen({ navigation, route }) {
                 />
               ) : null}
             </View>
+            <View style={styles.signupCode}>
+              <Text style={styles.codeLabel}>Codigo da loja</Text>
+              <Text selectable style={styles.signupCodeValue}>{signupQr?.registrationCode}</Text>
+            </View>
+            <AppButton icon="share-social-outline" onPress={shareSignup} title="Compartilhar cadastro" />
             <Pressable onPress={copySignupLink} style={({ pressed }) => [styles.signupLink, pressed && styles.pressed]}>
               <View style={styles.codeCopy}>
                 <Text style={styles.codeLabel}>Link de cadastro</Text>
@@ -236,6 +255,8 @@ const styles = StyleSheet.create({
   qrTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.h3, fontWeight: "700" },
   signupBackdrop: { alignItems: "center", backgroundColor: "rgba(20, 32, 25, 0.46)", flex: 1, justifyContent: "center", padding: spacing.lg },
   signupClose: { alignItems: "center", backgroundColor: "#F8FAFC", borderRadius: radius.round, height: 38, justifyContent: "center", width: 38 },
+  signupCode: { alignItems: "center", backgroundColor: "#F8FBF9", borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, gap: 3, padding: spacing.sm },
+  signupCodeValue: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: typography.h3, fontWeight: "800" },
   signupError: { color: colors.danger, fontFamily: fonts.medium, fontSize: typography.small, textAlign: "center" },
   signupLink: { alignItems: "center", backgroundColor: colors.primarySoft, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.sm, padding: spacing.md },
   signupModal: { backgroundColor: colors.card, borderRadius: 12, gap: spacing.md, maxWidth: 460, padding: spacing.lg, width: "100%", ...shadow },

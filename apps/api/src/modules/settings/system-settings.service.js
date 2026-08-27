@@ -1,4 +1,4 @@
-import { prisma } from "../../config/prisma.js";
+import { systemSettingsRepository } from "./system-settings.repository.js";
 
 const supportConfigKey = "support.whatsapp";
 const defaultSupportMessage =
@@ -59,9 +59,7 @@ function serializeSupportSettings(value = {}) {
 }
 
 async function getConfigValue(key) {
-  const config = await prisma.configuracaoSistema.findUnique({
-    where: { chave: key },
-  });
+  const config = await systemSettingsRepository.findByKey(key);
 
   return config?.valor_json ?? {};
 }
@@ -79,18 +77,11 @@ export async function updateSupportSettings(adminId, data) {
     whatsapp: whatsappDigits,
   };
 
-  const config = await prisma.configuracaoSistema.upsert({
-    create: {
-      atualizado_por_admin_id: adminId,
-      chave: supportConfigKey,
-      descricao: "WhatsApp e mensagem padrao do suporte exibidos no app.",
-      valor_json: value,
-    },
-    update: {
-      atualizado_por_admin_id: adminId,
-      valor_json: value,
-    },
-    where: { chave: supportConfigKey },
+  const config = await systemSettingsRepository.upsert({
+    adminId,
+    description: "WhatsApp e mensagem padrao do suporte exibidos no app.",
+    key: supportConfigKey,
+    value,
   });
 
   return {

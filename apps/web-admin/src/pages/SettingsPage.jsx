@@ -30,8 +30,14 @@ const commissionFields = [
   { icon: "cliente", key: "consumerReferralPercent", label: "Indicacao do consumidor", tone: "amber" },
 ];
 
-export function SettingsPage({ accessToken }) {
-  const [activeSection, setActiveSection] = useState("earnings");
+export function SettingsPage({
+  accessToken,
+  canManageEarnings = false,
+  canManageSupport = false,
+}) {
+  const [activeSection, setActiveSection] = useState(
+    canManageEarnings ? "earnings" : "support",
+  );
   const [error, setError] = useState("");
   const [form, setForm] = useState(defaultForm);
   const [isLoading, setIsLoading] = useState(true);
@@ -47,29 +53,33 @@ export function SettingsPage({ accessToken }) {
 
     try {
       const [supportResponse, earningsResponse] = await Promise.all([
-        getAdminSupportSettings(accessToken),
-        getAdminEarningsSettings(accessToken),
+        canManageSupport ? getAdminSupportSettings(accessToken) : Promise.resolve(null),
+        canManageEarnings ? getAdminEarningsSettings(accessToken) : Promise.resolve(null),
       ]);
-      const loadedSegments = earningsResponse.segments ?? [];
+      const loadedSegments = earningsResponse?.segments ?? [];
 
-      setSavedSupport(supportResponse.support);
-      setForm({
-        message: supportResponse.support?.message || defaultForm.message,
-        whatsapp: supportResponse.support?.whatsappDisplay || supportResponse.support?.whatsapp || "",
-      });
-      setSegments(loadedSegments);
-      setSegmentDrafts(buildSegmentDrafts(loadedSegments));
-      setSelectedSegmentId((current) => (
-        loadedSegments.some((segment) => segment.id === current)
-          ? current
-          : loadedSegments[0]?.id ?? null
-      ));
+      if (supportResponse) {
+        setSavedSupport(supportResponse.support);
+        setForm({
+          message: supportResponse.support?.message || defaultForm.message,
+          whatsapp: supportResponse.support?.whatsappDisplay || supportResponse.support?.whatsapp || "",
+        });
+      }
+      if (earningsResponse) {
+        setSegments(loadedSegments);
+        setSegmentDrafts(buildSegmentDrafts(loadedSegments));
+        setSelectedSegmentId((current) => (
+          loadedSegments.some((segment) => segment.id === current)
+            ? current
+            : loadedSegments[0]?.id ?? null
+        ));
+      }
     } catch (requestError) {
       setError(requestError.message || "Nao foi possivel carregar as configuracoes.");
     } finally {
       setIsLoading(false);
     }
-  }, [accessToken]);
+  }, [accessToken, canManageEarnings, canManageSupport]);
 
   useEffect(() => {
     loadSettings();
@@ -158,29 +168,29 @@ export function SettingsPage({ accessToken }) {
       {!isLoading ? (
         <div className="settings-workspace">
           <aside className="settings-nav" aria-label="Secoes de configuracao">
-            <button
+            {canManageEarnings ? <button
               className={activeSection === "earnings" ? "settings-nav__item active" : "settings-nav__item"}
               onClick={() => setActiveSection("earnings")}
               type="button"
             >
               <span><Percent size={18} /></span>
               <div><strong>Ganhos</strong><small>Taxas por segmento</small></div>
-            </button>
-            <button
+            </button> : null}
+            {canManageSupport ? <button
               className={activeSection === "support" ? "settings-nav__item active" : "settings-nav__item"}
               onClick={() => setActiveSection("support")}
               type="button"
             >
               <span><MessageCircle size={18} /></span>
               <div><strong>Suporte</strong><small>Canal no aplicativo</small></div>
-            </button>
+            </button> : null}
             <div className="settings-nav__note">
               <ShieldCheck size={17} />
               <span>As alteracoes sao salvas e usadas nas proximas vendas.</span>
             </div>
           </aside>
 
-          {activeSection === "earnings" ? (
+          {activeSection === "earnings" && canManageEarnings ? (
             <EarningsWorkspace
               draft={selectedDraft}
               isSaving={isSaving}

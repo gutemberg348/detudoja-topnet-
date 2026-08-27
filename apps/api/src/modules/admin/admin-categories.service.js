@@ -1,4 +1,3 @@
-import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../utils/errors.js";
 import { parsePositiveId } from "../../utils/ids.js";
 import {
@@ -6,20 +5,10 @@ import {
   saveUploadedImage,
 } from "../uploads/image.service.js";
 import { serializeCategory } from "./admin.serializer.js";
-
-const categoryInclude = {
-  _count: { select: { lojas: true, segmentos_venda: true } },
-};
+import { adminCategoriesRepository } from "./admin-categories.repository.js";
 
 async function ensureUniqueCategoryName(name, ignoredId) {
-  const category = await prisma.categoriaLoja.findFirst({
-    select: { id: true },
-    where: {
-      excluido_em: null,
-      nome: { equals: name, mode: "insensitive" },
-      ...(ignoredId ? { id: { not: ignoredId } } : {}),
-    },
-  });
+  const category = await adminCategoriesRepository.findNameConflict(name, ignoredId);
 
   if (category) {
     throw new AppError("Ja existe uma categoria com este nome", 409);
@@ -29,17 +18,7 @@ async function ensureUniqueCategoryName(name, ignoredId) {
 export async function listAdminCategories(query = {}) {
   const search = String(query.search ?? "").trim();
   const status = String(query.status ?? "").toUpperCase();
-  const categories = await prisma.categoriaLoja.findMany({
-    include: categoryInclude,
-    orderBy: { nome: "asc" },
-    where: {
-      excluido_em: null,
-      ...(search
-        ? { nome: { contains: search, mode: "insensitive" } }
-        : {}),
-      ...(["ATIVA", "INATIVA"].includes(status) ? { status } : {}),
-    },
-  });
+  const categories = await adminCategoriesRepository.list({ search, status });
 
   return { categories: categories.map(serializeCategory) };
 }
@@ -50,14 +29,11 @@ export async function createAdminCategory(data, iconFile = null) {
   let iconUpload = null;
 
   try {
-    category = await prisma.categoriaLoja.create({
-      data: {
-        descricao: data.description || null,
-        icone_url: data.iconUrl ?? null,
-        nome: data.name,
-        status: data.status,
-      },
-      include: categoryInclude,
+    category = await adminCategoriesRepository.create({
+      descricao: data.description || null,
+      icone_url: data.iconUrl ?? null,
+      nome: data.name,
+      status: data.status,
     });
 
     if (iconFile) {
@@ -66,10 +42,8 @@ export async function createAdminCategory(data, iconFile = null) {
         profile: "categoryIcon",
       });
 
-      category = await prisma.categoriaLoja.update({
-        data: { icone_url: iconUpload.url },
-        include: categoryInclude,
-        where: { id: category.id },
+      category = await adminCategoriesRepository.update(category.id, {
+        icone_url: iconUpload.url,
       });
     }
 
@@ -80,11 +54,8 @@ export async function createAdminCategory(data, iconFile = null) {
     }
 
     if (category) {
-      await prisma.categoriaLoja
-        .update({
-          data: { excluido_em: new Date(), status: "INATIVA" },
-          where: { id: category.id },
-        })
+      await adminCategoriesRepository
+        .softDelete(category.id)
         .catch(() => {});
     }
 
@@ -94,10 +65,7 @@ export async function createAdminCategory(data, iconFile = null) {
 
 export async function updateAdminCategory(categoryId, data, iconFile = null) {
   const parsedCategoryId = parsePositiveId(categoryId, "Categoria invalida");
-  const existing = await prisma.categoriaLoja.findFirst({
-    select: { icone_url: true, id: true },
-    where: { excluido_em: null, id: parsedCategoryId },
-  });
+  const existing = await adminCategoriesRepository.findActiveById(parsedCategoryId);
 
   if (!existing) {
     throw new AppError("Categoria nao encontrada", 404);
@@ -117,21 +85,17 @@ export async function updateAdminCategory(categoryId, data, iconFile = null) {
       });
     }
 
-    const category = await prisma.categoriaLoja.update({
-      data: {
-        ...(data.description !== undefined
-          ? { descricao: data.description || null }
+    const category = await adminCategoriesRepository.update(parsedCategoryId, {
+      ...(data.description !== undefined
+        ? { descricao: data.description || null }
+        : {}),
+      ...(iconUpload
+        ? { icone_url: iconUpload.url }
+        : data.iconUrl !== undefined
+          ? { icone_url: data.iconUrl || null }
           : {}),
-        ...(iconUpload
-          ? { icone_url: iconUpload.url }
-          : data.iconUrl !== undefined
-            ? { icone_url: data.iconUrl || null }
-            : {}),
-        ...(data.name ? { nome: data.name } : {}),
-        ...(data.status ? { status: data.status } : {}),
-      },
-      include: categoryInclude,
-      where: { id: parsedCategoryId },
+      ...(data.name ? { nome: data.name } : {}),
+      ...(data.status ? { status: data.status } : {}),
     });
 
     if (iconUpload) {
@@ -150,19 +114,13 @@ export async function updateAdminCategory(categoryId, data, iconFile = null) {
 
 export async function deleteAdminCategory(categoryId) {
   const parsedCategoryId = parsePositiveId(categoryId, "Categoria invalida");
-  const existing = await prisma.categoriaLoja.findFirst({
-    select: { icone_url: true, id: true },
-    where: { excluido_em: null, id: parsedCategoryId },
-  });
+  const existing = await adminCategoriesRepository.findActiveById(parsedCategoryId);
 
   if (!existing) {
     throw new AppError("Categoria nao encontrada", 404);
   }
 
-  await prisma.categoriaLoja.update({
-    data: { excluido_em: new Date(), status: "INATIVA" },
-    where: { id: parsedCategoryId },
-  });
+  await adminCategoriesRepository.softDelete(parsedCategoryId);
 
   await deleteUploadedImage(existing.icone_url);
 }

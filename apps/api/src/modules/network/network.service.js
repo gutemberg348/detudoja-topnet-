@@ -1,11 +1,9 @@
-import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../utils/errors.js";
 import {
   countActiveVerifiedDirects,
   isQualifiedForNetwork,
-  networkQualificationInclude,
-  qualifyingIndicationStatuses,
 } from "./network.qualification.js";
+import { networkRepository } from "./network.repository.js";
 
 function serializePerson(
   user,
@@ -59,38 +57,17 @@ function serializePerson(
 }
 
 async function ensureInviteCode(userId) {
-  const existingCode = await prisma.codigoConvite.findFirst({
-    orderBy: { criado_em: "desc" },
-    where: { ativo: true, usuario_id: userId },
-  });
+  const existingCode = await networkRepository.findActiveInviteCode(userId);
 
   if (existingCode) {
     return existingCode;
   }
 
-  return prisma.codigoConvite.create({
-    data: {
-      codigo: `DTJ-${String(userId).padStart(6, "0")}`,
-      usuario_id: userId,
-    },
-  });
+  return networkRepository.createInviteCode(userId);
 }
 
 async function findMatrixChildren(parentIds) {
-  const include = {
-    indicado: { include: networkQualificationInclude },
-    indicador: { select: { id: true, nome: true } },
-  };
-  const orderBy = [{ posicao_matriz: "asc" }, { criado_em: "asc" }];
-
-  return prisma.indicacao.findMany({
-    include,
-    orderBy,
-    where: {
-      alocado_sob_usuario_id: { in: parentIds },
-      status: { in: qualifyingIndicationStatuses },
-    },
-  });
+  return networkRepository.findMatrixChildren(parentIds);
 }
 
 async function buildAllocatedMatrixForRoot(rootUserId) {
@@ -277,18 +254,7 @@ function sortMatrixPeople(people) {
 }
 
 async function findLegacyIndications(rootUserId) {
-  return prisma.indicacao.findMany({
-    include: {
-      indicado: { include: networkQualificationInclude },
-      indicador: { select: { id: true, nome: true } },
-    },
-    orderBy: [{ criado_em: "asc" }],
-    where: {
-      alocado_sob_usuario_id: null,
-      indicador_usuario_id: rootUserId,
-      status: { in: qualifyingIndicationStatuses },
-    },
-  });
+  return networkRepository.findLegacyIndications(rootUserId);
 }
 
 async function findSponsorChain(userId) {
@@ -297,10 +263,7 @@ async function findSponsorChain(userId) {
   let currentUserId = userId;
 
   for (let depth = 0; depth < 20; depth += 1) {
-    const receivedIndication = await prisma.indicacao.findUnique({
-      select: { indicador_usuario_id: true },
-      where: { indicado_usuario_id: currentUserId },
-    });
+    const receivedIndication = await networkRepository.findReceivedSponsor(currentUserId);
     const sponsorId = receivedIndication?.indicador_usuario_id;
 
     if (!sponsorId || visited.has(sponsorId)) {
@@ -369,10 +332,7 @@ function mergeMatrixPeople(...peopleGroups) {
 }
 
 export async function getNetworkOverview(userId) {
-  const currentUser = await prisma.usuario.findUnique({
-    include: networkQualificationInclude,
-    where: { id: userId },
-  });
+  const currentUser = await networkRepository.findCurrentUser(userId);
 
   if (!currentUser) {
     throw new AppError("Usuario nao encontrado", 404);
@@ -389,20 +349,7 @@ export async function getNetworkOverview(userId) {
 
   const [invite, rewards] = await Promise.all([
     ensureInviteCode(userId),
-    prisma.recompensa.findMany({
-      orderBy: { criado_em: "desc" },
-      take: 20,
-      where: {
-        tipo_recompensa: {
-          in: [
-            "BONUS_INDICACAO_CONSUMIDOR",
-            "BONUS_INDICACAO_LOJISTA",
-            "BONUS_VENDEDOR",
-          ],
-        },
-        usuario_beneficiado_id: userId,
-      },
-    }),
+    networkRepository.findRewards(userId),
   ]);
   const current = serializePerson(currentUser);
   const matrixLevels = Array.from({ length: 20 }, (_, index) => {

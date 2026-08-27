@@ -55,8 +55,8 @@ Checks executados:
 
 ### Prioridade 1 - Dividir fluxos grandes
 
-- `SellScreen.jsx`: 3.147 linhas e ainda concentra estado, API, Socket.IO,
-  lojas, produtos, cobrancas e modais.
+- `SellScreen.jsx`: 1.136 linhas; atua como orquestradora de estado, API,
+  Socket.IO e navegacao. Painel e formularios comerciais foram isolados.
 - `sell/seller.styles.js`: 1.856 linhas.
 - `ProfileScreen.jsx`: 944 linhas.
 - `CustomerOrderDetailsScreen.jsx`: 927 linhas.
@@ -133,9 +133,11 @@ Foram identificados e removidos tres grupos de duplicacao de alto uso:
   no backend usam `utils/ids.js` e `utils/money.js` nos modulos de operacao e
   administracao.
 
-Em 2026-08-10, `SellScreen.jsx` foi reduzida de 3.966 para 3.147 linhas:
-`StoreOrderChatModal.jsx` agora possui o CRM de um pedido e
-`SellerSaleModals.jsx` possui os fluxos de venda autonoma e QR. Ainda restam
-como proximas fronteiras de dominio o painel interno/CRM da loja, catalogo de
-produtos e formularios de loja. `ProfileScreen.jsx` e os detalhes de pedido
-tambem continuam candidatos a dividir por fluxo, nao apenas por tamanho.
+Em 2026-08-10, `SellScreen.jsx` foi reduzida de 3.966 para 1.136 linhas:
+`StoreOrderChatModal.jsx` concentra a conversa do pedido,
+`SellerSaleModals.jsx` concentra os fluxos de venda autonoma e QR, e
+`StoreManagerPanel.jsx` passou a conter painel da loja, CRM, catalogo e
+financeiro; `SellerFormModals.jsx` concentra onboarding e formularios de
+loja, endereco, identidade visual e produto. `ProfileScreen.jsx` e os
+detalhes de pedido continuam candidatos a dividir por fluxo, nao apenas por
+tamanho.

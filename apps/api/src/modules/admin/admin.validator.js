@@ -113,6 +113,14 @@ export const creditAdminUserWalletSchema = z.object({
   walletCode: z.enum(["saldo_pix", "cashback", "rede", "vendas"]),
 });
 
+export const refundAdminPaymentSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(8, "Informe um motivo de pelo menos 8 caracteres")
+    .max(500, "O motivo deve ter no maximo 500 caracteres"),
+});
+
 export const updateAdminSupportSettingsSchema = z.object({
   message: z
     .string()

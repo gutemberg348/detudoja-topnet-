@@ -1,6 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, Vibration, View } from "react-native";
 import { PageHeader } from "../components/PageHeader";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { StatePanel } from "../components/StatePanel";
@@ -8,10 +8,12 @@ import {
   acceptCourierRequest,
   getCourierRequests,
   saveCourierProfile,
+  updateCourierDispatchScope,
 } from "../services/courier.api";
 import { getSellerProfile } from "../services/seller.api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import {
+  getServiceConversation,
   getSellerServices,
   getServiceConversations,
   updateSellerService,
@@ -45,9 +47,11 @@ export function ServiceDeskScreen({ navigation }) {
   const [conversations, setConversations] = useState([]);
   const [courierRequests, setCourierRequests] = useState([]);
   const [courierError, setCourierError] = useState("");
+  const [courierDashboard, setCourierDashboard] = useState(null);
   const [courierModalOpen, setCourierModalOpen] = useState(false);
   const [courierProfile, setCourierProfile] = useState(null);
   const [courierSaving, setCourierSaving] = useState(false);
+  const [courierScopeSaving, setCourierScopeSaving] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState(null);
@@ -60,9 +64,26 @@ export function ServiceDeskScreen({ navigation }) {
     () => services.filter((service) => service.available),
     [services],
   );
-  const openCalls = useMemo(
-    () => conversations.filter((conversation) => ["ABERTA", "ACORDADA", "AGUARDANDO_CONFIRMACAO"].includes(conversation.status)),
+  const courierCalls = useMemo(
+    () => conversations.filter((conversation) => (
+      conversation.serviceType?.operationalType === "ENTREGA_LOCAL"
+      && ["ABERTA", "ACORDADA", "AGUARDANDO_CONFIRMACAO"].includes(conversation.status)
+    )),
     [conversations],
+  );
+  const openCalls = useMemo(
+    () => conversations.filter((conversation) => (
+      conversation.serviceType?.operationalType !== "ENTREGA_LOCAL"
+      && ["ABERTA", "ACORDADA", "AGUARDANDO_CONFIRMACAO"].includes(conversation.status)
+    )),
+    [conversations],
+  );
+  const courierService = useMemo(
+    () => services.find((service) => service.requiresCourierProfile),
+    [services],
+  );
+  const receivesPlatformCalls = Boolean(
+    courierProfile && (courierProfile.acceptsPlatformCalls || !courierProfile.linkedStoreCount),
   );
 
   const load = useCallback(async ({ silent = false } = {}) => {
@@ -84,6 +105,7 @@ export function ServiceDeskScreen({ navigation }) {
       setServices(servicesResponse.services ?? []);
       setConversations((conversationsResponse.conversations ?? []).filter((conversation) => conversation.isSeller));
       setCourierRequests(requestsResponse.requests ?? []);
+      setCourierDashboard(requestsResponse.dashboard ?? null);
     } catch (requestError) {
       if (!silent) setError(requestError.message ?? "Nao foi possivel carregar seus servicos.");
     } finally {
@@ -103,21 +125,32 @@ export function ServiceDeskScreen({ navigation }) {
   }, [courierRequests, load]);
 
   useEffect(() => {
+    if (!courierRequests.length || Platform.OS === "web") return undefined;
+    Vibration.vibrate([0, 180, 110, 220]);
+    const timer = setInterval(() => Vibration.vibrate([0, 180, 110, 220]), 8000);
+    return () => {
+      clearInterval(timer);
+      Vibration.cancel();
+    };
+  }, [courierRequests.length]);
+
+  useEffect(() => {
     if (!session?.accessToken) return undefined;
     const socket = getRealtimeSocket(session.accessToken);
     const refresh = () => load({ silent: true });
+    const notifyCourier = () => load({ silent: true });
     socket?.on(realtimeEvents.serviceChatCreated, refresh);
     socket?.on(realtimeEvents.serviceChatMessageCreated, refresh);
     socket?.on(realtimeEvents.serviceAvailabilityUpdated, refresh);
     socket?.on(realtimeEvents.serviceChatUpdated, refresh);
-    socket?.on(realtimeEvents.courierRequestCreated, refresh);
+    socket?.on(realtimeEvents.courierRequestCreated, notifyCourier);
     socket?.on(realtimeEvents.courierRequestUpdated, refresh);
     return () => {
       socket?.off(realtimeEvents.serviceChatCreated, refresh);
       socket?.off(realtimeEvents.serviceChatMessageCreated, refresh);
       socket?.off(realtimeEvents.serviceAvailabilityUpdated, refresh);
       socket?.off(realtimeEvents.serviceChatUpdated, refresh);
-      socket?.off(realtimeEvents.courierRequestCreated, refresh);
+      socket?.off(realtimeEvents.courierRequestCreated, notifyCourier);
       socket?.off(realtimeEvents.courierRequestUpdated, refresh);
     };
   }, [load, session?.accessToken]);
@@ -140,6 +173,7 @@ export function ServiceDeskScreen({ navigation }) {
       setServices((current) => current.map((item) => (
         item.id === service.id ? { ...item, available: !item.available, enabled: true } : item
       )));
+      await load({ silent: true });
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel atualizar a disponibilidade.");
     } finally {
@@ -177,6 +211,20 @@ export function ServiceDeskScreen({ navigation }) {
     }
   }
 
+  async function updateDispatchScope(acceptsPlatformCalls) {
+    if (!session?.accessToken || courierScopeSaving || acceptsPlatformCalls === receivesPlatformCalls) return;
+    setCourierScopeSaving(true);
+    setError("");
+    try {
+      const response = await updateCourierDispatchScope(session.accessToken, acceptsPlatformCalls);
+      setCourierProfile(response.profile);
+    } catch (requestError) {
+      setError(requestError.message ?? "Nao foi possivel atualizar onde voce recebe chamadas.");
+    } finally {
+      setCourierScopeSaving(false);
+    }
+  }
+
   async function acceptRequest(request) {
     if (!session?.accessToken || acceptingRequestId) return;
     setAcceptingRequestId(request.id);
@@ -193,10 +241,21 @@ export function ServiceDeskScreen({ navigation }) {
     }
   }
 
+  async function openCourierRide(request) {
+    if (!session?.accessToken || !request?.conversationId) return;
+    setError("");
+    try {
+      const response = await getServiceConversation(session.accessToken, request.conversationId);
+      navigation.navigate("ServiceConversation", { conversation: response.conversation });
+    } catch (requestError) {
+      setError(requestError.message ?? "Nao foi possivel abrir esta corrida.");
+    }
+  }
+
   return (
     <ScreenContainer contentContainerStyle={styles.content}>
       <PageHeader
-        action={<StatusPill activeCount={activeServices.length} />}
+        action={<StatusPill activeCount={activeServices.length} courierStatus={courierDashboard?.operationalStatus} />}
         eyebrow="Prestador de servicos"
         subtitle="Escolha o que atende agora e acompanhe os chamados recebidos pelo chat."
         title={`Servicos de ${profile?.publicName ?? "voce"}`}
@@ -220,30 +279,47 @@ export function ServiceDeskScreen({ navigation }) {
           </View>
 
           {courierProfile ? (
-            <Pressable
-              onPress={() => {
-                setPendingCourierService(null);
-                setCourierError("");
-                setCourierModalOpen(true);
-              }}
-              style={({ pressed }) => [styles.courierProfile, pressed && styles.pressed]}
-            >
-              <View style={styles.courierProfileIcon}>
-                <Ionicons color={colors.card} name="bicycle-outline" size={21} />
-              </View>
-              <View style={styles.serviceCopy}>
-                <View style={styles.profileTopline}>
-                  <Text numberOfLines={1} style={styles.courierProfileName}>{courierProfile.displayName}</Text>
-                  <View style={styles.verifiedPill}>
-                    <Ionicons color={colors.primaryDark} name="checkmark-circle" size={13} />
-                    <Text style={styles.verifiedText}>Cadastro ativo</Text>
-                  </View>
+            <>
+              <Pressable
+                onPress={() => {
+                  setPendingCourierService(null);
+                  setCourierError("");
+                  setCourierModalOpen(true);
+                }}
+                style={({ pressed }) => [styles.courierProfile, pressed && styles.pressed]}
+              >
+                <View style={styles.courierProfileIcon}>
+                  <Ionicons color={colors.card} name="bicycle-outline" size={21} />
                 </View>
-                <Text style={styles.courierProfileMeta}>{courierProfile.vehicleModel} - {courierProfile.color} - {courierProfile.plate}</Text>
-                <Text style={styles.courierProfileRadius}>Atende em um raio de ate {courierProfile.serviceRadiusKm} km</Text>
-              </View>
-              <Ionicons color={colors.textMuted} name="create-outline" size={19} />
-            </Pressable>
+                <View style={styles.serviceCopy}>
+                  <View style={styles.profileTopline}>
+                    <Text numberOfLines={1} style={styles.courierProfileName}>{courierProfile.displayName}</Text>
+                    <View style={styles.verifiedPill}>
+                      <Ionicons color={colors.primaryDark} name="checkmark-circle" size={13} />
+                      <Text style={styles.verifiedText}>Cadastro ativo</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.courierProfileMeta}>{courierProfile.vehicleModel} - {courierProfile.color} - {courierProfile.plate}</Text>
+                  <Text style={styles.courierProfileRadius}>Atende em um raio de ate {courierProfile.serviceRadiusKm} km</Text>
+                </View>
+                <Ionicons color={colors.textMuted} name="create-outline" size={19} />
+              </Pressable>
+              <CourierDispatchScope
+                acceptsPlatformCalls={receivesPlatformCalls}
+                canUseTeamOnly={courierProfile.linkedStoreCount > 0}
+                isBusy={courierDashboard?.operationalStatus === "BUSY"}
+                isOnline={Boolean(courierService?.available)}
+                loading={courierScopeSaving}
+                onChange={updateDispatchScope}
+              />
+              <CourierOperationsPanel
+                currentConversation={courierCalls[0] ?? null}
+                dashboard={courierDashboard}
+                onOpenConversation={(conversation) => navigation.navigate("ServiceConversation", { conversation })}
+                onOpenRide={openCourierRide}
+                pendingCount={courierRequests.length}
+              />
+            </>
           ) : null}
 
           {courierRequests.length ? (
@@ -251,7 +327,7 @@ export function ServiceDeskScreen({ navigation }) {
               <SectionTitle
                 icon="notifications-outline"
                 subtitle="Aceite para entrar no chat e combinar valor e entrega"
-                title="Corridas aguardando"
+                title="Chamadas tocando"
                 value={courierRequests.length}
               />
               <View style={styles.requestList}>
@@ -331,8 +407,9 @@ export function ServiceDeskScreen({ navigation }) {
   );
 }
 
-function StatusPill({ activeCount }) {
-  return <View style={[styles.statusPill, activeCount && styles.statusPillActive]}><View style={[styles.statusDot, activeCount && styles.statusDotActive]} /><Text style={[styles.statusText, activeCount && styles.statusTextActive]}>{activeCount ? `${activeCount} ativo${activeCount === 1 ? "" : "s"}` : "Offline"}</Text></View>;
+function StatusPill({ activeCount, courierStatus }) {
+  const isBusy = courierStatus === "BUSY";
+  return <View style={[styles.statusPill, activeCount && styles.statusPillActive]}><View style={[styles.statusDot, activeCount && styles.statusDotActive]} /><Text style={[styles.statusText, activeCount && styles.statusTextActive]}>{isBusy ? "Em corrida" : activeCount ? `${activeCount} ativo${activeCount === 1 ? "" : "s"}` : "Offline"}</Text></View>;
 }
 
 function SectionTitle({ icon, subtitle, title, value = null }) {
@@ -383,7 +460,7 @@ function CourierRequestCard({ loading, onAccept, request }) {
         <View style={styles.requestIcon}><Ionicons color={colors.card} name="bicycle-outline" size={20} /></View>
         <View style={styles.copy}>
           <View style={styles.requestNameLine}>
-            <Text numberOfLines={1} style={styles.requestName}>{request.store?.name ?? "Loja"}</Text>
+            <Text numberOfLines={1} style={styles.requestName}>{request.store?.name ?? "Cliente solicitante"}</Text>
             {isDirect ? <View style={styles.directPill}><Text style={styles.directPillText}>SUA EQUIPE</Text></View> : null}
           </View>
           <Text style={styles.requestCaption}>{isDirect ? "Chamada direta da loja" : "Chamada da plataforma"}</Text>
@@ -398,6 +475,91 @@ function CourierRequestCard({ loading, onAccept, request }) {
       <Pressable disabled={loading} onPress={onAccept} style={({ pressed }) => [styles.acceptButton, pressed && styles.pressed]}>
         {loading ? <ActivityIndicator color={colors.card} /> : <><Ionicons color={colors.card} name="checkmark-circle-outline" size={18} /><Text style={styles.acceptButtonText}>Aceitar corrida</Text><Ionicons color={colors.card} name="arrow-forward" size={18} /></>}
       </Pressable>
+    </View>
+  );
+}
+
+function CourierOperationsPanel({ currentConversation, dashboard, onOpenConversation, onOpenRide, pendingCount }) {
+  const status = dashboard?.operationalStatus ?? "OFFLINE";
+  const isBusy = status === "BUSY";
+  const isAvailable = status === "AVAILABLE";
+  const recentRides = dashboard?.recentRides?.slice(0, 3) ?? [];
+
+  return (
+    <View style={styles.operationsPanel}>
+      <View style={styles.operationsHeader}>
+        <View style={[styles.operationsStatusIcon, isBusy && styles.operationsStatusIconBusy]}>
+          <Ionicons color={colors.card} name={isBusy ? "navigate" : isAvailable ? "radio" : "pause"} size={20} />
+        </View>
+        <View style={styles.copy}>
+          <Text style={styles.operationsEyebrow}>CENTRAL DO MOTOBOY</Text>
+          <Text style={styles.operationsTitle}>{isBusy ? "Corrida em andamento" : isAvailable ? "Pronto para receber" : "Operacao pausada"}</Text>
+          <Text style={styles.operationsText}>{isBusy ? "Novas chamadas ficam ocultas ate esta corrida terminar." : isAvailable ? "A primeira chamada aceita abre a rota e o chat." : "Fique online para voltar a receber chamadas."}</Text>
+        </View>
+        {pendingCount ? <View style={styles.ringingPill}><View style={styles.ringingDot} /><Text style={styles.ringingText}>{pendingCount} tocando</Text></View> : null}
+      </View>
+
+      <View style={styles.operationsMetrics}>
+        <OperationMetric label="Hoje" value={dashboard?.completedToday ?? 0} />
+        <OperationMetric label="Entregas" value={dashboard?.totalDeliveries ?? 0} />
+        <OperationMetric label="Lojas" value={dashboard?.linkedStoreCount ?? 0} />
+      </View>
+
+      {currentConversation ? (
+        <Pressable onPress={() => onOpenConversation(currentConversation)} style={({ pressed }) => [styles.currentRide, pressed && styles.pressed]}>
+          <View style={styles.currentRideIcon}><Ionicons color={colors.primaryDark} name="navigate-outline" size={19} /></View>
+          <View style={styles.copy}>
+            <Text style={styles.currentRideLabel}>CORRIDA ATUAL</Text>
+            <Text numberOfLines={1} style={styles.currentRideTitle}>{currentConversation.request?.store?.name ?? "Entrega em atendimento"}</Text>
+            <Text numberOfLines={1} style={styles.currentRideRoute}>{currentConversation.request?.destination || "Destino no chat"}</Text>
+          </View>
+          <Ionicons color={colors.primaryDark} name="arrow-forward" size={19} />
+        </Pressable>
+      ) : null}
+
+      {!currentConversation && recentRides.length ? (
+        <View style={styles.recentRides}>
+          <Text style={styles.recentRidesTitle}>Atividade recente</Text>
+          {recentRides.map((ride) => (
+            <Pressable disabled={!ride.conversationId} key={ride.id} onPress={() => onOpenRide(ride)} style={({ pressed }) => [styles.recentRideRow, pressed && styles.pressed]}>
+              <Ionicons color={ride.status === "CONCLUIDA" ? colors.success : colors.textMuted} name={ride.status === "CONCLUIDA" ? "checkmark-circle-outline" : "close-circle-outline"} size={18} />
+              <View style={styles.copy}><Text numberOfLines={1} style={styles.recentRideName}>{ride.store?.name ?? "Corrida"}</Text><Text style={styles.recentRideStatus}>{ride.status === "CONCLUIDA" ? "Concluida" : "Cancelada"}</Text></View>
+              <Ionicons color={colors.textMuted} name="chevron-forward" size={16} />
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function OperationMetric({ label, value }) {
+  return <View style={styles.operationMetric}><Text style={styles.operationMetricValue}>{value}</Text><Text style={styles.operationMetricLabel}>{label}</Text></View>;
+}
+
+function CourierDispatchScope({ acceptsPlatformCalls, canUseTeamOnly, isBusy, isOnline, loading, onChange }) {
+  return (
+    <View style={styles.dispatchScope}>
+      <View style={styles.dispatchScopeHeader}>
+        <View style={styles.dispatchScopeIcon}><Ionicons color={colors.primaryDark} name="radio-outline" size={19} /></View>
+        <View style={styles.copy}>
+          <Text style={styles.dispatchScopeTitle}>Central do entregador</Text>
+          <Text style={styles.dispatchScopeText}>{isBusy ? "Em corrida; novas chamadas estao pausadas" : isOnline ? "Online para novas corridas" : "Ative Motoboy para receber corridas"}</Text>
+        </View>
+        <View style={[styles.dispatchStatus, isOnline && styles.dispatchStatusOnline]}><View style={[styles.dispatchDot, isOnline && styles.dispatchDotOnline]} /><Text style={[styles.dispatchStatusText, isOnline && styles.dispatchStatusTextOnline]}>{isBusy ? "Ocupado" : isOnline ? "Online" : "Offline"}</Text></View>
+      </View>
+      <Text style={styles.dispatchScopeLabel}>Receber chamadas de</Text>
+      <View style={styles.dispatchScopeOptions}>
+        <Pressable disabled={loading} onPress={() => onChange(true)} style={[styles.dispatchScopeOption, acceptsPlatformCalls && styles.dispatchScopeOptionActive]}>
+          <Ionicons color={acceptsPlatformCalls ? colors.card : colors.primaryDark} name="globe-outline" size={16} />
+          <Text style={[styles.dispatchScopeOptionText, acceptsPlatformCalls && styles.dispatchScopeOptionTextActive]}>Toda a cidade</Text>
+        </Pressable>
+        <Pressable disabled={loading || !canUseTeamOnly} onPress={() => onChange(false)} style={[styles.dispatchScopeOption, !acceptsPlatformCalls && styles.dispatchScopeOptionActive, !canUseTeamOnly && styles.dispatchScopeOptionDisabled]}>
+          <Ionicons color={!acceptsPlatformCalls ? colors.card : colors.primaryDark} name="storefront-outline" size={16} />
+          <Text style={[styles.dispatchScopeOptionText, !acceptsPlatformCalls && styles.dispatchScopeOptionTextActive]}>Minhas lojas</Text>
+        </Pressable>
+      </View>
+      <Text style={styles.dispatchScopeHint}>{acceptsPlatformCalls ? "Chamadas gerais da sua cidade chegam aqui em tempo real." : "Somente lojas que credenciaram voce podem chamar diretamente."}</Text>
     </View>
   );
 }
@@ -425,13 +587,56 @@ const styles = StyleSheet.create({
   courierProfileRadius: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 11 },
   countPill: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.round, height: 26, justifyContent: "center", minWidth: 26, paddingHorizontal: 7 },
   countText: { color: colors.card, fontFamily: fonts.extraBold, fontSize: 11 },
+  currentRide: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.sm, padding: spacing.md },
+  currentRideIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 38, justifyContent: "center", width: 38 },
+  currentRideLabel: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: 9 },
+  currentRideRoute: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 11 },
+  currentRideTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small },
   deliveryPill: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, flexDirection: "row", gap: 4, paddingHorizontal: 7, paddingVertical: 3 },
   deliveryPillText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 9 },
+  dispatchDot: { backgroundColor: colors.textMuted, borderRadius: radius.round, height: 6, width: 6 },
+  dispatchDotOnline: { backgroundColor: colors.success },
+  dispatchScope: { backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, gap: spacing.sm, padding: spacing.md, ...shadowSoft },
+  dispatchScopeHeader: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
+  dispatchScopeHint: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
+  dispatchScopeIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 38, justifyContent: "center", width: 38 },
+  dispatchScopeLabel: { color: colors.textMuted, fontFamily: fonts.bold, fontSize: 10, marginTop: spacing.xs },
+  dispatchScopeOption: { alignItems: "center", backgroundColor: colors.backgroundSoft, borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, flex: 1, flexDirection: "row", gap: 6, justifyContent: "center", minHeight: 40, paddingHorizontal: spacing.sm },
+  dispatchScopeOptionActive: { backgroundColor: colors.primaryDark, borderColor: colors.primaryDark },
+  dispatchScopeOptionDisabled: { opacity: 0.45 },
+  dispatchScopeOptionText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 11 },
+  dispatchScopeOptionTextActive: { color: colors.card },
+  dispatchScopeOptions: { flexDirection: "row", gap: spacing.sm },
+  dispatchScopeText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 11 },
+  dispatchScopeTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.small },
+  dispatchStatus: { alignItems: "center", backgroundColor: colors.backgroundSoft, borderRadius: radius.round, flexDirection: "row", gap: 4, paddingHorizontal: 7, paddingVertical: 4 },
+  dispatchStatusOnline: { backgroundColor: colors.primarySoft },
+  dispatchStatusText: { color: colors.textMuted, fontFamily: fonts.bold, fontSize: 9 },
+  dispatchStatusTextOnline: { color: colors.primaryDark },
   deliveryCallCard: { backgroundColor: colors.primarySoft, borderColor: colors.primaryLight },
   deliveryCallIcon: { backgroundColor: colors.primaryDark },
   directPill: { backgroundColor: colors.warningSoft ?? "#FFF4D8", borderRadius: radius.round, paddingHorizontal: 7, paddingVertical: 3 },
   directPillText: { color: "#7A4A00", fontFamily: fonts.extraBold, fontSize: 8 },
   pressed: { opacity: 0.78 },
+  operationMetric: { alignItems: "center", borderRightColor: colors.border, borderRightWidth: 1, flex: 1, gap: 2 },
+  operationMetricLabel: { color: colors.textMuted, fontFamily: fonts.medium, fontSize: 10 },
+  operationMetricValue: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.h3 },
+  operationsEyebrow: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: 9 },
+  operationsHeader: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
+  operationsMetrics: { backgroundColor: colors.backgroundSoft, borderRadius: radius.md, flexDirection: "row", paddingVertical: spacing.sm },
+  operationsPanel: { backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, gap: spacing.md, padding: spacing.md, ...shadowSoft },
+  operationsStatusIcon: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.round, height: 42, justifyContent: "center", width: 42 },
+  operationsStatusIconBusy: { backgroundColor: colors.info },
+  operationsText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
+  operationsTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.label },
+  recentRideName: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.caption },
+  recentRideRow: { alignItems: "center", borderTopColor: colors.border, borderTopWidth: 1, flexDirection: "row", gap: spacing.sm, minHeight: 42, paddingTop: spacing.sm },
+  recentRideStatus: { color: colors.textMuted, fontFamily: fonts.regular, fontSize: 10 },
+  recentRides: { gap: spacing.sm },
+  recentRidesTitle: { color: colors.textSecondary, fontFamily: fonts.bold, fontSize: 10 },
+  ringingDot: { backgroundColor: colors.danger, borderRadius: radius.round, height: 6, width: 6 },
+  ringingPill: { alignItems: "center", backgroundColor: colors.dangerSoft, borderRadius: radius.round, flexDirection: "row", gap: 4, paddingHorizontal: 7, paddingVertical: 5 },
+  ringingText: { color: colors.danger, fontFamily: fonts.extraBold, fontSize: 9 },
   requestCaption: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 11 },
   requestCard: { backgroundColor: colors.card, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, gap: spacing.md, padding: spacing.md, ...shadowSoft },
   requestCardDirect: { borderColor: colors.warning ?? "#F5B942" },

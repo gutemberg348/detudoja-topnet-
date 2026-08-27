@@ -6,6 +6,7 @@ import { AppButton } from "../components/AppButton";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { getSupportSettings } from "../services/support.api";
 import { useAuthStore } from "../stores/useAuthStore";
+import { formatarDinheiro } from "../utils/money";
 import {
   colors,
   fonts,
@@ -15,7 +16,7 @@ import {
   typography,
 } from "../utils/theme";
 
-export function SupportScreen() {
+export function SupportScreen({ route }) {
   const { session } = useAuthStore();
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -44,11 +45,24 @@ export function SupportScreen() {
   }, [loadSupport]));
 
   async function openWhatsapp() {
-    if (!support?.whatsappUrl) {
+    if (!support?.whatsappDigits) {
       return;
     }
 
-    await Linking.openURL(support.whatsappUrl);
+    const order = route?.params?.order;
+    const message = order
+      ? [
+          "Ola, preciso solicitar o cancelamento de um pedido no DeTudoJa.",
+          `Pedido: ${order.code}`,
+          `Loja: ${order.store?.name ?? "Nao informada"}`,
+          `Valor: ${formatarDinheiro(order.totalCents)}`,
+          `Status: ${order.status}`,
+          "Motivo:",
+        ].join("\n")
+      : support.message;
+    const url = `https://wa.me/${support.whatsappDigits}?text=${encodeURIComponent(message)}`;
+
+    await Linking.openURL(url);
   }
 
   const configured = Boolean(support?.whatsappUrl);
@@ -109,6 +123,22 @@ export function SupportScreen() {
           </View>
 
           <View style={styles.helpGrid}>
+            {route?.params?.order ? (
+              <View style={styles.refundCard}>
+                <View style={styles.refundHeader}>
+                  <Ionicons color="#9A5B00" name="information-circle-outline" size={23} />
+                  <View style={styles.tipCopy}>
+                    <Text style={styles.refundTitle}>Como funciona o cancelamento</Text>
+                    <Text style={styles.refundOrder}>{route.params.order.code}</Text>
+                  </View>
+                </View>
+                <RefundRule text="Antes do pagamento, o cancelamento pode ser imediato." />
+                <RefundRule text="Pago ou em atendimento: o suporte analisa antes de cancelar." />
+                <RefundRule text="Saldo usado nas carteiras volta imediatamente apos a aprovacao." />
+                <RefundRule text="Pix externo e solicitado ao Asaas em ate 24 horas; o banco pode concluir depois." />
+                <RefundRule text="Depois da entrega, a analise inclui a reversao dos ganhos distribuidos." />
+              </View>
+            ) : null}
             <SupportTip
               icon="receipt-outline"
               text="Tenha o numero do pedido em maos quando falar sobre compras."
@@ -131,6 +161,15 @@ export function SupportScreen() {
   );
 }
 
+function RefundRule({ text }) {
+  return (
+    <View style={styles.refundRule}>
+      <Ionicons color="#B66A00" name="checkmark-circle-outline" size={17} />
+      <Text style={styles.refundRuleText}>{text}</Text>
+    </View>
+  );
+}
+
 function SupportTip({ icon, text, title }) {
   return (
     <View style={styles.tipCard}>
@@ -146,6 +185,43 @@ function SupportTip({ icon, text, title }) {
 }
 
 const styles = StyleSheet.create({
+  refundCard: {
+    backgroundColor: "#FFF9F0",
+    borderColor: "#F0D3A5",
+    borderRadius: 18,
+    borderWidth: 1,
+    gap: spacing.sm,
+    padding: spacing.md,
+  },
+  refundHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  refundOrder: {
+    color: colors.textSecondary,
+    fontFamily: fonts.medium,
+    fontSize: typography.caption,
+  },
+  refundRule: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  refundRuleText: {
+    color: colors.textSecondary,
+    flex: 1,
+    fontFamily: fonts.regular,
+    fontSize: typography.caption,
+    lineHeight: 18,
+  },
+  refundTitle: {
+    color: colors.textPrimary,
+    fontFamily: fonts.bold,
+    fontSize: typography.small,
+    fontWeight: "700",
+  },
   cardCopy: {
     flex: 1,
     gap: spacing.xs,

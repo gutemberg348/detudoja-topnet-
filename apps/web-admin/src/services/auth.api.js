@@ -18,8 +18,9 @@ export function refreshAdminSession(refreshToken) {
   });
 }
 
-export function logoutAdmin(accessToken) {
+export function logoutAdmin(accessToken, refreshToken) {
   return apiRequest("/api/admin/auth/logout", {
+    body: { refreshToken },
     method: "POST",
     token: accessToken,
   });

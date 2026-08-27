@@ -1,14 +1,5 @@
 import { env } from "../../config/env.js";
-import { prisma } from "../../config/prisma.js";
-
-const visibleIndicationStatuses = ["ATIVA", "CONVERTIDA", "PENDENTE"];
-const qualificationInclude = {
-  indicacoes_feitas: {
-    include: { indicado: { include: { kyc: true } } },
-    where: { status: { in: visibleIndicationStatuses } },
-  },
-  kyc: true,
-};
+import { adminNetworkRepository } from "./admin-network.repository.js";
 
 function activeVerifiedDirectCount(user) {
   return user.indicacoes_feitas.filter(
@@ -95,25 +86,13 @@ function parseOptionalPositiveIntId(value) {
 }
 
 async function findCompanyRoot() {
-  return prisma.usuario.findUnique({
-    include: qualificationInclude,
-    where: { email: env.companyRoot.email.trim().toLowerCase() },
-  });
+  return adminNetworkRepository.findCompanyRoot(
+    env.companyRoot.email.trim().toLowerCase(),
+  );
 }
 
 async function findMatrixChildren(parentIds) {
-  return prisma.indicacao.findMany({
-    include: {
-      alocado_sob: { select: { email: true, id: true, nome: true } },
-      indicado: { include: qualificationInclude },
-      indicador: { select: { email: true, id: true, nome: true } },
-    },
-    orderBy: [{ posicao_matriz: "asc" }, { criado_em: "asc" }],
-    where: {
-      alocado_sob_usuario_id: { in: parentIds },
-      status: { in: visibleIndicationStatuses },
-    },
-  });
+  return adminNetworkRepository.findMatrixChildren(parentIds);
 }
 
 async function buildNetworkTree(rootUser, maxDepth) {
@@ -180,23 +159,7 @@ async function buildNetworkTree(rootUser, maxDepth) {
 }
 
 async function findOrphanUsers(rootUserId) {
-  const users = await prisma.usuario.findMany({
-    orderBy: { criado_em: "asc" },
-    select: {
-      criado_em: true,
-      email: true,
-      id: true,
-      nome: true,
-      status: true,
-      tipo_conta: true,
-    },
-    where: {
-      excluido_em: null,
-      id: { not: rootUserId },
-      indicacao_recebida: null,
-      tipo_conta: { not: "ADMIN" },
-    },
-  });
+  const users = await adminNetworkRepository.findOrphanUsers(rootUserId);
 
   return users.map((user) => ({
     accountType: user.tipo_conta,
@@ -209,18 +172,7 @@ async function findOrphanUsers(rootUserId) {
 }
 
 async function findUnallocatedIndications() {
-  const indications = await prisma.indicacao.findMany({
-    include: {
-      indicado: { select: { email: true, id: true, nome: true } },
-      indicador: { select: { email: true, id: true, nome: true } },
-    },
-    orderBy: { criado_em: "asc" },
-    take: 50,
-    where: {
-      alocado_sob_usuario_id: null,
-      status: { in: visibleIndicationStatuses },
-    },
-  });
+  const indications = await adminNetworkRepository.findUnallocatedIndications();
 
   return indications.map((indication) => ({
     createdAt: indication.criado_em.toISOString(),
@@ -239,10 +191,7 @@ export async function getAdminNetworkOverview(query = {}) {
   const maxDepth = parseMaxDepth(query.maxDepth);
   const rootUserId = parseOptionalPositiveIntId(query.rootUserId);
   const rootUser = rootUserId
-    ? await prisma.usuario.findUnique({
-        include: qualificationInclude,
-        where: { id: rootUserId },
-      })
+    ? await adminNetworkRepository.findRootById(rootUserId)
     : await findCompanyRoot();
 
   if (!rootUser) {

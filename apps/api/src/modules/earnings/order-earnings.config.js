@@ -1,3 +1,5 @@
+import { createOrderEarningsRepository } from "./order-earnings.repository.js";
+
 export const orderEarningsConfigKey = "financial.order_earnings_distribution";
 export const defaultSegmentFeePercent = 10;
 
@@ -62,7 +64,7 @@ export function serializeOrderEarningsDistribution(value = {}) {
 }
 
 export async function getOrderEarningsDistribution(database) {
-  const config = await database.configuracaoSistema.findUnique({
+  const config = await createOrderEarningsRepository(database).findSystemConfiguration({
     where: { chave: orderEarningsConfigKey },
   });
 
@@ -137,7 +139,7 @@ export function getSegmentCommissionDistribution(
 
 export async function updateOrderEarningsDistribution(database, adminId, value) {
   const publicDistribution = serializeOrderEarningsDistribution(value);
-  const config = await database.configuracaoSistema.upsert({
+  const config = await createOrderEarningsRepository(database).upsertSystemConfiguration({
     create: {
       atualizado_por_admin_id: adminId,
       chave: orderEarningsConfigKey,

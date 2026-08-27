@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "test": "node --test",
+    "test": "node --import ./test.setup.js --test --test-concurrency=1",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
     "prisma:format": "prisma format",
@@ -19,7 +19,9 @@
     "seed:admin": "node prisma/seed.js",
     "seed:demo": "node prisma/seed-demo.js",
     "seed:service-types": "node prisma/seed-service-types.js",
-    "media:curated": "node prisma/apply-curated-media.js"
+    "media:curated": "node prisma/apply-curated-media.js",
+    "audit:business": "node prisma/audit-business.js",
+    "reconcile:completed-orders": "node prisma/reconcile-completed-orders.js"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
@@ -30,7 +32,9 @@
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.1",
     "file-type": "^20.5.0",
+    "google-auth-library": "^10.9.1",
     "helmet": "^8.1.0",
+    "jose": "^6.2.10",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.2.0",
     "qrcode": "^1.5.4",

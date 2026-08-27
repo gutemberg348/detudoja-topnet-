@@ -1,6 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { AppButton } from "../components/AppButton";
 import { CpfRequirementModal } from "../components/CpfRequirementModal";
@@ -8,6 +8,7 @@ import { PaymentFeedbackOverlay } from "../components/PaymentFeedbackOverlay";
 import { ScreenContainer } from "../components/ScreenContainer";
 import {
   createCheckoutOrder,
+  createOrderIdempotencyKey,
   payCustomerOrderProposal,
 } from "../services/orders.api";
 import { useAuthStore } from "../stores/useAuthStore";
@@ -31,6 +32,7 @@ export function CheckoutPaymentScreen({ navigation, route }) {
   const [completedPayment, setCompletedPayment] = useState(null);
   const [paymentFeedback, setPaymentFeedback] = useState(null);
   const [cpfModalOpen, setCpfModalOpen] = useState(false);
+  const checkoutIdempotencyKeyRef = useRef(null);
   const delivery = route.params?.delivery ?? {};
   const deliveryMode = route.params?.deliveryMode ?? delivery.mode ?? "delivery";
   const items = route.params?.items ?? [];
@@ -46,9 +48,8 @@ export function CheckoutPaymentScreen({ navigation, route }) {
         .reduce((total, wallet) => total + Number(wallet.availableCents ?? 0), 0),
     [wallets],
   );
-  const balanceUsedCents = useBalance
-    ? Math.min(availableBalanceCents, totals.totalCents)
-    : 0;
+  const canPayFullyWithBalance = availableBalanceCents >= totals.totalCents;
+  const balanceUsedCents = useBalance && canPayFullyWithBalance ? totals.totalCents : 0;
   const pixComplementCents = Math.max(totals.totalCents - balanceUsedCents, 0);
 
   async function confirmOrder({ skipCpfGate = false } = {}) {
@@ -91,8 +92,17 @@ export function CheckoutPaymentScreen({ navigation, route }) {
               quantity: item.quantity,
             })),
             payment: paymentData,
-            storeId: store.id,
-          });
+          storeId: store.id,
+          }, checkoutIdempotencyKeyRef.current ??= createOrderIdempotencyKey("checkout"));
+
+      if (response.gatewayPayment) {
+        navigation.replace("GatewayPixPayment", {
+          gatewayPayment: response.gatewayPayment,
+          order: response.order,
+          store,
+        });
+        return;
+      }
 
       setCompletedPayment({
         order: response.order,
@@ -127,7 +137,7 @@ export function CheckoutPaymentScreen({ navigation, route }) {
         <Text style={styles.subtitle}>
           {isProposalPayment
             ? "A proposta foi aceita. Escolha como pagar e volte ao chat para acompanhar."
-            : "Confirme o pedido. Nesta etapa o pagamento interno fica registrado como pago."}
+            : "Pague pelas carteiras ou gere um Pix seguro pelo Asaas."}
         </Text>
       </View>
 
@@ -139,17 +149,25 @@ export function CheckoutPaymentScreen({ navigation, route }) {
 
       <View style={styles.panel}>
         <PaymentOption
-          active={useBalance}
+          active={useBalance && canPayFullyWithBalance}
           icon="wallet-outline"
           label="Usar saldo/carteiras"
-          onPress={() => setUseBalance((current) => !current)}
-          value={`Disponivel: ${formatarDinheiro(availableBalanceCents)}`}
+          onPress={() => {
+            if (canPayFullyWithBalance) {
+              setUseBalance((current) => !current);
+            }
+          }}
+          value={
+            canPayFullyWithBalance
+              ? `Disponivel: ${formatarDinheiro(availableBalanceCents)}`
+              : `Disponivel: ${formatarDinheiro(availableBalanceCents)} - use Pix para este pedido`
+          }
         />
         <PaymentOption
           active={pixComplementCents > 0}
           icon="qr-code-outline"
           label="Complementar no Pix"
-          onPress={() => {}}
+          onPress={() => setUseBalance(false)}
           value={
             pixComplementCents > 0
               ? formatarDinheiro(pixComplementCents)
@@ -169,7 +187,7 @@ export function CheckoutPaymentScreen({ navigation, route }) {
         <View style={styles.pixHint}>
           <Ionicons color={colors.warning} name="alert-circle-outline" size={20} />
           <Text style={styles.pixHintText}>
-            O Pix real/gateway entra depois; agora o pedido fica salvo com pagamento interno.
+            O QR Pix sera criado pelo Asaas. A loja recebe o pedido somente apos a confirmacao.
           </Text>
         </View>
       ) : null}

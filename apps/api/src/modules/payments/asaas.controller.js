@@ -1,0 +1,36 @@
+import { env } from "../../config/env.js";
+import { AppError } from "../../utils/errors.js";
+import {
+  processAsaasWebhook,
+  refreshPendingAsaasOrderPayment,
+} from "./asaas.service.js";
+
+export async function asaasWebhookController(req, res, next) {
+  try {
+    if (!env.asaas.webhookToken) {
+      throw new AppError("Webhook Asaas nao foi configurado", 503);
+    }
+
+    if (req.get("asaas-access-token") !== env.asaas.webhookToken) {
+      throw new AppError("Token do webhook Asaas invalido", 401);
+    }
+
+    const result = await processAsaasWebhook(req.body);
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function refreshAsaasOrderPaymentController(req, res, next) {
+  try {
+    res.json(
+      await refreshPendingAsaasOrderPayment(
+        req.auth.user.id,
+        req.params.orderId,
+      ),
+    );
+  } catch (error) {
+    next(error);
+  }
+}

@@ -1,9 +1,22 @@
 import QRCode from "qrcode";
-import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../utils/errors.js";
+import {
+  createStoreSignupRepository,
+  storeSignupRepository,
+} from "./store-signup.repository.js";
 
 function normalizeBaseUrl(value) {
   return String(value ?? "").trim().replace(/\/$/, "");
+}
+
+const storeRegistrationCodePattern = /^LOJA-(\d+)$/i;
+
+export function createStoreRegistrationCode(storeId) {
+  return `LOJA-${Number(storeId)}`;
+}
+
+export function isStoreRegistrationCode(value) {
+  return storeRegistrationCodePattern.test(String(value ?? "").trim());
 }
 
 function escapeHtml(value) {
@@ -16,31 +29,35 @@ function escapeHtml(value) {
 }
 
 export async function findStoreSignupSource(database, storeSlug) {
-  const client = database ?? prisma;
-  const store = await client.loja.findFirst({
-    select: {
-      id: true,
-      logo_url: true,
-      lojista: {
-        select: {
-          usuario_id: true,
-          usuario: {
-            select: {
-              excluido_em: true,
-              status: true,
-            },
-          },
-        },
-      },
-      nome: true,
-      slug: true,
-    },
-    where: {
-      excluido_em: null,
-      slug: String(storeSlug ?? "").trim().toLowerCase(),
-      status: "ATIVA",
-    },
-  });
+  const repository = database
+    ? createStoreSignupRepository(database)
+    : storeSignupRepository;
+  const store = await repository.findSourceBySlug(
+    String(storeSlug ?? "").trim().toLowerCase(),
+  );
+
+  if (!store) {
+    throw new AppError("Loja de origem nao esta disponivel para cadastro", 404);
+  }
+
+  if (store.lojista.usuario.excluido_em || store.lojista.usuario.status !== "ATIVO") {
+    throw new AppError("O dono desta loja nao esta disponivel para receber cadastros", 409);
+  }
+
+  return store;
+}
+
+export async function findStoreSignupSourceByCode(database, registrationCode) {
+  const match = String(registrationCode ?? "").trim().match(storeRegistrationCodePattern);
+
+  if (!match) {
+    throw new AppError("Codigo de loja invalido", 400);
+  }
+
+  const repository = database
+    ? createStoreSignupRepository(database)
+    : storeSignupRepository;
+  const store = await repository.findSourceById(Number(match[1]));
 
   if (!store) {
     throw new AppError("Loja de origem nao esta disponivel para cadastro", 404);
@@ -70,31 +87,18 @@ export async function createStoreSignupQr(userId, storeId, publicBaseUrl, appDow
     throw new AppError("Loja invalida", 400);
   }
 
-  const store = await prisma.loja.findFirst({
-    select: {
-      id: true,
-      logo_url: true,
-      nome: true,
-      slug: true,
-    },
-    where: {
-      excluido_em: null,
-      id,
-      status: "ATIVA",
-      OR: [
-        { lojista: { usuario_id: userId } },
-        { usuarios: { some: { status: "ATIVO", usuario_id: userId } } },
-      ],
-    },
-  });
+  const store = await storeSignupRepository.findAccessibleStore(userId, id);
 
   if (!store) {
     throw new AppError("Loja nao encontrada para gerar o cadastro", 404);
   }
 
   const registrationUrl = signupUrl(publicBaseUrl, store.slug);
+  const appUrl = `detudoja://cadastro/loja/${encodeURIComponent(store.slug)}`;
+  const registrationCode = createStoreRegistrationCode(store.id);
 
   return {
+    appUrl,
     appDownloadUrl: appDownloadUrl || null,
     qrImageDataUrl: await QRCode.toDataURL(registrationUrl, {
       color: { dark: "#082E22", light: "#FFFFFF" },
@@ -102,7 +106,9 @@ export async function createStoreSignupQr(userId, storeId, publicBaseUrl, appDow
       margin: 1,
       width: 520,
     }),
+    registrationCode,
     registrationUrl,
+    shareMessage: `Cadastre-se no DeTudoJa pela ${store.nome}. Use o codigo ${registrationCode} ou abra ${registrationUrl}`,
     store: {
       id: store.id,
       logoUrl: store.logo_url,
@@ -115,6 +121,8 @@ export async function createStoreSignupQr(userId, storeId, publicBaseUrl, appDow
 export function renderStoreSignupPage({ appDownloadUrl, store }) {
   const storeName = escapeHtml(store.nome);
   const storeSlug = escapeHtml(store.slug);
+  const appUrl = `detudoja://cadastro/loja/${encodeURIComponent(store.slug)}`;
+  const registrationCode = createStoreRegistrationCode(store.id);
   const downloadAction = appDownloadUrl
     ? `<a class="secondary" href="${escapeHtml(appDownloadUrl)}">Baixar o app DeTudoJa</a>`
     : "";
@@ -138,6 +146,10 @@ export function renderStoreSignupPage({ appDownloadUrl, store }) {
     input { border: 1px solid #d4ddd7; border-radius: 8px; font: inherit; min-height: 48px; padding: 0 12px; width: 100%; }
     button, .secondary { align-items: center; background: #16a34a; border: 1px solid #16a34a; border-radius: 8px; color: #fff; cursor: pointer; display: flex; font-size: 15px; font-weight: 700; justify-content: center; min-height: 50px; padding: 0 16px; text-decoration: none; width: 100%; }
     .secondary { background: #ecfdf5; border-color: #bdeed0; color: #07805c; margin-top: 12px; }
+    .code { align-items: center; background: #f4faf6; border: 1px solid #dce9e0; border-radius: 8px; display: flex; justify-content: space-between; margin: 16px 0; padding: 12px 14px; }
+    .code span { color: #6b7b71; font-size: 12px; }
+    .code strong { color: #07805c; font-size: 16px; }
+    .app { margin-bottom: 12px; }
     #status { color: #5e6d64; font-size: 14px; line-height: 1.4; margin-top: 14px; min-height: 20px; }
     #status.error { color: #dc2626; }
     #status.success { color: #07805c; font-weight: 700; }
@@ -149,6 +161,8 @@ export function renderStoreSignupPage({ appDownloadUrl, store }) {
     <div class="brand">DeTudoJa</div>
     <h1>Cadastre-se pela ${storeName}</h1>
     <p>Crie sua conta para comprar, pagar e receber cashback. Depois, entre no app com estes mesmos dados.</p>
+    <a class="secondary app" href="${escapeHtml(appUrl)}">Abrir no app DeTudoJa</a>
+    <div class="code"><span>Codigo da loja</span><strong>${registrationCode}</strong></div>
     <form id="register-form">
       <label>Nome completo<input name="name" autocomplete="name" minlength="3" required></label>
       <label>Telefone<input name="phone" autocomplete="tel" inputmode="tel" required></label>

@@ -89,7 +89,7 @@ export async function apiRequest(
   options = {},
   canRetryAfterRefresh = true,
 ) {
-  const { body, method = "GET", token } = options;
+  const { body, headers: customHeaders, method = "GET", token } = options;
   const headers = {};
   const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
   let requestToken = token;
@@ -110,6 +110,8 @@ export async function apiRequest(
   if (requestToken) {
     headers.Authorization = `Bearer ${requestToken}`;
   }
+
+  Object.assign(headers, customHeaders ?? {});
 
   let response;
 

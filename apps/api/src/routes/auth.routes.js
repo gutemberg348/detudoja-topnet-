@@ -4,6 +4,7 @@ import {
   createLoginController,
   createRegisterController,
   createRefreshController,
+  createSocialLoginController,
   logoutController,
   meController,
 } from "../modules/auth/auth.controller.js";
@@ -12,6 +13,7 @@ import {
   loginSchema,
   refreshTokenSchema,
   registrationSchema,
+  socialLoginSchema,
 } from "../modules/auth/auth.validator.js";
 import { authAudiences } from "../modules/auth/auth.service.js";
 import { authMiddleware } from "../middlewares/auth.middleware.js";
@@ -28,6 +30,12 @@ authRoutes.post(
   loginRateLimit,
   validate(loginSchema),
   createLoginController(authAudiences.app),
+);
+authRoutes.post(
+  "/social",
+  loginRateLimit,
+  validate(socialLoginSchema),
+  createSocialLoginController(authAudiences.app),
 );
 authRoutes.post(
   "/register",
@@ -47,4 +55,9 @@ authRoutes.post(
   completeCpfController,
 );
 authRoutes.get("/me", authMiddleware, meController);
-authRoutes.post("/logout", authMiddleware, logoutController);
+authRoutes.post(
+  "/logout",
+  authMiddleware,
+  validate(refreshTokenSchema),
+  logoutController,
+);

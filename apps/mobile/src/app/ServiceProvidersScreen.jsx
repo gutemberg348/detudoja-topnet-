@@ -5,7 +5,17 @@ import { PageHeader } from "../components/PageHeader";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { StatePanel } from "../components/StatePanel";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
-import { createServiceConversation, getOnlineServiceProviders } from "../services/service-chats.api";
+import {
+  cancelCourierRequest,
+  createCustomerCourierRequest,
+  getCustomerCourierRequests,
+} from "../services/courier.api";
+import {
+  createServiceConversation,
+  getOnlineServiceProviders,
+  getServiceConversation,
+  getServiceConversations,
+} from "../services/service-chats.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { resolveMediaUrl } from "../utils/media";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
@@ -16,6 +26,9 @@ export function ServiceProvidersScreen({ navigation, route }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [openingId, setOpeningId] = useState(null);
+  const [activeCourierConversation, setActiveCourierConversation] = useState(null);
+  const [courierAvailable, setCourierAvailable] = useState(false);
+  const [courierRequest, setCourierRequest] = useState(null);
   const [sellers, setSellers] = useState([]);
   const isCourier = segment?.operationalType === "ENTREGA_LOCAL";
 
@@ -25,10 +38,25 @@ export function ServiceProvidersScreen({ navigation, route }) {
       setLoading(true);
       setError("");
     }
-    try { const response = await getOnlineServiceProviders(session.accessToken, segment.id); setSellers(response.sellers ?? []); }
+    try {
+      const [providersResponse, requestsResponse, conversationsResponse] = await Promise.all([
+        getOnlineServiceProviders(session.accessToken, segment.id),
+        isCourier ? getCustomerCourierRequests(session.accessToken, segment.id) : Promise.resolve({ requests: [] }),
+        isCourier ? getServiceConversations(session.accessToken) : Promise.resolve({ conversations: [] }),
+      ]);
+      const activeConversation = (conversationsResponse.conversations ?? []).find((conversation) => (
+        !conversation.isSeller
+        && Number(conversation.serviceType?.id) === Number(segment.id)
+        && ["ABERTA", "ACORDADA", "AGUARDANDO_CONFIRMACAO"].includes(conversation.status)
+      ));
+      setActiveCourierConversation(activeConversation ?? null);
+      setCourierAvailable(Boolean(providersResponse.serviceType?.availableNow));
+      setCourierRequest(requestsResponse.requests?.[0] ?? null);
+      setSellers(isCourier ? [] : providersResponse.sellers ?? []);
+    }
     catch (requestError) { if (!silent) setError(requestError.message ?? "Nao foi possivel buscar prestadores."); }
     finally { if (!silent) setLoading(false); }
-  }, [segment?.id, session?.accessToken]);
+  }, [isCourier, segment?.id, session?.accessToken]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -40,9 +68,44 @@ export function ServiceProvidersScreen({ navigation, route }) {
         load({ silent: true });
       }
     };
+    const refreshConversation = () => load({ silent: true });
+    const handleCourierUpdate = async ({ request } = {}) => {
+      if (!isCourier || Number(request?.serviceType?.id) !== Number(segment?.id)) return;
+      if (Number(request.requesterUserId) !== Number(session.user?.id)) return;
+      setCourierRequest(request.status === "PENDENTE" || request.status === "ACEITA" ? request : null);
+      if (request.status === "ACEITA" && request.conversationId) {
+        try {
+          const response = await getServiceConversation(session.accessToken, request.conversationId);
+          navigation.replace("ServiceConversation", { conversation: response.conversation });
+        } catch {
+          load({ silent: true });
+        }
+      }
+    };
     socket?.on(realtimeEvents.serviceAvailabilityUpdated, refreshProviders);
-    return () => socket?.off(realtimeEvents.serviceAvailabilityUpdated, refreshProviders);
-  }, [load, segment?.id, session?.accessToken]);
+    socket?.on(realtimeEvents.courierRequestUpdated, handleCourierUpdate);
+    socket?.on(realtimeEvents.serviceChatCreated, refreshConversation);
+    socket?.on(realtimeEvents.serviceChatMessageCreated, refreshConversation);
+    socket?.on(realtimeEvents.serviceChatUpdated, refreshConversation);
+    return () => {
+      socket?.off(realtimeEvents.serviceAvailabilityUpdated, refreshProviders);
+      socket?.off(realtimeEvents.courierRequestUpdated, handleCourierUpdate);
+      socket?.off(realtimeEvents.serviceChatCreated, refreshConversation);
+      socket?.off(realtimeEvents.serviceChatMessageCreated, refreshConversation);
+      socket?.off(realtimeEvents.serviceChatUpdated, refreshConversation);
+    };
+  }, [isCourier, load, navigation, segment?.id, session?.accessToken, session?.user?.id]);
+
+  useEffect(() => {
+    if (!isCourier || courierRequest?.status !== "ACEITA" || !courierRequest.conversationId || !session?.accessToken) return;
+    let active = true;
+    getServiceConversation(session.accessToken, courierRequest.conversationId)
+      .then((response) => {
+        if (active) navigation.replace("ServiceConversation", { conversation: response.conversation });
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [courierRequest?.conversationId, courierRequest?.status, isCourier, navigation, session?.accessToken]);
 
   async function openConversation(seller) {
     if (openingId || !session?.accessToken) return;
@@ -57,29 +120,100 @@ export function ServiceProvidersScreen({ navigation, route }) {
     finally { setOpeningId(null); }
   }
 
+  async function callCourier() {
+    if (!session?.accessToken || openingId || courierRequest) return;
+    setOpeningId("courier");
+    setError("");
+    try {
+      const response = await createCustomerCourierRequest(session.accessToken, {
+        description: "Quero combinar uma entrega.",
+        serviceTypeId: segment.id,
+      });
+      setCourierRequest(response.request);
+    } catch (requestError) {
+      setError(requestError.message ?? "Nao foi possivel chamar um motoboy.");
+    } finally {
+      setOpeningId(null);
+    }
+  }
+
+  async function cancelCourierCall() {
+    if (!session?.accessToken || !courierRequest || openingId) return;
+    setOpeningId("cancel");
+    setError("");
+    try {
+      await cancelCourierRequest(session.accessToken, courierRequest.id);
+      setCourierRequest(null);
+      load({ silent: true });
+    } catch (requestError) {
+      setError(requestError.message ?? "Nao foi possivel cancelar a chamada.");
+    } finally {
+      setOpeningId(null);
+    }
+  }
+
   return (
     <ScreenContainer contentContainerStyle={styles.content}>
       <PageHeader
         eyebrow={isCourier ? "Entrega em tempo real" : "Negociacao por chat"}
         subtitle={isCourier
-          ? "Escolha um motoboy disponivel e combine retirada, destino e valor pelo chat."
+          ? "Solicite uma entrega. Um motoboy livre aceita e entra no chat com voce."
           : "Escolha quem esta atendendo agora. Combine detalhes, fotos e valor na conversa."}
-        title={`${segment?.name ?? "Servico"} online`}
+        title={isCourier ? "Chamar motoboy" : `${segment?.name ?? "Servico"} online`}
       />
 
       {isCourier ? (
         <View style={styles.courierNotice}>
           <View style={styles.noticeIcon}><Ionicons color={colors.card} name="shield-checkmark-outline" size={19} /></View>
           <View style={styles.copy}>
-            <Text style={styles.noticeTitle}>Perfis de entrega identificados</Text>
-            <Text style={styles.noticeText}>Veiculo e raio de atendimento ficam visiveis antes de voce chamar.</Text>
+            <Text style={styles.noticeTitle}>Chamada protegida</Text>
+            <Text style={styles.noticeText}>A identidade do motoboy aparece somente depois que ele aceitar sua corrida.</Text>
           </View>
         </View>
       ) : null}
 
       {loading ? <StatePanel icon="chatbubbles-outline" loading text="Buscando quem esta online..." /> : null}
       {!loading && error ? <StatePanel actionLabel="Tentar de novo" danger icon="alert-circle-outline" onAction={load} text={error} /> : null}
-      {!loading && !error && sellers.length ? (
+      {!loading && !error && isCourier && activeCourierConversation ? (
+        <Pressable
+          onPress={() => navigation.navigate("ServiceConversation", { conversation: activeCourierConversation })}
+          style={({ pressed }) => [styles.activeChatCard, pressed && styles.pressed]}
+        >
+          <View style={styles.activeChatIcon}><Ionicons color={colors.card} name="chatbubbles-outline" size={22} /></View>
+          <View style={styles.copy}>
+            <Text style={styles.availabilityLabel}>ATENDIMENTO EM ANDAMENTO</Text>
+            <Text style={styles.availabilityTitle}>Voltar para o chat</Text>
+            <Text numberOfLines={1} style={styles.availabilityText}>Continue combinando retirada, destino e pagamento.</Text>
+          </View>
+          {activeCourierConversation.unreadCount ? <View style={styles.unreadBadge}><Text style={styles.unreadBadgeText}>{activeCourierConversation.unreadCount}</Text></View> : null}
+          <Ionicons color={colors.primaryDark} name="arrow-forward" size={19} />
+        </Pressable>
+      ) : null}
+      {!loading && !error && isCourier && !activeCourierConversation && courierRequest?.status === "PENDENTE" ? (
+        <View style={styles.waitingCard}>
+          <View style={styles.waitingRadar}><ActivityIndicator color={colors.card} /></View>
+          <Text style={styles.waitingEyebrow}>CHAMADA ENVIADA</Text>
+          <Text style={styles.waitingTitle}>Procurando motoboy</Text>
+          <Text style={styles.waitingText}>A chamada continua ativa ate um profissional livre aceitar ou voce cancelar.</Text>
+          <Pressable disabled={openingId === "cancel"} onPress={cancelCourierCall} style={styles.cancelButton}>
+            {openingId === "cancel" ? <ActivityIndicator color={colors.danger} /> : <Text style={styles.cancelButtonText}>Cancelar chamada</Text>}
+          </Pressable>
+        </View>
+      ) : null}
+      {!loading && !error && isCourier && !activeCourierConversation && !courierRequest ? (
+        <View style={[styles.availabilityCard, !courierAvailable && styles.availabilityCardOff]}>
+          <View style={styles.availabilityIcon}><Ionicons color={courierAvailable ? colors.card : colors.textMuted} name="bicycle-outline" size={25} /></View>
+          <View style={styles.copy}>
+            <Text style={styles.availabilityLabel}>{courierAvailable ? "SERVICO DISPONIVEL" : "SERVICO INDISPONIVEL"}</Text>
+            <Text style={styles.availabilityTitle}>{courierAvailable ? "Chamar motoboy" : "Nenhum motoboy livre agora"}</Text>
+            <Text style={styles.availabilityText}>{courierAvailable ? "Envie a chamada sem escolher ou expor profissionais." : "Quando alguem ficar livre, esta pagina atualiza em tempo real."}</Text>
+          </View>
+          <Pressable disabled={!courierAvailable || openingId === "courier"} onPress={callCourier} style={[styles.callCourierButton, !courierAvailable && styles.callCourierButtonOff]}>
+            {openingId === "courier" ? <ActivityIndicator color={colors.card} /> : <Ionicons color={courierAvailable ? colors.card : colors.textMuted} name="arrow-forward" size={19} />}
+          </Pressable>
+        </View>
+      ) : null}
+      {!loading && !isCourier && !error && sellers.length ? (
         <View style={styles.list}>
           {sellers.map((seller) => (
             <ProviderCard
@@ -92,7 +226,7 @@ export function ServiceProvidersScreen({ navigation, route }) {
           ))}
         </View>
       ) : null}
-      {!loading && !error && !sellers.length ? (
+      {!loading && !isCourier && !error && !sellers.length ? (
         <StatePanel icon="time-outline" text={`Quando um prestador de ${segment?.name ?? "servicos"} ativar o atendimento, ele aparece aqui.`} title="Ninguem online agora" />
       ) : null}
     </ScreenContainer>
@@ -149,6 +283,14 @@ function ProviderFact({ icon, text }) {
 }
 
 const styles = StyleSheet.create({
+  activeChatCard: { alignItems: "center", backgroundColor: colors.primarySoft, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.md, padding: spacing.lg, ...shadowSoft },
+  activeChatIcon: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.round, height: 48, justifyContent: "center", width: 48 },
+  availabilityCard: { alignItems: "center", backgroundColor: colors.primarySoft, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.md, padding: spacing.lg, ...shadowSoft },
+  availabilityCardOff: { backgroundColor: colors.card, borderColor: colors.border },
+  availabilityIcon: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.round, height: 48, justifyContent: "center", width: 48 },
+  availabilityLabel: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: 9 },
+  availabilityText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
+  availabilityTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.label },
   avatar: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 52, justifyContent: "center", overflow: "hidden", width: 52 },
   avatarImage: { height: "100%", width: "100%" },
   avatarText: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: typography.h3 },
@@ -156,6 +298,10 @@ const styles = StyleSheet.create({
   cardAction: { alignItems: "center", borderTopColor: colors.border, borderTopWidth: 1, flexDirection: "row", justifyContent: "space-between", minHeight: 34, paddingTop: spacing.sm },
   cardActionText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: typography.caption },
   cardTopline: { alignItems: "center", flexDirection: "row", gap: spacing.md },
+  callCourierButton: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.round, height: 42, justifyContent: "center", width: 42 },
+  callCourierButtonOff: { backgroundColor: colors.cardMuted },
+  cancelButton: { alignItems: "center", backgroundColor: colors.card, borderRadius: radius.md, justifyContent: "center", minHeight: 42, paddingHorizontal: spacing.md },
+  cancelButtonText: { color: colors.danger, fontFamily: fonts.bold, fontSize: typography.caption },
   content: { gap: spacing.xl, paddingBottom: spacing.xxxl },
   copy: { flex: 1, gap: 5, minWidth: 0 },
   courierCard: { borderColor: colors.primaryLight, ...shadowSoft },
@@ -175,4 +321,11 @@ const styles = StyleSheet.create({
   onlineText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 10 },
   pressed: { opacity: 0.8 },
   rating: { alignItems: "center", color: colors.textMuted, flexDirection: "row", fontFamily: fonts.medium, fontSize: 11, gap: 3 },
+  waitingCard: { alignItems: "center", backgroundColor: "#083F32", borderRadius: radius.lg, gap: spacing.sm, padding: spacing.xl, ...shadowSoft },
+  waitingEyebrow: { color: "#A7F3D0", fontFamily: fonts.extraBold, fontSize: 9 },
+  waitingRadar: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.14)", borderRadius: radius.round, height: 52, justifyContent: "center", width: 52 },
+  waitingText: { color: "#CDEFE2", fontFamily: fonts.regular, fontSize: typography.caption, lineHeight: 18, textAlign: "center" },
+  waitingTitle: { color: colors.card, fontFamily: fonts.extraBold, fontSize: typography.h3 },
+  unreadBadge: { alignItems: "center", backgroundColor: colors.warning, borderRadius: radius.round, height: 24, justifyContent: "center", minWidth: 24, paddingHorizontal: 6 },
+  unreadBadgeText: { color: "#4A2B00", fontFamily: fonts.extraBold, fontSize: 10 },
 });

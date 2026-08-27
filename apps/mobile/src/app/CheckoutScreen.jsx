@@ -1,5 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -13,7 +13,10 @@ import { CpfRequirementModal } from "../components/CpfRequirementModal";
 import { PageHeader } from "../components/PageHeader";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { fetchCepAddress } from "../services/cep.api";
-import { createOnlineOrderRequest } from "../services/orders.api";
+import {
+  createOnlineOrderRequest,
+  createOrderIdempotencyKey,
+} from "../services/orders.api";
 import { getCurrentUserAddresses } from "../services/users.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import {
@@ -77,6 +80,7 @@ export function CheckoutScreen({ navigation, route }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [cepError, setCepError] = useState("");
   const [submitError, setSubmitError] = useState("");
+  const requestIdempotencyKeyRef = useRef(null);
   const totals = useMemo(
     () => checkoutTotals(cart.items, { deliveryMode }),
     [cart.items, deliveryMode],
@@ -254,7 +258,7 @@ export function CheckoutScreen({ navigation, route }) {
           quantity: item.quantity,
         })),
         storeId: cart.store.id,
-      });
+      }, requestIdempotencyKeyRef.current ??= createOrderIdempotencyKey("request"));
 
       navigation.replace("CustomerOrderDetails", { order: response.order });
     } catch (requestError) {

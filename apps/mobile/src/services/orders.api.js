@@ -1,16 +1,22 @@
 import { apiRequest } from "./api";
 
-export function createCheckoutOrder(accessToken, data) {
+export function createOrderIdempotencyKey(prefix = "order") {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+export function createCheckoutOrder(accessToken, data, idempotencyKey = createOrderIdempotencyKey("checkout")) {
   return apiRequest("/api/app/orders/checkout", {
     body: data,
+    headers: { "Idempotency-Key": idempotencyKey },
     method: "POST",
     token: accessToken,
   });
 }
 
-export function createOnlineOrderRequest(accessToken, data) {
+export function createOnlineOrderRequest(accessToken, data, idempotencyKey = createOrderIdempotencyKey("request")) {
   return apiRequest("/api/app/orders/requests", {
     body: data,
+    headers: { "Idempotency-Key": idempotencyKey },
     method: "POST",
     token: accessToken,
   });
@@ -26,8 +32,22 @@ export function getCustomerOrderMessages(accessToken, orderId) {
   return apiRequest(`/api/app/orders/${orderId}/messages`, { token: accessToken });
 }
 
+export function refreshCustomerOrderPayment(accessToken, orderId) {
+  return apiRequest(`/api/app/orders/${orderId}/payment/refresh`, {
+    method: "POST",
+    token: accessToken,
+  });
+}
+
 export function completeCustomerOrder(accessToken, orderId) {
   return apiRequest(`/api/app/orders/${orderId}/complete`, {
+    method: "PATCH",
+    token: accessToken,
+  });
+}
+
+export function cancelCustomerOrder(accessToken, orderId) {
+  return apiRequest(`/api/app/orders/${orderId}/cancel`, {
     method: "PATCH",
     token: accessToken,
   });

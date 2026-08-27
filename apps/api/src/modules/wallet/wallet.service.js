@@ -1,5 +1,5 @@
-import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../utils/errors.js";
+import { createWalletRepository, walletRepository } from "./wallet.repository.js";
 
 export const walletTypeDefinitions = [
   {
@@ -111,44 +111,20 @@ function serializeWallet(wallet) {
   };
 }
 
-export async function ensureUserWallets(userId, database = prisma) {
+export async function ensureUserWallets(userId, database) {
+  const repository = database ? createWalletRepository(database) : walletRepository;
   const walletTypes = [];
 
   for (const definition of walletTypeDefinitions) {
-    const walletType = await database.tipoCarteira.upsert({
-      create: {
-        codigo: definition.code,
-        descricao: definition.description,
-        nome: definition.name,
-        permite_saque: definition.permiteSaque,
-        permite_uso_em_compra: definition.permiteUsoEmCompra,
-      },
-      update: {
-        descricao: definition.description,
-        nome: definition.name,
-        permite_saque: definition.permiteSaque,
-        permite_uso_em_compra: definition.permiteUsoEmCompra,
-        status: "ATIVO",
-      },
-      where: { codigo: definition.code },
-    });
+    const walletType = await repository.upsertWalletType(definition);
     walletTypes.push(walletType);
   }
 
-  await database.carteira.createMany({
-    data: walletTypes.map((walletType) => ({
-      saldo_bloqueado_centavos: 0,
-      saldo_disponivel_centavos: 0,
-      saldo_pendente_centavos: 0,
-      tipo_carteira_id: walletType.id,
-      usuario_id: userId,
-    })),
-    skipDuplicates: true,
-  });
+  await repository.createMissingWallets(userId, walletTypes);
 }
 
 export async function creditUserWallet({
-  database = prisma,
+  database,
   description,
   origin,
   originId,
@@ -156,6 +132,7 @@ export async function creditUserWallet({
   valueCents,
   walletCode,
 }) {
+  const repository = database ? createWalletRepository(database) : walletRepository;
   const amount = Number(valueCents ?? 0);
 
   if (!Number.isSafeInteger(amount) || amount < 0) {
@@ -168,44 +145,31 @@ export async function creditUserWallet({
 
   await ensureUserWallets(userId, database);
 
-  const wallet = await database.carteira.findFirst({
-    select: { id: true },
-    where: {
-      status: "ATIVA",
-      tipo_carteira: { codigo: walletCode },
-      usuario_id: userId,
-    },
-  });
+  const wallet = await repository.findActiveWalletByCode(userId, walletCode);
 
   if (!wallet) {
     throw new AppError("Carteira ativa nao encontrada para o credito", 409);
   }
 
-  const updatedWallet = await database.carteira.update({
-    data: { saldo_disponivel_centavos: { increment: BigInt(amount) } },
-    select: { saldo_disponivel_centavos: true },
-    where: { id: wallet.id },
-  });
+  const updatedWallet = await repository.incrementAvailableBalance(wallet.id, amount);
   const balanceAfterCents = Number(updatedWallet.saldo_disponivel_centavos);
 
-  return database.lancamentoCarteira.create({
-    data: {
-      carteira_id: wallet.id,
-      descricao: description,
-      origem: origin,
-      origem_id: originId,
-      saldo_anterior_centavos: BigInt(balanceAfterCents - amount),
-      saldo_posterior_centavos: BigInt(balanceAfterCents),
-      status: "PROCESSADO",
-      tipo_lancamento: "CREDITO",
-      usuario_id: userId,
-      valor_centavos: BigInt(amount),
-    },
+  return repository.createMovement({
+    carteira_id: wallet.id,
+    descricao: description,
+    origem: origin,
+    origem_id: originId,
+    saldo_anterior_centavos: BigInt(balanceAfterCents - amount),
+    saldo_posterior_centavos: BigInt(balanceAfterCents),
+    status: "PROCESSADO",
+    tipo_lancamento: "CREDITO",
+    usuario_id: userId,
+    valor_centavos: BigInt(amount),
   });
 }
 
 export async function debitUserWallet({
-  database = prisma,
+  database,
   description,
   origin = "PAGAMENTO",
   originId,
@@ -213,34 +177,20 @@ export async function debitUserWallet({
   valueCents,
   walletId,
 }) {
+  const repository = database ? createWalletRepository(database) : walletRepository;
   const amount = Number(valueCents ?? 0);
 
   if (!Number.isSafeInteger(amount) || amount <= 0) {
     throw new AppError("Valor de debito da carteira invalido", 400);
   }
 
-  const wallet = await database.carteira.findFirst({
-    include: { tipo_carteira: true },
-    where: {
-      id: Number(walletId),
-      status: "ATIVA",
-      tipo_carteira: { permite_uso_em_compra: true },
-      usuario_id: userId,
-    },
-  });
+  const wallet = await repository.findActivePurchaseWallet(userId, walletId);
 
   if (!wallet) {
     throw new AppError("Carteira nao encontrada para o pagamento", 404);
   }
 
-  const updated = await database.carteira.updateMany({
-    data: { saldo_disponivel_centavos: { decrement: BigInt(amount) } },
-    where: {
-      id: wallet.id,
-      saldo_disponivel_centavos: { gte: BigInt(amount) },
-      status: "ATIVA",
-    },
-  });
+  const updated = await repository.decrementAvailableBalance(wallet.id, amount);
 
   if (updated.count !== 1) {
     throw new AppError(`Saldo insuficiente na carteira ${wallet.tipo_carteira.nome}`, 409);
@@ -248,19 +198,17 @@ export async function debitUserWallet({
 
   const balanceAfterCents = Number(wallet.saldo_disponivel_centavos) - amount;
 
-  await database.lancamentoCarteira.create({
-    data: {
-      carteira_id: wallet.id,
-      descricao: description,
-      origem: origin,
-      origem_id: originId,
-      saldo_anterior_centavos: wallet.saldo_disponivel_centavos,
-      saldo_posterior_centavos: BigInt(balanceAfterCents),
-      status: "PROCESSADO",
-      tipo_lancamento: "DEBITO",
-      usuario_id: userId,
-      valor_centavos: BigInt(amount),
-    },
+  await repository.createMovement({
+    carteira_id: wallet.id,
+    descricao: description,
+    origem: origin,
+    origem_id: originId,
+    saldo_anterior_centavos: wallet.saldo_disponivel_centavos,
+    saldo_posterior_centavos: BigInt(balanceAfterCents),
+    status: "PROCESSADO",
+    tipo_lancamento: "DEBITO",
+    usuario_id: userId,
+    valor_centavos: BigInt(amount),
   });
 
   return {
@@ -270,21 +218,64 @@ export async function debitUserWallet({
   };
 }
 
+const purchaseWalletPriority = ["cashback", "saldo_pix", "rede", "vendas"];
+
+export async function allocateUserWalletsForPayment({
+  database,
+  userId,
+  valueCents,
+}) {
+  const repository = database ? createWalletRepository(database) : walletRepository;
+  const requested = Number(valueCents ?? 0);
+
+  if (!Number.isSafeInteger(requested) || requested < 0) {
+    throw new AppError("Valor de uso das carteiras invalido", 400);
+  }
+
+  if (requested === 0) {
+    return [];
+  }
+
+  await ensureUserWallets(userId, database);
+  const wallets = await repository.findPurchaseWallets(userId);
+  const sorted = [...wallets].sort((left, right) =>
+    purchaseWalletPriority.indexOf(left.tipo_carteira.codigo)
+    - purchaseWalletPriority.indexOf(right.tipo_carteira.codigo),
+  );
+  const allocations = [];
+  let remaining = requested;
+
+  for (const wallet of sorted) {
+    const available = cents(wallet.saldo_disponivel_centavos);
+    const amountCents = Math.min(available, remaining);
+
+    if (amountCents > 0) {
+      allocations.push({
+        amountCents,
+        code: wallet.tipo_carteira.codigo,
+        id: wallet.id,
+      });
+      remaining -= amountCents;
+    }
+
+    if (remaining === 0) {
+      break;
+    }
+  }
+
+  if (remaining > 0) {
+    throw new AppError("Saldo insuficiente nas carteiras selecionadas", 409);
+  }
+
+  return allocations;
+}
+
 export async function getWalletOverview(userId) {
   await ensureUserWallets(userId);
 
   const [wallets, movements] = await Promise.all([
-    prisma.carteira.findMany({
-      include: { tipo_carteira: true },
-      orderBy: { tipo_carteira: { nome: "asc" } },
-      where: { usuario_id: userId },
-    }),
-    prisma.lancamentoCarteira.findMany({
-      include: { carteira: { include: { tipo_carteira: true } } },
-      orderBy: { criado_em: "desc" },
-      take: 30,
-      where: { usuario_id: userId },
-    }),
+    walletRepository.findWallets(userId),
+    walletRepository.findMovements(userId),
   ]);
   const paymentIds = [
     ...new Set(
@@ -294,24 +285,7 @@ export async function getWalletOverview(userId) {
     ),
   ];
   const payments = paymentIds.length > 0
-    ? await prisma.pagamento.findMany({
-        include: {
-          cobranca: {
-            select: {
-              codigo_publico: true,
-              origem: true,
-              titulo: true,
-            },
-          },
-          loja: { select: { id: true, nome: true } },
-          pedido_loja: { select: { codigo: true } },
-          vendedor: { select: { id: true, nome_publico: true } },
-        },
-        where: {
-          id: { in: paymentIds },
-          usuario_pagador_id: userId,
-        },
-      })
+    ? await walletRepository.findPayments(userId, paymentIds)
     : [];
   const paymentsById = new Map(payments.map((payment) => [payment.id, payment]));
   const serializedWallets = wallets.map(serializeWallet);
@@ -336,13 +310,7 @@ export async function getWalletOverview(userId) {
 export async function getWalletByCode(userId, code) {
   await ensureUserWallets(userId);
 
-  const wallet = await prisma.carteira.findFirst({
-    include: {
-      lancamentos: { orderBy: { criado_em: "desc" }, take: 50 },
-      tipo_carteira: true,
-    },
-    where: { tipo_carteira: { codigo: code }, usuario_id: userId },
-  });
+  const wallet = await walletRepository.findWalletByCode(userId, code);
 
   if (!wallet) {
     throw new AppError("Carteira nao encontrada", 404);

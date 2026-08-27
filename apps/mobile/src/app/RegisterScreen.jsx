@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { AppButton } from "../components/AppButton";
 import { AuthCredentialsForm } from "../components/AuthCredentialsForm";
@@ -7,8 +7,16 @@ import { ScreenContainer } from "../components/ScreenContainer";
 import { SocialAuthButtons } from "../components/SocialAuthButtons";
 import { colors, fonts, spacing, typography } from "../utils/theme";
 
-export function RegisterScreen({ navigation }) {
-  const [emailFormVisible, setEmailFormVisible] = useState(false);
+export function RegisterScreen({ navigation, route }) {
+  const storeSlug = route.params?.storeSlug ?? "";
+  const registrationCode = route.params?.registrationCode ?? "";
+  const [emailFormVisible, setEmailFormVisible] = useState(Boolean(storeSlug || registrationCode));
+
+  useEffect(() => {
+    if (storeSlug || registrationCode) {
+      setEmailFormVisible(true);
+    }
+  }, [registrationCode, storeSlug]);
 
   return (
     <ScreenContainer contentContainerStyle={styles.content}>
@@ -36,7 +44,11 @@ export function RegisterScreen({ navigation }) {
 
       {emailFormVisible ? (
         <View style={styles.credentials}>
-          <AuthCredentialsForm mode="register" />
+          <AuthCredentialsForm
+            mode="register"
+            registrationCode={registrationCode}
+            storeSlug={storeSlug}
+          />
         </View>
       ) : null}
 

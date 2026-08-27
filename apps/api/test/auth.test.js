@@ -506,6 +506,30 @@ test("refresh tokens rotate a session within the same audience", async () => {
   assert.equal(meResponse.data.user.role, "super_admin");
 });
 
+test("refresh token cannot be reused after rotation or logout", async () => {
+  const loginResponse = await request("/api/app/auth/login", {
+    body: { login: testAccount.email, password: testAccount.password },
+  });
+  const firstRefresh = await request("/api/app/auth/refresh", {
+    body: { refreshToken: loginResponse.data.refreshToken },
+  });
+  const reusedRefresh = await request("/api/app/auth/refresh", {
+    body: { refreshToken: loginResponse.data.refreshToken },
+  });
+  const logoutResponse = await request("/api/app/auth/logout", {
+    body: { refreshToken: firstRefresh.data.refreshToken },
+    token: firstRefresh.data.accessToken,
+  });
+  const loggedOutRefresh = await request("/api/app/auth/refresh", {
+    body: { refreshToken: firstRefresh.data.refreshToken },
+  });
+
+  assert.equal(firstRefresh.status, 200);
+  assert.equal(reusedRefresh.status, 401);
+  assert.equal(logoutResponse.status, 204);
+  assert.equal(loggedOutRefresh.status, 401);
+});
+
 test("app refresh keeps the database user session", async () => {
   const loginResponse = await request("/api/app/auth/login", {
     body: { login: testAccount.email, password: testAccount.password },

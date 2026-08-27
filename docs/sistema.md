@@ -554,6 +554,19 @@ etapa começar.
 
 ## 4. Arquitetura
 
+### Camada de persistencia da API
+
+Os modulos backend seguem `route/controller -> service -> repository ->
+Prisma/PostgreSQL`. Controllers cuidam do protocolo HTTP; services concentram
+regras de negocio, calculos, integracoes e eventos; repositories isolam toda
+leitura e escrita no banco.
+
+Repositories transacionais possuem factory que recebe o cliente Prisma da
+transacao. Isso permite que pagamento, estoque, liquidacao de ganhos, estorno,
+aceite de motoboy e criacao de chat continuem atomicos sem expor models Prisma
+ao service. Em 2026-08-27 todos os modulos ativos foram ajustados para essa
+regra. A mudanca foi apenas estrutural, sem migration ou alteracao de contrato.
+
 Estrutura principal:
 
 ```text

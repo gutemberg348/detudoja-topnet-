@@ -13,7 +13,12 @@ import { StatusBadge } from "../components/StatusBadge";
 const moneyFormatter = new Intl.NumberFormat("pt-BR", { currency: "BRL", style: "currency" });
 const dateFormatter = new Intl.DateTimeFormat("pt-BR", { dateStyle: "medium", timeStyle: "short" });
 
-export function ParticipantsPage({ accessToken }) {
+export function ParticipantsPage({
+  accessToken,
+  canManageParticipantData = false,
+  canManageParticipantStatus = false,
+  canManageWallet = false,
+}) {
   const [filters, setFilters] = useState({ kycStatus: "", page: 1, search: "", status: "" });
   const [draftSearch, setDraftSearch] = useState("");
   const [data, setData] = useState(null);
@@ -177,7 +182,7 @@ export function ParticipantsPage({ accessToken }) {
               <div><dt>Nível KYC</dt><dd>{selectedUser.kycLevel}</dd></div><div><dt>Saldo total</dt><dd>{moneyFormatter.format(selectedUser.balanceCents / 100)}</dd></div>
               <div><dt>Cadastrado em</dt><dd>{dateFormatter.format(new Date(selectedUser.createdAt))}</dd></div><div><dt>Último acesso</dt><dd>{selectedUser.lastLoginAt ? dateFormatter.format(new Date(selectedUser.lastLoginAt)) : "Nunca acessou"}</dd></div>
             </dl>
-            <section className="admin-edit-panel">
+            {canManageParticipantData ? <section className="admin-edit-panel">
               <div className="admin-panel-heading"><div><p className="eyebrow">Cadastro</p><h3>Editar participante</h3></div><Pencil size={17} /></div>
               <div className="admin-edit-grid">
                 <label>Nome<input onChange={(event) => setEditForm((current) => ({ ...current, name: event.target.value }))} value={editForm.name} /></label>
@@ -186,8 +191,8 @@ export function ParticipantsPage({ accessToken }) {
                 <label>CPF<input onChange={(event) => setEditForm((current) => ({ ...current, cpf: event.target.value }))} value={editForm.cpf} /></label>
               </div>
               <button className="button button--secondary" disabled={detailLoading} onClick={saveUser} type="button"><Pencil size={16} /> Salvar dados</button>
-            </section>
-            <section className="admin-edit-panel admin-edit-panel--credit">
+            </section> : null}
+            {canManageWallet ? <section className="admin-edit-panel admin-edit-panel--credit">
               <div className="admin-panel-heading"><div><p className="eyebrow">Financeiro</p><h3>Inserir saldo</h3></div><WalletCards size={17} /></div>
               <form className="admin-edit-grid" onSubmit={creditWallet}>
                 <label>Carteira<select onChange={(event) => setCreditForm((current) => ({ ...current, walletCode: event.target.value }))} value={creditForm.walletCode}><option value="saldo_pix">Saldo Pix</option><option value="cashback">Cashback</option><option value="rede">Rede</option><option value="vendas">Vendas</option></select></label>
@@ -198,8 +203,8 @@ export function ParticipantsPage({ accessToken }) {
               <div className="admin-wallet-list">
                 {(selectedUser.wallets ?? []).map((wallet) => <span key={wallet.code}><strong>{wallet.name}</strong>{moneyFormatter.format(wallet.availableCents / 100)}</span>)}
               </div>
-            </section>
-            <div className="drawer-actions"><label htmlFor="participant-status">Situação da conta</label><select disabled={detailLoading} id="participant-status" onChange={(event) => changeStatus(event.target.value)} value={selectedUser.status}><option value="ATIVO">Ativo</option><option value="PENDENTE">Pendente</option><option value="INATIVO">Inativo</option><option value="BLOQUEADO">Bloqueado</option></select></div>
+            </section> : null}
+            {canManageParticipantStatus ? <div className="drawer-actions"><label htmlFor="participant-status">Situação da conta</label><select disabled={detailLoading} id="participant-status" onChange={(event) => changeStatus(event.target.value)} value={selectedUser.status}><option value="ATIVO">Ativo</option><option value="PENDENTE">Pendente</option><option value="INATIVO">Inativo</option><option value="BLOQUEADO">Bloqueado</option></select></div> : null}
           </aside>
         </div>
       ) : null}

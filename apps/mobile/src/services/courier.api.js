@@ -12,6 +12,14 @@ export function saveCourierProfile(token, data) {
   });
 }
 
+export function updateCourierDispatchScope(token, acceptsPlatformCalls) {
+  return apiRequest("/api/app/courier/profile/dispatch-scope", {
+    body: { acceptsPlatformCalls },
+    method: "PATCH",
+    token,
+  });
+}
+
 export function getStoreCourierTeam(token, storeId) {
   return apiRequest(`/api/app/courier/stores/${storeId}/team`, { token });
 }
@@ -41,6 +49,15 @@ export function createStoreCourierRequest(token, storeId, data) {
 
 export function getCourierRequests(token) {
   return apiRequest("/api/app/courier/requests", { token });
+}
+
+export function getCustomerCourierRequests(token, serviceTypeId) {
+  const query = serviceTypeId ? `?serviceTypeId=${encodeURIComponent(serviceTypeId)}` : "";
+  return apiRequest(`/api/app/courier/customer-requests${query}`, { token });
+}
+
+export function createCustomerCourierRequest(token, data) {
+  return apiRequest("/api/app/courier/customer-requests", { body: data, method: "POST", token });
 }
 
 export function acceptCourierRequest(token, requestId) {

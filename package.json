@@ -28,6 +28,8 @@
     "seed:admin": "npm run seed:admin -w apps/api",
     "seed:demo": "npm run seed:demo -w apps/api",
     "seed:service-types": "npm run seed:service-types -w apps/api",
-    "media:curated": "npm run media:curated -w apps/api"
+    "media:curated": "npm run media:curated -w apps/api",
+    "audit:business": "npm run audit:business -w apps/api",
+    "reconcile:completed-orders": "npm run reconcile:completed-orders -w apps/api"
   }
 }

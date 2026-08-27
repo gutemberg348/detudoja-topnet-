@@ -1,5 +1,4 @@
 import { randomUUID } from "crypto";
-import { prisma } from "../../config/prisma.js";
 import {
   emitOrderCreated,
   emitOrderMessageCreated,
@@ -7,10 +6,26 @@ import {
   emitWalletUpdated,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
-import { requireUserCpf } from "../../utils/cpf-required.js";
+import { createOrdersRepository, ordersRepository } from "./orders.repository.js";
 import { parsePositiveId } from "../../utils/ids.js";
 import { formatMoney } from "../../utils/money.js";
 import { settleCompletedStoreOrderEarnings } from "../earnings/order-earnings.service.js";
+import { assertStoreMonthlyCpfLimit } from "../earnings/commercial-limit.service.js";
+import {
+  releaseReservedOrderStock,
+  reserveOrderStock,
+} from "./order-stock.service.js";
+import {
+  cancelPendingAsaasOrderPayment,
+  createPendingAsaasPix,
+  failPendingAsaasPayment,
+  shouldUseAsaasPix,
+} from "../payments/asaas.service.js";
+import { isAsaasEnabled } from "../payments/asaas.client.js";
+import {
+  allocateUserWalletsForPayment,
+  debitUserWallet,
+} from "../wallet/wallet.service.js";
 import {
   serializeOrder,
   serializeOrderMessage,
@@ -52,6 +67,12 @@ const orderInclude = {
   },
 };
 
+function paymentSourceForWallet(walletCode) {
+  if (walletCode === "cashback") return "CASHBACK";
+  if (walletCode === "saldo_pix") return "SALDO_PIX";
+  return "BONUS";
+}
+
 const orderMessageInclude = {
   autor: {
     select: {
@@ -85,6 +106,24 @@ function generateOrderCode() {
     .toUpperCase()}`;
 }
 
+async function findIdempotentOrder(repository, userId, idempotencyKey) {
+  if (!idempotencyKey) {
+    return null;
+  }
+
+  return repository.findFirstOrder({
+    include: orderInclude,
+    where: {
+      chave_idempotencia: idempotencyKey,
+      usuario_id: userId,
+    },
+  });
+}
+
+function isIdempotencyCollision(error) {
+  return error?.code === "P2002";
+}
+
 function addressSnapshot(address, reference = "") {
   if (!address) {
     return null;
@@ -108,7 +147,7 @@ async function resolveDeliveryAddress(database, userId, data) {
   }
 
   if (data.addressId) {
-    const address = await database.enderecoUsuario.findFirst({
+    const address = await createOrdersRepository(database).findAddress({
       where: {
         excluido_em: null,
         id: data.addressId,
@@ -124,19 +163,19 @@ async function resolveDeliveryAddress(database, userId, data) {
   }
 
   const address = data.address;
-  const addressCount = await database.enderecoUsuario.count({
+  const addressCount = await createOrdersRepository(database).countUserAddresses({
     where: { excluido_em: null, usuario_id: userId },
   });
   const shouldBeMain = addressCount === 0;
 
   if (shouldBeMain) {
-    await database.enderecoUsuario.updateMany({
+    await createOrdersRepository(database).updateAddresses({
       data: { principal: false },
       where: { usuario_id: userId },
     });
   }
 
-  return database.enderecoUsuario.create({
+  return createOrdersRepository(database).createUserAddress({
     data: {
       bairro: address.bairro,
       cep: formatCep(address.cep),
@@ -155,7 +194,7 @@ async function resolveDeliveryAddress(database, userId, data) {
 
 async function resolveStoreAndItems(storeId, requestedItems) {
   const productIds = [...new Set(requestedItems.map((item) => item.productId))];
-  const store = await prisma.loja.findFirst({
+  const store = await ordersRepository.findStore({
     include: {
       categoria: {
         select: { negocia_pedido_por_chat: true },
@@ -210,8 +249,8 @@ async function resolveStoreAndItems(storeId, requestedItems) {
   return { items, store };
 }
 
-export async function createOnlineOrderRequest(userId, data) {
-  await requireUserCpf(prisma, userId);
+export async function createOnlineOrderRequest(userId, data, { idempotencyKey = null } = {}) {
+  await ordersRepository.requireUserCpf(userId);
   const { items, store } = await resolveStoreAndItems(data.storeId, data.items);
 
   const negotiatesByChat = store.segmento_venda?.negocia_pedido_por_chat
@@ -226,12 +265,26 @@ export async function createOnlineOrderRequest(userId, data) {
   const deliveryCents = data.deliveryMode === "delivery" ? defaultDeliveryFeeCents : 0;
   const totalCents = subtotalCents + deliveryCents;
 
-  const order = await prisma.$transaction(async (database) => {
+  let result;
+  try {
+    result = await ordersRepository.transaction(async (database) => {
+    const existingOrder = await findIdempotentOrder(
+      createOrdersRepository(database),
+      userId,
+      idempotencyKey,
+    );
+
+    if (existingOrder) {
+      return { created: false, order: existingOrder };
+    }
+
     const deliveryAddress = await resolveDeliveryAddress(database, userId, data);
     const snapshot = addressSnapshot(deliveryAddress, data.address?.referencia ?? "");
+    await reserveOrderStock(database, items);
 
-    return database.pedidoLoja.create({
+    const order = await createOrdersRepository(database).createOrder({
       data: {
+        ...(idempotencyKey ? { chave_idempotencia: idempotencyKey } : {}),
         codigo: generateOrderCode(),
         endereco_entrega_id: deliveryAddress?.id ?? null,
         endereco_entrega_snapshot_json: snapshot,
@@ -259,6 +312,7 @@ export async function createOnlineOrderRequest(userId, data) {
         },
         observacao_cliente: data.address?.referencia || null,
         status: "NEGOCIANDO",
+        estoque_reservado_em: new Date(),
         subtotal_centavos: BigInt(subtotalCents),
         taxa_entrega_centavos: BigInt(deliveryCents),
         tipo_entrega: data.deliveryMode === "delivery" ? "ENTREGA" : "RETIRADA",
@@ -267,19 +321,30 @@ export async function createOnlineOrderRequest(userId, data) {
       },
       include: orderInclude,
     });
+    return { created: true, order };
   });
+  } catch (error) {
+    if (!idempotencyKey || !isIdempotencyCollision(error)) {
+      throw error;
+    }
+    const order = await findIdempotentOrder(ordersRepository, userId, idempotencyKey);
+    if (!order) throw error;
+    result = { created: false, order };
+  }
 
-  const serializedOrder = serializeOrder(order);
+  const serializedOrder = serializeOrder(result.order);
 
-  emitOrderCreated(serializedOrder);
+  if (result.created) {
+    emitOrderCreated(serializedOrder);
+  }
 
-  return { order: serializedOrder };
+  return { order: serializedOrder, reused: !result.created };
 }
 
-export async function createCheckoutOrder(userId, data) {
-  await requireUserCpf(prisma, userId);
+export async function createCheckoutOrder(userId, data, { idempotencyKey = null } = {}) {
+  await ordersRepository.requireUserCpf(userId);
   const productIds = [...new Set(data.items.map((item) => item.productId))];
-  const store = await prisma.loja.findFirst({
+  const store = await ordersRepository.findStore({
     include: {
       categoria: {
         select: { negocia_pedido_por_chat: true },
@@ -346,6 +411,22 @@ export async function createCheckoutOrder(userId, data) {
     : 0;
   const balanceUsedCents = Math.min(Math.max(requestedBalanceCents, 0), totalCents);
   const pixComplementCents = Math.max(totalCents - balanceUsedCents, 0);
+  if (balanceUsedCents > 0 && pixComplementCents > 0) {
+    throw new AppError(
+      "No Pix externo, escolha pagar integralmente pelas carteiras ou integralmente por Pix",
+      400,
+    );
+  }
+  if (pixComplementCents > 0 && !isAsaasEnabled()) {
+    throw new AppError(
+      "Pagamento Pix esta indisponivel no momento. Use suas carteiras ou tente novamente mais tarde.",
+      503,
+    );
+  }
+  const useAsaasPix = shouldUseAsaasPix({
+    pixComplementCents,
+    walletUsedCents: balanceUsedCents,
+  });
   const method =
     balanceUsedCents > 0 && pixComplementCents > 0
       ? "MISTO"
@@ -353,33 +434,32 @@ export async function createCheckoutOrder(userId, data) {
         ? "SALDO_PIX"
         : "PIX";
 
-  const order = await prisma.$transaction(async (database) => {
+  let result;
+  try {
+    result = await ordersRepository.transaction(async (database) => {
+    const existingOrder = await findIdempotentOrder(
+      createOrdersRepository(database),
+      userId,
+      idempotencyKey,
+    );
+
+    if (existingOrder) {
+      return { created: false, order: existingOrder };
+    }
+
     const deliveryAddress = await resolveDeliveryAddress(database, userId, data);
     const snapshot = addressSnapshot(deliveryAddress, data.address?.referencia ?? "");
-    const payment = await database.pagamento.create({
+    await reserveOrderStock(database, items);
+    if (!useAsaasPix) {
+      await assertStoreMonthlyCpfLimit(database, store.id, totalCents);
+    }
+    const walletAllocations = await allocateUserWalletsForPayment({
+      database,
+      userId,
+      valueCents: balanceUsedCents,
+    });
+    const payment = await createOrdersRepository(database).createPayment({
       data: {
-        composicoes: {
-          create: [
-            ...(balanceUsedCents > 0
-              ? [
-                  {
-                    status: "CONFIRMADO",
-                    tipo_origem: "SALDO_PIX",
-                    valor_centavos: BigInt(balanceUsedCents),
-                  },
-                ]
-              : []),
-            ...(pixComplementCents > 0
-              ? [
-                  {
-                    status: "CONFIRMADO",
-                    tipo_origem: "PIX",
-                    valor_centavos: BigInt(pixComplementCents),
-                  },
-                ]
-              : []),
-          ],
-        },
         itens: {
           create: [
             ...items.map((item) => ({
@@ -404,11 +484,11 @@ export async function createCheckoutOrder(userId, data) {
               : []),
           ],
         },
-        gateway: "INTERNO",
+        gateway: useAsaasPix ? "ASAAS" : "INTERNO",
         loja_id: store.id,
         metodo_principal: method,
-        pago_em: new Date(),
-        status: "PAGO",
+        pago_em: useAsaasPix ? null : new Date(),
+        status: useAsaasPix ? "AGUARDANDO_PAGAMENTO" : "PAGO",
         usuario_pagador_id: userId,
         valor_pago_pix_centavos: BigInt(pixComplementCents),
         valor_pago_saldo_centavos: BigInt(balanceUsedCents),
@@ -416,8 +496,39 @@ export async function createCheckoutOrder(userId, data) {
       },
     });
 
-    return database.pedidoLoja.create({
+    for (const allocation of walletAllocations) {
+      await debitUserWallet({
+        database,
+        description: `Pagamento do pedido na loja ${store.nome}.`,
+        originId: payment.id,
+        userId,
+        valueCents: allocation.amountCents,
+        walletId: allocation.id,
+      });
+      await createOrdersRepository(database).createPaymentComposition({
+        data: {
+          carteira_id: allocation.id,
+          pagamento_id: payment.id,
+          status: "CONFIRMADO",
+          tipo_origem: paymentSourceForWallet(allocation.code),
+          valor_centavos: BigInt(allocation.amountCents),
+        },
+      });
+    }
+    if (pixComplementCents > 0) {
+      await createOrdersRepository(database).createPaymentComposition({
+        data: {
+          pagamento_id: payment.id,
+          status: useAsaasPix ? "PENDENTE" : "CONFIRMADO",
+          tipo_origem: "PIX",
+          valor_centavos: BigInt(pixComplementCents),
+        },
+      });
+    }
+
+    const order = await createOrdersRepository(database).createOrder({
       data: {
+        ...(idempotencyKey ? { chave_idempotencia: idempotencyKey } : {}),
         codigo: generateOrderCode(),
         endereco_entrega_id: deliveryAddress?.id ?? null,
         endereco_entrega_snapshot_json: snapshot,
@@ -435,15 +546,21 @@ export async function createCheckoutOrder(userId, data) {
         loja_id: store.id,
         mensagens: {
           create: {
-            mensagem: "Recebemos seu pedido. A loja ja consegue acompanhar pelo painel.",
-            metadata_json: { kind: "created", status: "RECEBIDO" },
+            mensagem: useAsaasPix
+              ? "Pedido criado. Aguardando a confirmacao do Pix para enviar a loja."
+              : "Recebemos seu pedido. A loja ja consegue acompanhar pelo painel.",
+            metadata_json: {
+              kind: "created",
+              status: useAsaasPix ? "AGUARDANDO_PAGAMENTO" : "RECEBIDO",
+            },
             origem: "SISTEMA",
-            titulo: "Pedido recebido",
+            titulo: useAsaasPix ? "Aguardando Pix" : "Pedido recebido",
           },
         },
         observacao_cliente: data.address?.referencia || null,
         pagamento_id: payment.id,
-        status: "RECEBIDO",
+        status: useAsaasPix ? "AGUARDANDO_PAGAMENTO" : "RECEBIDO",
+        estoque_reservado_em: new Date(),
         subtotal_centavos: BigInt(subtotalCents),
         taxa_entrega_centavos: BigInt(deliveryCents),
         tipo_entrega: data.deliveryMode === "delivery" ? "ENTREGA" : "RETIRADA",
@@ -454,20 +571,46 @@ export async function createCheckoutOrder(userId, data) {
       },
       include: orderInclude,
     });
+    return { created: true, order };
   });
+  } catch (error) {
+    if (!idempotencyKey || !isIdempotencyCollision(error)) {
+      throw error;
+    }
+    const order = await findIdempotentOrder(ordersRepository, userId, idempotencyKey);
+    if (!order) throw error;
+    result = { created: false, order };
+  }
 
-  const serializedOrder = serializeOrder(order);
+  let gatewayPayment = null;
 
-  emitOrderCreated(serializedOrder);
+  if (useAsaasPix && result.created) {
+    try {
+      gatewayPayment = await createPendingAsaasPix({
+        description: `Pedido ${result.order.codigo} - ${store.nome}`,
+        paymentId: result.order.pagamento_id,
+        userId,
+      });
+    } catch (error) {
+      await failPendingAsaasPayment(result.order.pagamento_id);
+      throw error;
+    }
+  }
 
-  return { order: serializedOrder };
+  const serializedOrder = serializeOrder(result.order);
+
+  if (result.created) {
+    emitOrderCreated(serializedOrder);
+  }
+
+  return { gatewayPayment, order: serializedOrder, reused: !result.created };
 }
 
 export async function listCustomerOrders(userId, { storeId } = {}) {
   const parsedStoreId = storeId
     ? parsePositiveId(storeId, "Loja invalida")
     : null;
-  const orders = await prisma.pedidoLoja.findMany({
+  const orders = await ordersRepository.findManyOrders({
     include: orderInclude,
     orderBy: { criado_em: "desc" },
     take: 30,
@@ -482,7 +625,7 @@ export async function listCustomerOrders(userId, { storeId } = {}) {
 
 async function findCustomerOrder(userId, orderId, select = { id: true, loja_id: true, usuario_id: true }) {
   const parsedOrderId = parsePositiveId(orderId, "Pedido invalido");
-  const order = await prisma.pedidoLoja.findFirst({
+  const order = await ordersRepository.findFirstOrder({
     select,
     where: {
       id: parsedOrderId,
@@ -500,7 +643,7 @@ async function findCustomerOrder(userId, orderId, select = { id: true, loja_id: 
 export async function listCustomerOrderMessages(userId, orderId) {
   const order = await findCustomerOrder(userId, orderId);
 
-  await prisma.pedidoLojaMensagem.updateMany({
+  await ordersRepository.updateOrderMessages({
     data: { lido_cliente_em: new Date() },
     where: {
       lido_cliente_em: null,
@@ -509,7 +652,7 @@ export async function listCustomerOrderMessages(userId, orderId) {
     },
   });
 
-  const messages = await prisma.pedidoLojaMensagem.findMany({
+  const messages = await ordersRepository.findManyOrderMessages({
     include: orderMessageInclude,
     orderBy: { criado_em: "asc" },
     where: { pedido_id: order.id },
@@ -527,7 +670,7 @@ export async function completeCustomerOrder(userId, orderId) {
   });
 
   if (currentOrder.status === "CONCLUIDO") {
-    const order = await prisma.pedidoLoja.findUnique({
+    const order = await ordersRepository.findUniqueOrder({
       include: orderInclude,
       where: { id: currentOrder.id },
     });
@@ -544,8 +687,8 @@ export async function completeCustomerOrder(userId, orderId) {
   }
 
   const completedAt = new Date();
-  const { message, order, settlement } = await prisma.$transaction(async (database) => {
-    const updatedOrder = await database.pedidoLoja.update({
+  const { message, order, settlement } = await ordersRepository.transaction(async (database) => {
+    const updatedOrder = await createOrdersRepository(database).updateOrder({
       data: {
         cancelado_em: null,
         concluido_em: completedAt,
@@ -555,7 +698,7 @@ export async function completeCustomerOrder(userId, orderId) {
       where: { id: currentOrder.id },
     });
 
-    const createdMessage = await database.pedidoLojaMensagem.create({
+    const createdMessage = await createOrdersRepository(database).createOrderMessage({
       data: {
         autor_usuario_id: userId,
         mensagem: "Cliente confirmou que recebeu o pedido.",
@@ -595,6 +738,81 @@ export async function completeCustomerOrder(userId, orderId) {
   return { order: serializedOrder };
 }
 
+export async function cancelCustomerOrder(userId, orderId) {
+  const parsedOrderId = parsePositiveId(orderId, "Pedido invalido");
+  const currentOrder = await ordersRepository.findFirstOrder({
+    include: { pagamento: true },
+    where: { id: parsedOrderId, usuario_id: userId },
+  });
+
+  if (!currentOrder) {
+    throw new AppError("Pedido nao encontrado", 404);
+  }
+
+  if (currentOrder.status === "CANCELADO") {
+    const order = await ordersRepository.findUniqueOrder({
+      include: orderInclude,
+      where: { id: currentOrder.id },
+    });
+    return { order: serializeOrder(order) };
+  }
+
+  const paid = ["PAGO", "LIQUIDADO", "EM_DISPUTA", "ESTORNADO"].includes(
+    currentOrder.pagamento?.status,
+  );
+  const started = [
+    "ACEITO",
+    "PREPARANDO",
+    "SAIU_ENTREGA",
+    "PRONTO_RETIRADA",
+    "CONCLUIDO",
+  ].includes(currentOrder.status);
+
+  if (paid || started) {
+    throw new AppError(
+      "Pedido pago ou em atendimento: solicite o cancelamento ao suporte",
+      409,
+    );
+  }
+
+  if (
+    currentOrder.pagamento?.gateway === "ASAAS"
+    && currentOrder.pagamento.status === "AGUARDANDO_PAGAMENTO"
+  ) {
+    await cancelPendingAsaasOrderPayment(userId, currentOrder.id);
+  } else {
+    await ordersRepository.transaction(async (database) => {
+      await createOrdersRepository(database).updateProposals({
+        data: { status: "CANCELADA" },
+        where: { pedido_id: currentOrder.id, status: { in: ["PENDENTE", "ACEITA"] } },
+      });
+      if (currentOrder.pagamento_id) {
+        await createOrdersRepository(database).updatePayment({
+          data: { cancelado_em: new Date(), status: "CANCELADO" },
+          where: {
+            id: currentOrder.pagamento_id,
+            status: { in: ["PENDENTE", "AGUARDANDO_PAGAMENTO"] },
+          },
+        });
+      }
+      await createOrdersRepository(database).updateOrder({
+        data: { cancelado_em: new Date(), status: "CANCELADO" },
+        where: { id: currentOrder.id },
+      });
+      await releaseReservedOrderStock(database, currentOrder.id);
+    });
+  }
+
+  const order = await ordersRepository.findUniqueOrder({
+    include: orderInclude,
+    where: { id: currentOrder.id },
+  });
+  const serializedOrder = serializeOrder(order);
+  emitOrderStatusUpdated(serializedOrder);
+
+  return { order: serializedOrder };
+}
+
 export async function acceptCustomerOrderProposal(userId, orderId, proposalId) {
   const order = await findCustomerOrder(userId, orderId, {
     id: true,
@@ -608,8 +826,8 @@ export async function acceptCustomerOrderProposal(userId, orderId, proposalId) {
     throw new AppError("Este pedido nao esta aguardando uma proposta", 409);
   }
 
-  const result = await prisma.$transaction(async (database) => {
-    const claimedProposal = await database.propostaPedidoLoja.updateMany({
+  const result = await ordersRepository.transaction(async (database) => {
+    const claimedProposal = await createOrdersRepository(database).updateProposals({
       data: { respondido_em: new Date(), status: "ACEITA" },
       where: {
         id: parsedProposalId,
@@ -622,16 +840,16 @@ export async function acceptCustomerOrderProposal(userId, orderId, proposalId) {
       throw new AppError("Esta proposta nao esta mais disponivel", 409);
     }
 
-    const proposal = await database.propostaPedidoLoja.findUnique({
+    const proposal = await createOrdersRepository(database).findUniqueProposal({
       where: { id: parsedProposalId },
     });
-    const currentOrder = await database.pedidoLoja.findUnique({
+    const currentOrder = await createOrdersRepository(database).findUniqueOrder({
       select: { taxa_entrega_centavos: true },
       where: { id: order.id },
     });
     const totalCents = Number(proposal.valor_centavos);
     const deliveryCents = Math.min(Number(currentOrder.taxa_entrega_centavos), totalCents);
-    const updatedOrder = await database.pedidoLoja.update({
+    const updatedOrder = await createOrdersRepository(database).updateOrder({
       data: {
         status: "AGUARDANDO_PAGAMENTO",
         subtotal_centavos: BigInt(Math.max(totalCents - deliveryCents, 0)),
@@ -640,7 +858,7 @@ export async function acceptCustomerOrderProposal(userId, orderId, proposalId) {
       include: orderInclude,
       where: { id: order.id },
     });
-    const message = await database.pedidoLojaMensagem.create({
+    const message = await createOrdersRepository(database).createOrderMessage({
       data: {
         autor_usuario_id: userId,
         lido_cliente_em: new Date(),
@@ -682,8 +900,8 @@ export async function declineCustomerOrderProposal(userId, orderId, proposalId) 
   const order = await findCustomerOrder(userId, orderId);
   const parsedProposalId = parsePositiveId(proposalId, "Proposta invalida");
 
-  const result = await prisma.$transaction(async (database) => {
-    const declinedProposal = await database.propostaPedidoLoja.updateMany({
+  const result = await ordersRepository.transaction(async (database) => {
+    const declinedProposal = await createOrdersRepository(database).updateProposals({
       data: { respondido_em: new Date(), status: "RECUSADA" },
       where: {
         id: parsedProposalId,
@@ -696,12 +914,12 @@ export async function declineCustomerOrderProposal(userId, orderId, proposalId) 
       throw new AppError("Esta proposta nao esta mais disponivel", 409);
     }
 
-    const updatedOrder = await database.pedidoLoja.update({
+    const updatedOrder = await createOrdersRepository(database).updateOrder({
       data: { status: "NEGOCIANDO" },
       include: orderInclude,
       where: { id: order.id },
     });
-    const message = await database.pedidoLojaMensagem.create({
+    const message = await createOrdersRepository(database).createOrderMessage({
       data: {
         autor_usuario_id: userId,
         lido_cliente_em: new Date(),
@@ -736,10 +954,10 @@ export async function declineCustomerOrderProposal(userId, orderId, proposalId) 
 }
 
 export async function payCustomerOrderProposal(userId, orderId, proposalId, data) {
-  await requireUserCpf(prisma, userId);
+  await ordersRepository.requireUserCpf(userId);
   const parsedOrderId = parsePositiveId(orderId, "Pedido invalido");
   const parsedProposalId = parsePositiveId(proposalId, "Proposta invalida");
-  const currentOrder = await prisma.pedidoLoja.findFirst({
+  const currentOrder = await ordersRepository.findFirstOrder({
     include: {
       itens: { orderBy: { criado_em: "asc" } },
       propostas: true,
@@ -770,17 +988,38 @@ export async function payCustomerOrderProposal(userId, orderId, proposalId, data
     : 0;
   const balanceUsedCents = Math.min(Math.max(requestedBalanceCents, 0), totalCents);
   const pixComplementCents = Math.max(totalCents - balanceUsedCents, 0);
+  if (balanceUsedCents > 0 && pixComplementCents > 0) {
+    throw new AppError(
+      "No Pix externo, escolha pagar integralmente pelas carteiras ou integralmente por Pix",
+      400,
+    );
+  }
+  if (pixComplementCents > 0 && !isAsaasEnabled()) {
+    throw new AppError(
+      "Pagamento Pix esta indisponivel no momento. Use suas carteiras ou tente novamente mais tarde.",
+      503,
+    );
+  }
+  const useAsaasPix = shouldUseAsaasPix({
+    pixComplementCents,
+    walletUsedCents: balanceUsedCents,
+  });
   const method =
     balanceUsedCents > 0 && pixComplementCents > 0
       ? "MISTO"
       : balanceUsedCents > 0
         ? "SALDO_PIX"
         : "PIX";
-  const paymentConfirmedAt = new Date();
+  const paymentConfirmedAt = useAsaasPix ? null : new Date();
 
-  const result = await prisma.$transaction(async (database) => {
-    const claimedProposal = await database.propostaPedidoLoja.updateMany({
-      data: { pago_em: paymentConfirmedAt, status: "PAGA" },
+  const result = await ordersRepository.transaction(async (database) => {
+    const repository = createOrdersRepository(database);
+    await repository.lockOrder(currentOrder.id);
+    const lockedOrder = await repository.findUniqueOrder({
+      select: { pagamento_id: true, status: true },
+      where: { id: currentOrder.id },
+    });
+    const lockedProposal = await repository.findFirstProposal({
       where: {
         id: proposal.id,
         pedido_id: currentOrder.id,
@@ -788,30 +1027,28 @@ export async function payCustomerOrderProposal(userId, orderId, proposalId, data
       },
     });
 
-    if (claimedProposal.count !== 1) {
+    if (!lockedProposal || lockedOrder?.pagamento_id || lockedOrder.status !== "AGUARDANDO_PAGAMENTO") {
       throw new AppError("Esta proposta ja foi processada", 409);
     }
 
-    const payment = await database.pagamento.create({
+    if (!useAsaasPix) {
+      await assertStoreMonthlyCpfLimit(database, currentOrder.loja_id, totalCents);
+    }
+
+    if (!useAsaasPix) {
+      await repository.updateProposal({
+        data: { pago_em: paymentConfirmedAt, status: "PAGA" },
+        where: { id: lockedProposal.id },
+      });
+    }
+
+    const walletAllocations = await allocateUserWalletsForPayment({
+      database,
+      userId,
+      valueCents: balanceUsedCents,
+    });
+    const payment = await repository.createPayment({
       data: {
-        composicoes: {
-          create: [
-            ...(balanceUsedCents > 0
-              ? [{
-                  status: "CONFIRMADO",
-                  tipo_origem: "SALDO_PIX",
-                  valor_centavos: BigInt(balanceUsedCents),
-                }]
-              : []),
-            ...(pixComplementCents > 0
-              ? [{
-                  status: "CONFIRMADO",
-                  tipo_origem: "PIX",
-                  valor_centavos: BigInt(pixComplementCents),
-                }]
-              : []),
-          ],
-        },
         itens: {
           create: [{
             descricao: proposal.descricao || "Valor confirmado pela loja no chat",
@@ -823,22 +1060,51 @@ export async function payCustomerOrderProposal(userId, orderId, proposalId, data
             valor_unitario_centavos: BigInt(totalCents),
           }],
         },
-        gateway: "INTERNO",
+        gateway: useAsaasPix ? "ASAAS" : "INTERNO",
         loja_id: currentOrder.loja_id,
         metodo_principal: method,
         pago_em: paymentConfirmedAt,
-        status: "PAGO",
+        status: useAsaasPix ? "AGUARDANDO_PAGAMENTO" : "PAGO",
         usuario_pagador_id: userId,
         valor_pago_pix_centavos: BigInt(pixComplementCents),
         valor_pago_saldo_centavos: BigInt(balanceUsedCents),
         valor_total_centavos: BigInt(totalCents),
       },
     });
-    const updatedOrder = await database.pedidoLoja.update({
+    for (const allocation of walletAllocations) {
+      await debitUserWallet({
+        database,
+        description: `Pagamento da proposta do pedido ${currentOrder.codigo}.`,
+        originId: payment.id,
+        userId,
+        valueCents: allocation.amountCents,
+        walletId: allocation.id,
+      });
+      await repository.createPaymentComposition({
+        data: {
+          carteira_id: allocation.id,
+          pagamento_id: payment.id,
+          status: "CONFIRMADO",
+          tipo_origem: paymentSourceForWallet(allocation.code),
+          valor_centavos: BigInt(allocation.amountCents),
+        },
+      });
+    }
+    if (pixComplementCents > 0) {
+      await repository.createPaymentComposition({
+        data: {
+          pagamento_id: payment.id,
+          status: useAsaasPix ? "PENDENTE" : "CONFIRMADO",
+          tipo_origem: "PIX",
+          valor_centavos: BigInt(pixComplementCents),
+        },
+      });
+    }
+    const updatedOrder = await repository.updateOrder({
       data: {
         aceito_em: paymentConfirmedAt,
         pagamento_id: payment.id,
-        status: "ACEITO",
+        status: useAsaasPix ? "AGUARDANDO_PAGAMENTO" : "ACEITO",
         total_centavos: BigInt(totalCents),
         valor_pago_pix_centavos: BigInt(pixComplementCents),
         valor_pago_saldo_centavos: BigInt(balanceUsedCents),
@@ -846,25 +1112,42 @@ export async function payCustomerOrderProposal(userId, orderId, proposalId, data
       include: orderInclude,
       where: { id: currentOrder.id },
     });
-    const message = await database.pedidoLojaMensagem.create({
+    const message = await repository.createOrderMessage({
       data: {
         autor_usuario_id: userId,
         lido_cliente_em: new Date(),
-        mensagem: `Pagamento de ${formatMoney(totalCents)} confirmado. A loja ja confirmou o pedido e pode iniciar o preparo.`,
+        mensagem: useAsaasPix
+          ? `Proposta aceita. Aguardando a confirmacao do Pix de ${formatMoney(totalCents)}.`
+          : `Pagamento de ${formatMoney(totalCents)} confirmado. A loja ja confirmou o pedido e pode iniciar o preparo.`,
         metadata_json: {
-          kind: "payment",
+          kind: useAsaasPix ? "payment-pending" : "payment",
           proposalId: proposal.id,
-          status: "ACEITO",
+          status: useAsaasPix ? "AGUARDANDO_PAGAMENTO" : "ACEITO",
         },
         origem: "CLIENTE",
         pedido_id: currentOrder.id,
-        titulo: "Pagamento confirmado",
+        titulo: useAsaasPix ? "Aguardando Pix" : "Pagamento confirmado",
       },
       include: orderMessageInclude,
     });
 
-    return { message, order: updatedOrder };
+    return { message, order: updatedOrder, payment };
   });
+
+  let gatewayPayment = null;
+
+  if (useAsaasPix) {
+    try {
+      gatewayPayment = await createPendingAsaasPix({
+        description: `Proposta do pedido ${currentOrder.codigo}`,
+        paymentId: result.payment.id,
+        userId,
+      });
+    } catch (error) {
+      await failPendingAsaasPayment(result.payment.id);
+      throw error;
+    }
+  }
 
   const serializedOrder = serializeOrder(result.order);
   const serializedMessage = serializeOrderMessage(result.message);
@@ -877,13 +1160,13 @@ export async function payCustomerOrderProposal(userId, orderId, proposalId, data
   });
   emitOrderStatusUpdated(serializedOrder);
 
-  return { message: serializedMessage, order: serializedOrder };
+  return { gatewayPayment, message: serializedMessage, order: serializedOrder };
 }
 
 export async function createCustomerOrderMessage(userId, orderId, data) {
   const order = await findCustomerOrder(userId, orderId);
 
-  const message = await prisma.pedidoLojaMensagem.create({
+  const message = await ordersRepository.createOrderMessage({
     data: {
       autor_usuario_id: userId,
       lido_cliente_em: new Date(),

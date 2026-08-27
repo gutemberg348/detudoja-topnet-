@@ -1,4 +1,3 @@
-import { prisma } from "../../config/prisma.js";
 import {
   emitServiceAvailabilityUpdated,
   emitServiceChatCreated,
@@ -7,7 +6,7 @@ import {
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
 import { parsePositiveId } from "../../utils/ids.js";
-import { cityAddressWhere, requireUserBaseAddress, sameCity } from "../../utils/location.js";
+import { cityAddressWhere, sameCity } from "../../utils/location.js";
 import { formatMoney } from "../../utils/money.js";
 import {
   createServiceConversationCharge,
@@ -17,6 +16,14 @@ import {
   deleteUploadedImage,
   saveUploadedImage,
 } from "../uploads/image.service.js";
+import {
+  getBusyCourierSellerIds,
+  isCourierSellerBusy,
+} from "../courier/courier-availability.js";
+import {
+  createServiceChatsRepository,
+  serviceChatsRepository,
+} from "./service-chats.repository.js";
 
 const publicSellerStatuses = ["ATIVO", "PENDENTE"];
 const legacyServiceTypeSlugs = ["entregador"];
@@ -29,7 +36,7 @@ function matchesStoreCity(courier, address) {
 }
 
 async function findStoreForCourierRequest(userId, storeId) {
-  const store = await prisma.loja.findFirst({
+  const store = await serviceChatsRepository.findStore({
     select: {
       endereco: { select: { cidade: true, estado: true } },
       id: true,
@@ -95,6 +102,7 @@ function serializeSeller(seller, { isOnline = false } = {}) {
       ? {
           baseCity: seller.motoboy.cidade_base,
           baseState: seller.motoboy.estado_base,
+          acceptsPlatformCalls: seller.motoboy.aceita_chamadas_plataforma,
           color: seller.motoboy.cor_moto,
           displayName: seller.motoboy.nome_exibicao,
           plate: seller.motoboy.placa,
@@ -102,6 +110,7 @@ function serializeSeller(seller, { isOnline = false } = {}) {
           serviceRadiusKm: seller.motoboy.raio_atendimento_km,
           status: seller.motoboy.status,
           totalDeliveries: seller.motoboy.total_entregas,
+          linkedStoreCount: seller.motoboy.lojas?.filter((membership) => membership.ativo).length ?? 0,
           vehicleModel: seller.motoboy.modelo_moto,
         }
       : null,
@@ -225,7 +234,7 @@ function serializeConversation(conversation, viewerId, { includeMessages = false
 
 async function findAccessibleConversation(userId, conversationId) {
   const id = parsePositiveId(conversationId, "Conversa invalida");
-  const conversation = await prisma.conversaServico.findFirst({
+  const conversation = await serviceChatsRepository.findConversation({
     include: conversationInclude,
     where: {
       id,
@@ -246,10 +255,24 @@ function notifyConversation(conversation, reason) {
   });
 }
 
+function notifyCourierAvailability(conversation, available) {
+  if (conversation.servico_vendedor?.tipo_servico?.tipo_operacao !== "ENTREGA_LOCAL") return;
+  emitServiceAvailabilityUpdated({
+    available,
+    sellerId: conversation.vendedor_id,
+    sellerUserId: conversation.vendedor?.usuario_id,
+    serviceTypeId: conversation.servico_vendedor.tipo_servico_id,
+  });
+}
+
 function serializeServiceType(type) {
   const onlineServices = type.servicos_vendedor ?? [];
   const hasAvailableProvider = type.tipo_operacao === "ENTREGA_LOCAL"
-    ? onlineServices.some((service) => service.vendedor?.motoboy?.status === "ATIVO")
+    ? onlineServices.some((service) => {
+        const courier = service.vendedor?.motoboy;
+        return courier?.status === "ATIVO"
+          && (courier.aceita_chamadas_plataforma || !courier.lojas?.length);
+      })
     : onlineServices.length > 0;
 
   return {
@@ -267,7 +290,7 @@ function serializeServiceType(type) {
 
 export async function listServiceTypes(userId, query = {}) {
   const operationalType = String(query.operationalType ?? "").toUpperCase();
-  const requesterAddress = await requireUserBaseAddress(prisma, userId);
+  const requesterAddress = await serviceChatsRepository.getUserBaseAddress(userId);
   const availableSellerWhere = {
     excluido_em: null,
     status: { in: publicSellerStatuses },
@@ -277,11 +300,22 @@ export async function listServiceTypes(userId, query = {}) {
       },
     },
   };
-  const types = await prisma.tipoServico.findMany({
+  const types = await serviceChatsRepository.findServiceTypes({
     include: {
       servicos_vendedor: {
         select: {
-          vendedor: { select: { motoboy: { select: { status: true } } } },
+          vendedor_id: true,
+          vendedor: {
+            select: {
+              motoboy: {
+                select: {
+                  aceita_chamadas_plataforma: true,
+                  lojas: { select: { id: true }, where: { ativo: true } },
+                  status: true,
+                },
+              },
+            },
+          },
         },
         where: {
           disponivel_agora: true,
@@ -302,12 +336,22 @@ export async function listServiceTypes(userId, query = {}) {
         : {}),
     },
   });
+  const busySellerIds = await getBusyCourierSellerIds(
+    serviceChatsRepository,
+    types.flatMap((type) => type.servicos_vendedor.map((service) => service.vendedor_id)),
+  );
+  for (const type of types) {
+    if (type.tipo_operacao !== "ENTREGA_LOCAL") continue;
+    type.servicos_vendedor = type.servicos_vendedor.filter(
+      (service) => !busySellerIds.has(service.vendedor_id),
+    );
+  }
   return { serviceTypes: types.map(serializeServiceType) };
 }
 
 export async function listSellerServices(userId) {
   const [types, seller] = await Promise.all([
-    prisma.tipoServico.findMany({
+    serviceChatsRepository.findServiceTypes({
       orderBy: [{ ordem: "asc" }, { nome: "asc" }],
       where: {
         excluido_em: null,
@@ -315,7 +359,13 @@ export async function listSellerServices(userId) {
         status: "ATIVO",
       },
     }),
-    prisma.vendedor.findFirst({ include: { motoboy: true, servicos: { where: { excluido_em: null } } }, where: { excluido_em: null, usuario_id: userId } }),
+    serviceChatsRepository.findSeller({
+      include: {
+        motoboy: { include: { lojas: { where: { ativo: true }, select: { ativo: true } } } },
+        servicos: { where: { excluido_em: null } },
+      },
+      where: { excluido_em: null, usuario_id: userId },
+    }),
   ]);
   const byType = new Map((seller?.servicos ?? []).map((service) => [service.tipo_servico_id, service]));
   return {
@@ -332,7 +382,7 @@ export async function listSellerServices(userId) {
 
 export async function listOnlineServiceProviders(userId, serviceTypeId, { storeId } = {}) {
   const typeId = parsePositiveId(serviceTypeId, "Servico invalido");
-  const type = await prisma.tipoServico.findFirst({
+  const type = await serviceChatsRepository.findServiceType({
     where: {
       excluido_em: null,
       id: typeId,
@@ -342,16 +392,20 @@ export async function listOnlineServiceProviders(userId, serviceTypeId, { storeI
     },
   });
   if (!type) throw new AppError("Servico nao encontrado", 404);
-  const requesterAddress = await requireUserBaseAddress(prisma, userId);
+  const requesterAddress = await serviceChatsRepository.getUserBaseAddress(userId);
   const requesterStore = storeId && type.tipo_operacao === "ENTREGA_LOCAL"
     ? await findStoreForCourierRequest(userId, storeId)
     : null;
   const serviceCity = requesterStore?.endereco ?? requesterAddress;
-  const services = await prisma.servicoVendedor.findMany({
+  const services = await serviceChatsRepository.findSellerServices({
     include: {
       vendedor: {
         include: {
-          motoboy: true,
+          motoboy: {
+            include: {
+              lojas: { select: { id: true }, where: { ativo: true } },
+            },
+          },
           usuario: { select: { foto_url: true, id: true, nome: true } },
         },
       },
@@ -375,13 +429,23 @@ export async function listOnlineServiceProviders(userId, serviceTypeId, { storeI
       },
     },
   });
+  const busySellerIds = type.tipo_operacao === "ENTREGA_LOCAL"
+    ? await getBusyCourierSellerIds(serviceChatsRepository, services.map((service) => service.vendedor_id))
+    : new Set();
+  const availableServices = services
+    .filter((service) => !busySellerIds.has(service.vendedor_id))
+    .filter((service) => (
+      type.tipo_operacao !== "ENTREGA_LOCAL"
+      || service.vendedor.motoboy?.aceita_chamadas_plataforma
+      || !service.vendedor.motoboy?.lojas?.length
+    ))
+    .filter((service) => !requesterStore || matchesStoreCity(service.vendedor.motoboy, requesterStore.endereco));
   return {
     serviceType: {
       ...serializeServiceType(type),
-      availableNow: services.length > 0,
+      availableNow: availableServices.length > 0,
     },
-    sellers: services
-      .filter((service) => !requesterStore || matchesStoreCity(service.vendedor.motoboy, requesterStore.endereco))
+    sellers: type.tipo_operacao === "ENTREGA_LOCAL" ? [] : availableServices
       .map((service) => ({
       ...serializeSeller(service.vendedor, { isOnline: service.disponivel_agora }),
       sellerServiceId: service.id,
@@ -390,12 +454,12 @@ export async function listOnlineServiceProviders(userId, serviceTypeId, { storeI
 }
 
 export async function updateSellerService(userId, data) {
-  const seller = await prisma.vendedor.findFirst({ include: { motoboy: true }, where: { excluido_em: null, usuario_id: userId } });
+  const seller = await serviceChatsRepository.findSeller({ include: { motoboy: true }, where: { excluido_em: null, usuario_id: userId } });
   if (!seller) throw new AppError("Crie seu perfil de vendedor antes de ativar servicos", 428);
   if (["BLOQUEADO", "REPROVADO"].includes(seller.status)) {
     throw new AppError("Seu cadastro comercial nao pode atender servicos", 403);
   }
-  const type = await prisma.tipoServico.findFirst({
+  const type = await serviceChatsRepository.findServiceType({
     where: {
       excluido_em: null,
       id: data.serviceTypeId,
@@ -409,13 +473,13 @@ export async function updateSellerService(userId, data) {
   }
 
   if (seller.status === "PENDENTE") {
-    await prisma.vendedor.update({
+    await serviceChatsRepository.updateSeller({
       data: { status: "ATIVO" },
       where: { id: seller.id },
     });
   }
 
-  const service = await prisma.servicoVendedor.upsert({
+  const service = await serviceChatsRepository.upsertSellerService({
     create: { categoria: type.nome, descricao: type.descricao, disponivel_agora: data.available, nome: type.nome, preco_centavos: null, status: "ATIVO", tipo_servico_id: type.id, vendedor_id: seller.id },
     update: { disponivel_agora: data.available, status: "ATIVO" },
     where: { vendedor_id_tipo_servico_id: { tipo_servico_id: type.id, vendedor_id: seller.id } },
@@ -432,9 +496,9 @@ export async function updateSellerService(userId, data) {
 }
 
 export async function createServiceConversation(userId, data) {
-  const requesterAddress = await requireUserBaseAddress(prisma, userId);
+  const requesterAddress = await serviceChatsRepository.getUserBaseAddress(userId);
   const sellerServiceId = parsePositiveId(data.sellerServiceId, "Servico do prestador invalido");
-  const sellerService = await prisma.servicoVendedor.findFirst({
+  const sellerService = await serviceChatsRepository.findSellerService({
     include: {
       tipo_servico: { include: { segmento_venda: true } },
       vendedor: { include: { motoboy: true, segmento_venda: true, usuario: { include: { enderecos: { where: { excluido_em: null }, orderBy: [{ principal: "desc" }, { criado_em: "asc" }], take: 1 } } } } },
@@ -450,8 +514,8 @@ export async function createServiceConversation(userId, data) {
   });
 
   if (!sellerService?.tipo_servico) throw new AppError("Este servico nao esta disponivel agora", 409);
-  if (sellerService.tipo_servico.tipo_operacao === "ENTREGA_LOCAL" && sellerService.vendedor.motoboy?.status !== "ATIVO") {
-    throw new AppError("Este motoboy nao esta disponivel para novas corridas", 409);
+  if (sellerService.tipo_servico.tipo_operacao === "ENTREGA_LOCAL") {
+    throw new AppError("Chame um motoboy pela central de entregas para aguardar o aceite", 409);
   }
   if (sellerService.vendedor.usuario_id === userId) throw new AppError("Voce nao pode iniciar conversa com seu proprio perfil", 400);
 
@@ -465,81 +529,49 @@ export async function createServiceConversation(userId, data) {
     throw new AppError("Este servico ainda nao possui um segmento comercial ativo", 409);
   }
 
-  let requesterStore = null;
-  let requesterOrder = null;
-  if (data.storeId) {
-    if (sellerService.tipo_servico.tipo_operacao !== "ENTREGA_LOCAL") {
-      throw new AppError("Escolha um servico de entrega local", 409);
-    }
-    requesterStore = await findStoreForCourierRequest(userId, data.storeId);
-    if (!matchesStoreCity(sellerService.vendedor.motoboy, requesterStore.endereco)) {
-      throw new AppError("Este motoboy atende outra cidade. Escolha um profissional da sua cidade.", 409);
-    }
-
-    if (data.orderId) {
-      requesterOrder = await prisma.pedidoLoja.findFirst({
-        select: { id: true },
-        where: {
-          id: parsePositiveId(data.orderId, "Pedido invalido"),
-          loja_id: requesterStore.id,
-          status: { notIn: ["CANCELADO", "CONCLUIDO"] },
-        },
-      });
-      if (!requesterOrder) throw new AppError("Pedido nao encontrado nesta loja", 404);
-    }
+  if (data.storeId || data.orderId) {
+    throw new AppError("Use a central de entregas para solicitar motoboy para uma loja", 409);
   }
 
   const origin = String(data.origin ?? "").trim() || null;
   const destination = String(data.destination ?? "").trim() || null;
   const initialDescription = String(data.description ?? "").trim() || null;
-  if (requesterStore && (!origin || !destination)) {
-    throw new AppError("Informe origem e destino da corrida", 400);
-  }
 
-  const existing = requesterStore && !requesterOrder
-    ? null
-    : await prisma.conversaServico.findFirst({
-        include: conversationInclude,
-        orderBy: { atualizado_em: "desc" },
-        where: {
-          cliente_usuario_id: userId,
-          loja_solicitante_id: requesterStore?.id ?? null,
-          pedido_loja_id: requesterOrder?.id ?? null,
-          servico_vendedor_id: sellerService.id,
-          status: { in: ["ABERTA", "ACORDADA", "AGUARDANDO_CONFIRMACAO"] },
-        },
-      });
+  const existing = await serviceChatsRepository.findConversation({
+    include: conversationInclude,
+    orderBy: { atualizado_em: "desc" },
+    where: {
+      cliente_usuario_id: userId,
+      loja_solicitante_id: null,
+      pedido_loja_id: null,
+      servico_vendedor_id: sellerService.id,
+      status: { in: ["ABERTA", "ACORDADA", "AGUARDANDO_CONFIRMACAO"] },
+    },
+  });
   if (existing) return { conversation: serializeConversation(existing, userId, { includeMessages: true }) };
-  const conversation = await prisma.conversaServico.create({
+  const createConversation = (repository) => repository.createConversation({
     include: conversationInclude,
     data: {
       cliente_usuario_id: userId,
       descricao_inicial: initialDescription,
       destino: destination,
-      loja_solicitante_id: requesterStore?.id ?? null,
-      pedido_loja_id: requesterOrder?.id ?? null,
-      mensagens: requesterStore
-        ? {
-            create: {
-              lido_cliente_em: new Date(),
-              mensagem: `Nova corrida de ${requesterStore.nome}. Retirada: ${origin}. Destino: ${destination}.${initialDescription ? ` Detalhes: ${initialDescription}` : ""}`,
-              origem: "SISTEMA",
-            },
-          }
-        : undefined,
+      loja_solicitante_id: null,
+      pedido_loja_id: null,
       origem: origin,
       segmento_venda_id: segment.id,
       servico_vendedor_id: sellerService.id,
       vendedor_id: sellerService.vendedor_id,
     },
   });
+  const conversation = await createConversation(serviceChatsRepository);
   const serialized = serializeConversation(conversation, userId, { includeMessages: true });
   emitServiceChatCreated(serialized);
+  notifyCourierAvailability(conversation, false);
   return { conversation: serialized };
 }
 
 export async function listServiceConversations(userId) {
-  const conversations = await prisma.conversaServico.findMany({ include: conversationInclude, orderBy: { atualizado_em: "desc" }, where: { OR: [{ cliente_usuario_id: userId }, { vendedor: { usuario_id: userId } }] } });
+  const conversations = await serviceChatsRepository.findConversations({ include: conversationInclude, orderBy: { atualizado_em: "desc" }, where: { OR: [{ cliente_usuario_id: userId }, { vendedor: { usuario_id: userId } }] } });
   return { conversations: conversations.map((item) => serializeConversation(item, userId)) };
 }
 
@@ -548,7 +580,7 @@ export async function getServiceConversation(userId, conversationId) {
   const isSeller = conversation.vendedor.usuario_id === userId;
   const now = new Date();
 
-  await prisma.cobranca.updateMany({
+  await serviceChatsRepository.updateCharges({
     data: { expira_em: null, status: "ATIVA" },
     where: {
       pagamento_id: null,
@@ -557,8 +589,8 @@ export async function getServiceConversation(userId, conversationId) {
     },
   });
 
-  await prisma.$transaction([
-    prisma.conversaServicoMensagem.updateMany({
+  await serviceChatsRepository.transaction([
+    serviceChatsRepository.updateMessages({
       data: isSeller ? { lido_vendedor_em: now } : { lido_cliente_em: now },
       where: {
         conversa_servico_id: conversation.id,
@@ -569,7 +601,7 @@ export async function getServiceConversation(userId, conversationId) {
     }),
     ...(isSeller
       ? [
-          prisma.conversaServico.update({
+          serviceChatsRepository.updateConversation({
             data: { visualizado_vendedor_em: now },
             where: { id: conversation.id },
           }),
@@ -605,15 +637,16 @@ export async function createServiceProposal(userId, conversationId, data) {
     throw new AppError("Finalize a proposta atual antes de enviar outra", 409);
   }
 
-  const result = await prisma.$transaction(async (database) => {
-    await database.propostaServico.updateMany({
+  const result = await serviceChatsRepository.transaction(async (database) => {
+    const repository = createServiceChatsRepository(database);
+    await repository.updateProposals({
       data: { status: "CANCELADA" },
       where: {
         conversa_servico_id: conversation.id,
         status: "PENDENTE",
       },
     });
-    const proposal = await database.propostaServico.create({
+    const proposal = await repository.createProposal({
       data: {
         conversa_servico_id: conversation.id,
         descricao: data.description || null,
@@ -622,7 +655,7 @@ export async function createServiceProposal(userId, conversationId, data) {
         vendedor_id: conversation.vendedor_id,
       },
     });
-    await database.conversaServicoMensagem.create({
+    await repository.createMessage({
       data: {
         autor_usuario_id: userId,
         conversa_servico_id: conversation.id,
@@ -649,8 +682,9 @@ export async function acceptServiceProposal(userId, conversationId, proposalId) 
 
   if (isSeller) throw new AppError("O cliente precisa aceitar a proposta", 403);
 
-  const result = await prisma.$transaction(async (database) => {
-    const claim = await database.propostaServico.updateMany({
+  const result = await serviceChatsRepository.transaction(async (database) => {
+    const repository = createServiceChatsRepository(database);
+    const claim = await repository.updateProposals({
       data: { respondido_em: new Date(), status: "ACEITA" },
       where: {
         conversa_servico_id: conversation.id,
@@ -663,7 +697,7 @@ export async function acceptServiceProposal(userId, conversationId, proposalId) 
       throw new AppError("Esta proposta nao esta mais disponivel", 409);
     }
 
-    const proposal = await database.propostaServico.findUnique({
+    const proposal = await repository.findProposal({
       where: { id: parsedProposalId },
     });
     const charge = await createServiceConversationCharge(database, {
@@ -675,11 +709,11 @@ export async function acceptServiceProposal(userId, conversationId, proposalId) 
       serviceName: conversation.servico_vendedor?.tipo_servico?.nome ?? conversation.segmento_venda.nome,
       valueCents: Number(proposal.valor_centavos),
     });
-    await database.conversaServico.update({
+    await repository.updateConversation({
       data: { status: "ACORDADA" },
       where: { id: conversation.id },
     });
-    await database.conversaServicoMensagem.create({
+    await repository.createMessage({
       data: {
         autor_usuario_id: userId,
         conversa_servico_id: conversation.id,
@@ -707,7 +741,7 @@ export async function declineServiceProposal(userId, conversationId, proposalId)
     throw new AppError("O cliente precisa recusar a proposta", 403);
   }
 
-  const result = await prisma.propostaServico.updateMany({
+  const result = await serviceChatsRepository.updateProposals({
     data: { respondido_em: new Date(), status: "RECUSADA" },
     where: {
       conversa_servico_id: conversation.id,
@@ -717,7 +751,7 @@ export async function declineServiceProposal(userId, conversationId, proposalId)
   });
 
   if (result.count !== 1) throw new AppError("Esta proposta nao esta mais disponivel", 409);
-  await prisma.conversaServicoMensagem.create({
+  await serviceChatsRepository.createMessage({
     data: {
       autor_usuario_id: userId,
       conversa_servico_id: conversation.id,
@@ -755,30 +789,30 @@ export async function cancelServiceConversation(userId, conversationId) {
 
   const now = new Date();
   const isSeller = conversation.vendedor.usuario_id === userId;
-  await prisma.$transaction([
-    prisma.conversaServico.update({
+  await serviceChatsRepository.transaction([
+    serviceChatsRepository.updateConversation({
       data: { encerrado_em: now, status: "CANCELADA" },
       where: { id: conversation.id },
     }),
-    prisma.propostaServico.updateMany({
+    serviceChatsRepository.updateProposals({
       data: { status: "CANCELADA" },
       where: {
         conversa_servico_id: conversation.id,
         status: { in: ["PENDENTE", "ACEITA"] },
       },
     }),
-    prisma.cobranca.updateMany({
+    serviceChatsRepository.updateCharges({
       data: { cancelada_em: now, status: "CANCELADA" },
       where: {
         proposta_servico: { conversa_servico_id: conversation.id },
         status: { in: ["ATIVA", "EXPIRADA"] },
       },
     }),
-    prisma.solicitacaoMotoboy.updateMany({
+    serviceChatsRepository.updateCourierRequests({
       data: { cancelado_em: now, status: "CANCELADA" },
       where: { conversa_servico_id: conversation.id, status: "ACEITA" },
     }),
-    prisma.conversaServicoMensagem.create({
+    serviceChatsRepository.createMessage({
       data: {
         autor_usuario_id: userId,
         conversa_servico_id: conversation.id,
@@ -791,6 +825,11 @@ export async function cancelServiceConversation(userId, conversationId) {
 
   const updatedConversation = await findAccessibleConversation(userId, conversation.id);
   notifyConversation(updatedConversation, "service-cancelled");
+  notifyCourierAvailability(
+    updatedConversation,
+    Boolean(updatedConversation.servico_vendedor?.disponivel_agora)
+      && !(await isCourierSellerBusy(serviceChatsRepository, updatedConversation.vendedor_id)),
+  );
   return { conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
 }
 
@@ -809,12 +848,12 @@ export async function markServiceDelivered(userId, conversationId) {
     .find((proposal) => proposal.status === "PAGA");
   if (!paidProposal) throw new AppError("O pagamento precisa estar confirmado primeiro", 409);
 
-  await prisma.$transaction([
-    prisma.conversaServico.update({
+  await serviceChatsRepository.transaction([
+    serviceChatsRepository.updateConversation({
       data: { status: "AGUARDANDO_CONFIRMACAO" },
       where: { id: conversation.id },
     }),
-    prisma.conversaServicoMensagem.create({
+    serviceChatsRepository.createMessage({
       data: {
         autor_usuario_id: userId,
         conversa_servico_id: conversation.id,
@@ -840,20 +879,20 @@ export async function confirmServiceCompletion(userId, conversationId) {
   }
 
   const now = new Date();
-  await prisma.$transaction([
-    prisma.conversaServico.update({
+  await serviceChatsRepository.transaction([
+    serviceChatsRepository.updateConversation({
       data: { encerrado_em: now, status: "ENCERRADA" },
       where: { id: conversation.id },
     }),
-    prisma.propostaServico.updateMany({
+    serviceChatsRepository.updateProposals({
       data: { concluido_em: now, status: "CONCLUIDA" },
       where: { conversa_servico_id: conversation.id, status: "PAGA" },
     }),
-    prisma.solicitacaoMotoboy.updateMany({
+    serviceChatsRepository.updateCourierRequests({
       data: { status: "CONCLUIDA" },
       where: { conversa_servico_id: conversation.id, status: "ACEITA" },
     }),
-    prisma.conversaServicoMensagem.create({
+    serviceChatsRepository.createMessage({
       data: {
         autor_usuario_id: userId,
         conversa_servico_id: conversation.id,
@@ -865,6 +904,11 @@ export async function confirmServiceCompletion(userId, conversationId) {
   ]);
   const updatedConversation = await findAccessibleConversation(userId, conversation.id);
   notifyConversation(updatedConversation, "service-completed");
+  notifyCourierAvailability(
+    updatedConversation,
+    Boolean(updatedConversation.servico_vendedor?.disponivel_agora)
+      && !(await isCourierSellerBusy(serviceChatsRepository, updatedConversation.vendedor_id)),
+  );
   return { conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
 }
 
@@ -877,8 +921,8 @@ export async function createServiceConversationMessage(userId, conversationId, d
   let upload = null;
   try {
     if (imageFile) upload = await saveUploadedImage(imageFile, { folder: ["conversas-servico", String(conversation.id)], profile: "serviceChat" });
-    const message = await prisma.conversaServicoMensagem.create({ data: { autor_usuario_id: userId, conversa_servico_id: conversation.id, imagem_url: upload?.url ?? null, lido_cliente_em: isSeller ? null : new Date(), lido_vendedor_em: isSeller ? new Date() : null, mensagem: text || null, origem: isSeller ? "VENDEDOR" : "CLIENTE" } });
-    const savedConversation = await prisma.conversaServico.update({ include: conversationInclude, data: {}, where: { id: conversation.id } });
+    const message = await serviceChatsRepository.createMessage({ data: { autor_usuario_id: userId, conversa_servico_id: conversation.id, imagem_url: upload?.url ?? null, lido_cliente_em: isSeller ? null : new Date(), lido_vendedor_em: isSeller ? new Date() : null, mensagem: text || null, origem: isSeller ? "VENDEDOR" : "CLIENTE" } });
+    const savedConversation = await serviceChatsRepository.updateConversation({ include: conversationInclude, data: {}, where: { id: conversation.id } });
     const serializedConversation = serializeConversation(savedConversation, userId, { includeMessages: true });
     const serializedMessage = serializeMessage(message, userId);
     emitServiceChatMessageCreated({ conversation: serializedConversation, message: serializedMessage });

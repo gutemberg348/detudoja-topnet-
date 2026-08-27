@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  ReceiptText,
   Settings,
   ShieldCheck,
   Store,
@@ -17,14 +18,25 @@ import { Brand } from "../../components/Brand";
 import { CategoriesPage } from "../../pages/CategoriesPage";
 import { DashboardPage } from "../../pages/DashboardPage";
 import { NetworkPage } from "../../pages/NetworkPage";
+import { PaymentsPage } from "../../pages/PaymentsPage";
 import { ParticipantsPage } from "../../pages/ParticipantsPage";
 import { SegmentsPage } from "../../pages/SegmentsPage";
 import { SettingsPage } from "../../pages/SettingsPage";
 import { StoresPage } from "../../pages/StoresPage";
 import { ServiceTypesPage } from "../../pages/ServiceTypesPage";
+import {
+  canAccessAdminPage,
+  canManageEarnings,
+  canManageParticipantData,
+  canManageParticipantStatus,
+  canManageWallet,
+  canRefundPayments,
+  canManageSupport,
+} from "../../utils/admin-permissions";
 
 const pages = {
   categories: { component: CategoriesPage, context: "Comercial", icon: Tags, label: "Categorias" },
+  payments: { component: PaymentsPage, context: "Financeiro", icon: ReceiptText, label: "Pagamentos" },
   dashboard: { component: DashboardPage, context: "Operação", icon: LayoutDashboard, label: "Visão geral" },
   network: { component: NetworkPage, context: "Operação", icon: GitBranch, label: "Rede" },
   participants: { component: ParticipantsPage, context: "Operação", icon: UsersRound, label: "Participantes" },
@@ -53,14 +65,27 @@ const navigationGroups = [
     ],
   },
   {
+    label: "Financeiro",
+    items: [{ icon: ReceiptText, id: "payments", label: "Pagamentos" }],
+  },
+  {
     label: "Sistema",
     items: [{ icon: Settings, id: "settings", label: "Configurações" }],
   },
 ];
 
 export function AppShell({ onLogout, session }) {
-  const [activePage, setActivePage] = useState("dashboard");
+  const initialPage = canAccessAdminPage(session.user.role, "dashboard")
+    ? "dashboard"
+    : "payments";
+  const [activePage, setActivePage] = useState(initialPage);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const availableGroups = navigationGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => canAccessAdminPage(session.user.role, item.id)),
+    }))
+    .filter((group) => group.items.length > 0);
   const activePageConfig = pages[activePage];
   const ActivePage = activePageConfig.component;
   const ActiveIcon = activePageConfig.icon;
@@ -88,7 +113,7 @@ export function AppShell({ onLogout, session }) {
           </button>
         </div>
           <nav aria-label="Navegação administrativa">
-          {navigationGroups.map((group) => (
+          {availableGroups.map((group) => (
             <div className="sidebar__group" key={group.label}>
               <span className="sidebar__group-label">{group.label}</span>
               {group.items.map(({ icon: Icon, id, label }) => (
@@ -152,7 +177,16 @@ export function AppShell({ onLogout, session }) {
           </div>
         </header>
         <main>
-          <ActivePage accessToken={session.accessToken} onNavigate={navigate} />
+          <ActivePage
+            accessToken={session.accessToken}
+            canManageWallet={canManageWallet(session.user.role)}
+            canRefundPayments={canRefundPayments(session.user.role)}
+            canManageEarnings={canManageEarnings(session.user.role)}
+            canManageParticipantData={canManageParticipantData(session.user.role)}
+            canManageParticipantStatus={canManageParticipantStatus(session.user.role)}
+            canManageSupport={canManageSupport(session.user.role)}
+            onNavigate={navigate}
+          />
         </main>
       </div>
     </div>

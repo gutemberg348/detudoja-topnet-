@@ -28,11 +28,11 @@ export function StoreCourierTeamScreen({ navigation, route }) {
   const [removingId, setRemovingId] = useState(null);
 
   const onlineCount = useMemo(
-    () => members.filter((member) => member.courier.isOnline).length,
+    () => members.filter((member) => member.courier.isAvailable).length,
     [members],
   );
   const sortedMembers = useMemo(
-    () => [...members].sort((left, right) => Number(right.courier.isOnline) - Number(left.courier.isOnline)),
+    () => [...members].sort((left, right) => Number(right.courier.isAvailable) - Number(left.courier.isAvailable)),
     [members],
   );
 
@@ -210,7 +210,7 @@ function TeamCount({ online, total }) {
 function TeamMemberCard({ loading, member, onRemove }) {
   const courier = member.courier;
   return (
-    <View style={[styles.memberCard, courier.isOnline && styles.memberCardOnline]}>
+    <View style={[styles.memberCard, courier.isAvailable && styles.memberCardOnline]}>
       <View style={styles.memberTopline}>
         <View style={styles.avatar}>
           {courier.photoUrl
@@ -220,9 +220,9 @@ function TeamMemberCard({ loading, member, onRemove }) {
         <View style={styles.copy}>
           <View style={styles.nameLine}>
             <Text numberOfLines={1} style={styles.memberName}>{courier.displayName}</Text>
-            <View style={[styles.statusPill, courier.isOnline && styles.statusPillOnline]}>
-              <View style={[styles.statusDot, courier.isOnline && styles.statusDotOnline]} />
-              <Text style={[styles.statusText, courier.isOnline && styles.statusTextOnline]}>{courier.isOnline ? "Online" : "Offline"}</Text>
+            <View style={[styles.statusPill, courier.isAvailable && styles.statusPillOnline]}>
+              <View style={[styles.statusDot, courier.isAvailable && styles.statusDotOnline]} />
+              <Text style={[styles.statusText, courier.isAvailable && styles.statusTextOnline]}>{courier.isAvailable ? "Disponivel" : courier.isBusy ? "Em corrida" : "Offline"}</Text>
             </View>
           </View>
           <Text numberOfLines={1} style={styles.memberVehicle}>{courier.vehicleModel} - {courier.color} - {courier.plate}</Text>

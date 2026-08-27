@@ -17,6 +17,25 @@ export function getAdminDashboard(accessToken) {
   return apiGet("/api/admin/dashboard", accessToken);
 }
 
+export function getAdminPayments(accessToken, params) {
+  return apiGet(withQuery("/api/admin/payments", params), accessToken);
+}
+
+export function refundAdminPayment(accessToken, paymentId, reason) {
+  return apiRequest(`/api/admin/payments/${paymentId}/refund`, {
+    body: { reason },
+    method: "POST",
+    token: accessToken,
+  });
+}
+
+export function refreshAdminRefund(accessToken, paymentId) {
+  return apiRequest(`/api/admin/payments/${paymentId}/refund/refresh`, {
+    method: "POST",
+    token: accessToken,
+  });
+}
+
 export function getAdminNetwork(accessToken, params) {
   return apiGet(withQuery("/api/admin/network", params), accessToken);
 }

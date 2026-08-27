@@ -16,7 +16,7 @@ import { colors, fonts, spacing, typography } from "../utils/theme";
 import { AppButton } from "./AppButton";
 import { AppInput } from "./AppInput";
 
-export function AuthCredentialsForm({ mode = "login" }) {
+export function AuthCredentialsForm({ mode = "login", registrationCode = "", storeSlug = "" }) {
   const { login, register } = useAuthStore();
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState({
@@ -32,7 +32,7 @@ export function AuthCredentialsForm({ mode = "login" }) {
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loginValue, setLoginValue] = useState("");
-  const [inviteCode, setInviteCode] = useState("");
+  const [inviteCode, setInviteCode] = useState(registrationCode);
   const [message, setMessage] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
@@ -106,6 +106,7 @@ export function AuthCredentialsForm({ mode = "login" }) {
           ...(inviteCode.trim()
             ? { inviteCode: inviteCode.trim().toUpperCase() }
             : {}),
+          ...(storeSlug ? { storeSlug } : {}),
           name: name.trim(),
           password,
           phone: onlyDigits(phone),
@@ -226,15 +227,27 @@ export function AuthCredentialsForm({ mode = "login" }) {
             textContentType="emailAddress"
             value={email}
           />
-          <AppInput
-            autoCapitalize="characters"
-            autoComplete="off"
-            icon="people-outline"
-            onChangeText={updateField(setInviteCode, "inviteCode")}
-            placeholder="Codigo de convite (opcional)"
-            returnKeyType="next"
-            value={inviteCode}
-          />
+          {storeSlug ? (
+            <View style={styles.storeOrigin}>
+              <View style={styles.storeOriginIcon}>
+                <Text style={styles.storeOriginIconText}>d</Text>
+              </View>
+              <View style={styles.storeOriginCopy}>
+                <Text style={styles.storeOriginTitle}>Cadastro indicado por uma loja</Text>
+                <Text style={styles.storeOriginText}>Sua origem ja esta aplicada. Conclua seus dados.</Text>
+              </View>
+            </View>
+          ) : (
+            <AppInput
+              autoCapitalize="characters"
+              autoComplete="off"
+              icon="people-outline"
+              onChangeText={updateField(setInviteCode, "inviteCode")}
+              placeholder="Codigo de convite ou da loja"
+              returnKeyType="next"
+              value={inviteCode}
+            />
+          )}
         </>
       ) : (
         <AppInput
@@ -286,6 +299,28 @@ export function AuthCredentialsForm({ mode = "login" }) {
 }
 
 const styles = StyleSheet.create({
+  storeOrigin: {
+    alignItems: "center",
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primaryLight,
+    borderRadius: 10,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    padding: spacing.md,
+  },
+  storeOriginCopy: { flex: 1, gap: 2, minWidth: 0 },
+  storeOriginIcon: {
+    alignItems: "center",
+    backgroundColor: colors.primaryDark,
+    borderRadius: 20,
+    height: 40,
+    justifyContent: "center",
+    width: 40,
+  },
+  storeOriginIconText: { color: colors.card, fontFamily: fonts.extraBold, fontSize: 21 },
+  storeOriginText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption },
+  storeOriginTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small, fontWeight: "700" },
   forgot: {
     color: colors.primaryDark,
     fontFamily: fonts.bold,

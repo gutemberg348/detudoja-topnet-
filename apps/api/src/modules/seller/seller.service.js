@@ -1,13 +1,12 @@
 import { randomUUID } from "crypto";
-import { prisma } from "../../config/prisma.js";
 import {
   emitOrderMessageCreated,
   emitOrderStatusUpdated,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
+import { createSellerRepository, sellerRepository } from "./seller.repository.js";
 import { parsePositiveId } from "../../utils/ids.js";
-import { requireUserBaseAddress, sameCity } from "../../utils/location.js";
-import { requireUserCpf } from "../../utils/cpf-required.js";
+import { sameCity } from "../../utils/location.js";
 import {
   createAutonomousQrCharge,
   serializeChargeWithQr,
@@ -21,6 +20,7 @@ import {
   serializeOrderMessage,
   serializeOrderProposal,
 } from "../orders/orders.serializer.js";
+import { releaseReservedOrderStock } from "../orders/order-stock.service.js";
 
 const individualMerchantMonthlyLimitCents = 500000n;
 const sellerOrderInclude = {
@@ -81,6 +81,47 @@ function hasValidDocumentShape(documentDigits, type) {
     documentDigits.length === expectedLength &&
     !/^(\d)\1+$/.test(documentDigits)
   );
+}
+
+function commercialDocumentField(type) {
+  return type === "JURIDICA" ? "cnpj" : "cpf";
+}
+
+function isCommercialDocumentUniqueConflict(error) {
+  if (error?.code !== "P2002") {
+    return false;
+  }
+
+  const target = Array.isArray(error.meta?.target)
+    ? error.meta.target.join(",")
+    : String(error.meta?.target ?? "");
+
+  return target.includes("cpf") || target.includes("cnpj");
+}
+
+function commercialDocumentConflictError(type) {
+  return new AppError(
+    type === "JURIDICA"
+      ? "Este CNPJ ja esta vinculado a outro cadastro comercial"
+      : "Este CPF ja esta vinculado a outro cadastro comercial",
+    409,
+  );
+}
+
+async function assertCommercialDocumentAvailable(repository, {
+  documentDigits,
+  type,
+  userId,
+  profile,
+}) {
+  const field = commercialDocumentField(type);
+  const existing = profile === "MERCHANT"
+    ? await repository.findMerchantByDocument(field, documentDigits, userId)
+    : await repository.findSellerByDocument(field, documentDigits, userId);
+
+  if (existing) {
+    throw commercialDocumentConflictError(type);
+  }
 }
 
 function commercialApprovalData(type) {
@@ -390,7 +431,7 @@ function serializeSellerProfile(seller) {
 }
 
 async function getActiveSegment(segmentId) {
-  const segment = await prisma.segmentoVenda.findFirst({
+  const segment = await sellerRepository.findFirstSegment({
     where: { excluido_em: null, id: segmentId, status: "ATIVO" },
   });
 
@@ -402,7 +443,7 @@ async function getActiveSegment(segmentId) {
 }
 
 export async function listSellerSegments() {
-  const segments = await prisma.segmentoVenda.findMany({
+  const segments = await sellerRepository.findSegments({
     orderBy: [{ ordem: "asc" }, { nome: "asc" }],
     where: { excluido_em: null, status: "ATIVO" },
   });
@@ -411,7 +452,7 @@ export async function listSellerSegments() {
 }
 
 export async function listSellerStoreCategories() {
-  const categories = await prisma.categoriaLoja.findMany({
+  const categories = await sellerRepository.findCategories({
     include: {
       segmento_venda: true,
       segmentos_venda: {
@@ -428,11 +469,11 @@ export async function listSellerStoreCategories() {
 
 export async function getSellerProfile(userId) {
   const [seller, merchant] = await Promise.all([
-    prisma.vendedor.findFirst({
+    sellerRepository.findFirstSeller({
       include: { segmento_venda: true },
       where: { excluido_em: null, usuario_id: userId },
     }),
-    prisma.lojista.findFirst({
+    sellerRepository.findFirstMerchant({
       include: {
         lojas: {
           include: {
@@ -465,7 +506,7 @@ export async function getSellerProfile(userId) {
   ]);
 
   const sales = seller
-    ? await prisma.vendaAutonoma.findMany({
+    ? await sellerRepository.findSales({
         include: { cobranca: true, segmento_venda: true },
         orderBy: { criado_em: "desc" },
         take: 8,
@@ -483,7 +524,7 @@ export async function getSellerProfile(userId) {
 export async function createSellerOnboarding(userId, data) {
   const [segment, user] = await Promise.all([
     getActiveSegment(data.segmentId),
-    prisma.usuario.findUnique({
+    sellerRepository.findUniqueUser({
       include: { kyc: true },
       where: { id: userId },
     }),
@@ -510,14 +551,25 @@ export async function createSellerOnboarding(userId, data) {
     throw new AppError("Informe um CNPJ valido para vender", 400);
   }
 
-  const seller = await prisma.$transaction(async (database) => {
-    const savedSeller = await database.vendedor.upsert({
+  try {
+    const seller = await sellerRepository.transaction(async (database) => {
+      const repository = createSellerRepository(database);
+      await assertCommercialDocumentAvailable(repository, {
+        documentDigits,
+        profile: "SELLER",
+        type: data.type,
+        userId,
+      });
+
+      const savedSeller = await repository.upsertSeller({
       create: {
         aceita_servicos: true,
         categoria: segment.nome,
         cnpj: data.type === "JURIDICA" ? documentDigits : null,
         cpf: data.type === "FISICA" ? documentDigits : null,
         descricao: data.description || null,
+        limite_faturamento_mensal_centavos:
+          data.type === "FISICA" ? individualMerchantMonthlyLimitCents : null,
         nome_publico: data.publicName || user.nome,
         segmento_venda_id: segment.id,
         status: "ATIVO",
@@ -531,6 +583,8 @@ export async function createSellerOnboarding(userId, data) {
         cnpj: data.type === "JURIDICA" ? documentDigits : null,
         cpf: data.type === "FISICA" ? documentDigits : null,
         descricao: data.description || null,
+        limite_faturamento_mensal_centavos:
+          data.type === "FISICA" ? individualMerchantMonthlyLimitCents : null,
         nome_publico: data.publicName || user.nome,
         segmento_venda_id: segment.id,
         status: "ATIVO",
@@ -540,15 +594,22 @@ export async function createSellerOnboarding(userId, data) {
       where: { usuario_id: userId },
     });
 
-    return savedSeller;
-  });
+      return savedSeller;
+    });
 
-  return { profile: serializeSellerProfile(seller) };
+    return { profile: serializeSellerProfile(seller) };
+  } catch (error) {
+    if (isCommercialDocumentUniqueConflict(error)) {
+      throw commercialDocumentConflictError(data.type);
+    }
+
+    throw error;
+  }
 }
 
 export async function createAutonomousSale(userId, data) {
-  await requireUserCpf(prisma, userId);
-  const seller = await prisma.vendedor.findFirst({
+  await sellerRepository.requireUserCpf(userId);
+  const seller = await sellerRepository.findFirstSeller({
     include: { segmento_venda: true },
     where: { excluido_em: null, usuario_id: userId },
   });
@@ -562,8 +623,8 @@ export async function createAutonomousSale(userId, data) {
   }
 
   const linkSlug = `${slugify(data.title) || "venda"}-${randomUUID().slice(0, 8)}`;
-  const { charge, sale } = await prisma.$transaction(async (database) => {
-    const createdSale = await database.vendaAutonoma.create({
+  const { charge, sale } = await sellerRepository.transaction(async (database) => {
+    const createdSale = await createSellerRepository(database).createAutonomousSale({
       data: {
         descricao: data.description || null,
         link_slug: linkSlug,
@@ -594,7 +655,7 @@ export async function createAutonomousSale(userId, data) {
 
 async function findStoreForUser(userId, storeId) {
   const parsedStoreId = parsePositiveId(storeId, "Loja invalida");
-  const store = await prisma.loja.findFirst({
+  const store = await sellerRepository.findFirstStore({
     include: {
       _count: {
         select: {
@@ -664,7 +725,7 @@ export async function updateSellerStoreMedia(userId, storeId, data, files = {}) 
       savedUploads.push(bannerUpload.url);
     }
 
-    const store = await prisma.loja.update({
+    const store = await sellerRepository.updateStore({
       data: {
         ...(bannerUpload ? { banner_url: bannerUpload.url } : {}),
         ...(data.description !== undefined ? { descricao: data.description || null } : {}),
@@ -710,7 +771,7 @@ export async function updateSellerStore(userId, storeId, data) {
   const currentStore = await findStoreForUser(userId, storeId);
 
   if (data.address) {
-    const baseAddress = await requireUserBaseAddress(prisma, userId);
+    const baseAddress = await sellerRepository.getUserBaseAddress(userId);
     if (!sameCity(baseAddress, data.address)) {
       throw new AppError("A loja precisa permanecer na cidade-base da sua conta", 409);
     }
@@ -720,7 +781,7 @@ export async function updateSellerStore(userId, storeId, data) {
   let segment = null;
 
   if (data.segmentId) {
-    segment = await prisma.segmentoVenda.findFirst({
+    segment = await sellerRepository.findFirstSegment({
       include: {
         categoria_loja: true,
         categorias_loja: {
@@ -741,7 +802,7 @@ export async function updateSellerStore(userId, storeId, data) {
     throw new AppError("Selecione o segmento da loja", 400);
   }
 
-  const store = await prisma.loja.update({
+  const store = await sellerRepository.updateStore({
     data: {
       ...(data.address
         ? {
@@ -807,18 +868,19 @@ export async function deleteSellerStore(userId, storeId) {
     ...(store.produtos ?? []).map((product) => product.imagem_url),
   ].filter(Boolean);
 
-  await prisma.$transaction(async (database) => {
-    await database.produtoLoja.updateMany({
+  await sellerRepository.transaction(async (database) => {
+    const repository = createSellerRepository(database);
+    await repository.updateProducts({
       data: { excluido_em: now, status: "INATIVO" },
       where: { excluido_em: null, loja_id: store.id },
     });
 
-    await database.usuarioLoja.updateMany({
+    await repository.updateStoreMembers({
       data: { status: "INATIVO" },
       where: { loja_id: store.id },
     });
 
-    await database.loja.update({
+    await repository.updateStore({
       data: {
         excluido_em: now,
         status: "PAUSADA",
@@ -839,7 +901,7 @@ export async function createStoreProduct(userId, storeId, data, imageFile = null
   let imageUpload = null;
 
   try {
-    product = await prisma.produtoLoja.create({
+    product = await sellerRepository.createProduct({
       data: {
         aceita_entrega: data.acceptDelivery ?? true,
         aceita_retirada: data.acceptPickup ?? true,
@@ -869,7 +931,7 @@ export async function createStoreProduct(userId, storeId, data, imageFile = null
         profile: "product",
       });
 
-      product = await prisma.produtoLoja.update({
+      product = await sellerRepository.updateProduct({
         data: { imagem_url: imageUpload.url },
         where: { id: product.id },
       });
@@ -882,7 +944,7 @@ export async function createStoreProduct(userId, storeId, data, imageFile = null
     }
 
     if (product) {
-      await prisma.produtoLoja.delete({ where: { id: product.id } }).catch(() => {});
+      await sellerRepository.deleteProduct({ where: { id: product.id } }).catch(() => {});
     }
 
     throw error;
@@ -893,7 +955,7 @@ async function findStoreProductForUser(userId, storeId, productId) {
   const store = await findStoreForUser(userId, storeId);
   const parsedProductId = parsePositiveId(productId, "Produto invalido");
 
-  const product = await prisma.produtoLoja.findFirst({
+  const product = await sellerRepository.findFirstProduct({
     where: {
       excluido_em: null,
       id: parsedProductId,
@@ -920,7 +982,7 @@ export async function updateStoreProduct(userId, storeId, productId, data, image
       });
     }
 
-    const product = await prisma.produtoLoja.update({
+    const product = await sellerRepository.updateProduct({
       data: {
         ...(data.acceptDelivery !== undefined
           ? { aceita_entrega: Boolean(data.acceptDelivery) }
@@ -977,7 +1039,7 @@ export async function updateStoreProduct(userId, storeId, productId, data, image
 export async function deleteStoreProduct(userId, storeId, productId) {
   const product = await findStoreProductForUser(userId, storeId, productId);
 
-  await prisma.produtoLoja.update({
+  await sellerRepository.updateProduct({
     data: {
       excluido_em: new Date(),
       status: "INATIVO",
@@ -994,7 +1056,8 @@ export async function updateStoreOrderStatus(userId, storeId, orderId, status) {
   const store = await findStoreForUser(userId, storeId);
   const parsedOrderId = parsePositiveId(orderId, "Pedido invalido");
 
-  const currentOrder = await prisma.pedidoLoja.findFirst({
+  const currentOrder = await sellerRepository.findFirstOrder({
+    include: { pagamento: { select: { status: true } } },
     where: {
       id: parsedOrderId,
       loja_id: store.id,
@@ -1013,11 +1076,32 @@ export async function updateStoreOrderStatus(userId, storeId, orderId, status) {
     throw new AppError("Pedido concluido nao pode voltar etapa", 409);
   }
 
+  if (status === "CANCELADO") {
+    const paid = ["PAGO", "LIQUIDADO", "EM_DISPUTA", "ESTORNADO"].includes(
+      currentOrder.pagamento?.status,
+    );
+    const alreadyInFulfillment = [
+      "ACEITO",
+      "PREPARANDO",
+      "SAIU_ENTREGA",
+      "PRONTO_RETIRADA",
+      "CONCLUIDO",
+    ].includes(currentOrder.status);
+
+    if (paid || alreadyInFulfillment) {
+      throw new AppError(
+        "Pedido pago ou em atendimento exige cancelamento pelo suporte",
+        409,
+      );
+    }
+  }
+
   const now = new Date();
   const statusChanged = currentOrder.status !== status;
-  const order = await prisma.$transaction(async (database) => {
+  const order = await sellerRepository.transaction(async (database) => {
+    const repository = createSellerRepository(database);
     if (status === "CANCELADO") {
-      await database.propostaPedidoLoja.updateMany({
+      await repository.updateProposals({
         data: { status: "CANCELADA" },
         where: {
           pedido_id: parsedOrderId,
@@ -1026,7 +1110,7 @@ export async function updateStoreOrderStatus(userId, storeId, orderId, status) {
       });
     }
 
-    const updatedOrder = await database.pedidoLoja.update({
+    const updatedOrder = await repository.updateOrder({
       data: {
         status,
         ...statusTimestampData(status, currentOrder, now),
@@ -1035,10 +1119,14 @@ export async function updateStoreOrderStatus(userId, storeId, orderId, status) {
       where: { id: parsedOrderId },
     });
 
+    if (status === "CANCELADO") {
+      await releaseReservedOrderStock(database, parsedOrderId);
+    }
+
     if (statusChanged) {
       const copy = statusMessageCopy[status];
 
-      await database.pedidoLojaMensagem.create({
+      await repository.createOrderMessage({
         data: {
           autor_usuario_id: userId,
           lido_loja_em: new Date(),
@@ -1067,7 +1155,7 @@ async function findStoreOrderForUser(userId, storeId, orderId) {
   const store = await findStoreForUser(userId, storeId);
   const parsedOrderId = parsePositiveId(orderId, "Pedido invalido");
 
-  const order = await prisma.pedidoLoja.findFirst({
+  const order = await sellerRepository.findFirstOrder({
     select: { id: true, loja_id: true, usuario_id: true },
     where: {
       id: parsedOrderId,
@@ -1085,7 +1173,7 @@ async function findStoreOrderForUser(userId, storeId, orderId) {
 export async function listStoreOrderMessages(userId, storeId, orderId) {
   const order = await findStoreOrderForUser(userId, storeId, orderId);
 
-  await prisma.pedidoLojaMensagem.updateMany({
+  await sellerRepository.updateOrderMessages({
     data: { lido_loja_em: new Date() },
     where: {
       lido_loja_em: null,
@@ -1094,7 +1182,7 @@ export async function listStoreOrderMessages(userId, storeId, orderId) {
     },
   });
 
-  const messages = await prisma.pedidoLojaMensagem.findMany({
+  const messages = await sellerRepository.findOrderMessages({
     include: orderMessageInclude,
     orderBy: { criado_em: "asc" },
     where: { pedido_id: order.id },
@@ -1106,7 +1194,7 @@ export async function listStoreOrderMessages(userId, storeId, orderId) {
 export async function createStoreOrderMessage(userId, storeId, orderId, data) {
   const order = await findStoreOrderForUser(userId, storeId, orderId);
 
-  const message = await prisma.pedidoLojaMensagem.create({
+  const message = await sellerRepository.createOrderMessage({
     data: {
       autor_usuario_id: userId,
       lido_loja_em: new Date(),
@@ -1133,7 +1221,7 @@ export async function createStoreOrderMessage(userId, storeId, orderId, data) {
 export async function createStoreOrderProposal(userId, storeId, orderId, data) {
   const store = await findStoreForUser(userId, storeId);
   const parsedOrderId = parsePositiveId(orderId, "Pedido invalido");
-  const currentOrder = await prisma.pedidoLoja.findFirst({
+  const currentOrder = await sellerRepository.findFirstOrder({
     select: {
       id: true,
       loja_id: true,
@@ -1155,15 +1243,16 @@ export async function createStoreOrderProposal(userId, storeId, orderId, data) {
     throw new AppError("Este pedido nao esta aberto para uma nova proposta", 409);
   }
 
-  const result = await prisma.$transaction(async (database) => {
-    await database.propostaPedidoLoja.updateMany({
+  const result = await sellerRepository.transaction(async (database) => {
+    const repository = createSellerRepository(database);
+    await repository.updateProposals({
       data: { status: "CANCELADA" },
       where: {
         pedido_id: currentOrder.id,
         status: "PENDENTE",
       },
     });
-    const proposal = await database.propostaPedidoLoja.create({
+    const proposal = await repository.createProposal({
       data: {
         autor_usuario_id: userId,
         descricao: data.description || null,
@@ -1171,7 +1260,7 @@ export async function createStoreOrderProposal(userId, storeId, orderId, data) {
         valor_centavos: BigInt(data.amountCents),
       },
     });
-    const message = await database.pedidoLojaMensagem.create({
+    const message = await repository.createOrderMessage({
       data: {
         autor_usuario_id: userId,
         lido_loja_em: new Date(),
@@ -1192,7 +1281,7 @@ export async function createStoreOrderProposal(userId, storeId, orderId, data) {
       },
       include: orderMessageInclude,
     });
-    const order = await database.pedidoLoja.findUnique({
+    const order = await repository.findUniqueOrder({
       include: sellerOrderInclude,
       where: { id: currentOrder.id },
     });
@@ -1220,7 +1309,7 @@ export async function createStoreOrderProposal(userId, storeId, orderId, data) {
 
 export async function createSellerStore(userId, data) {
   const [segment, user] = await Promise.all([
-    prisma.segmentoVenda.findFirst({
+    sellerRepository.findFirstSegment({
       include: {
         categoria_loja: true,
         categorias_loja: {
@@ -1229,7 +1318,7 @@ export async function createSellerStore(userId, data) {
       },
       where: { excluido_em: null, id: data.segmentId, status: "ATIVO" },
     }),
-    prisma.usuario.findUnique({
+    sellerRepository.findUniqueUser({
       include: { kyc: true },
       where: { id: userId },
     }),
@@ -1243,7 +1332,7 @@ export async function createSellerStore(userId, data) {
     throw new AppError("Informe seu CPF antes de cadastrar a primeira loja", 428);
   }
 
-  const baseAddress = await requireUserBaseAddress(prisma, userId);
+  const baseAddress = await sellerRepository.getUserBaseAddress(userId);
   if (!sameCity(baseAddress, data.address)) {
     throw new AppError("A loja precisa ficar na cidade-base da sua conta", 409);
   }
@@ -1270,8 +1359,16 @@ export async function createSellerStore(userId, data) {
   }
 
   const baseSlug = slugify(data.name) || "loja";
-  const result = await prisma.$transaction(async (database) => {
-    const merchant = await database.lojista.upsert({
+  try {
+    const result = await sellerRepository.transaction(async (database) => {
+      const repository = createSellerRepository(database);
+      await assertCommercialDocumentAvailable(repository, {
+        documentDigits,
+        profile: "MERCHANT",
+        type: data.type,
+        userId,
+      });
+    const merchant = await repository.upsertMerchant({
       create: {
         cnpj: data.type === "JURIDICA" ? documentDigits : null,
         cpf: data.type === "FISICA" ? documentDigits : null,
@@ -1290,7 +1387,7 @@ export async function createSellerStore(userId, data) {
       where: { usuario_id: userId },
     });
 
-    const createdStore = await database.loja.create({
+    const createdStore = await repository.createStore({
       data: {
         aberta_para_pedidos: data.openForOrders ?? true,
         aceita_qrcode: true,
@@ -1315,7 +1412,7 @@ export async function createSellerStore(userId, data) {
       },
     });
 
-    await database.usuarioLoja.create({
+    await repository.createStoreMember({
       data: {
         cargo: "DONO",
         loja_id: createdStore.id,
@@ -1324,8 +1421,15 @@ export async function createSellerStore(userId, data) {
       },
     });
 
-    return { merchant, store: createdStore };
-  });
+      return { merchant, store: createdStore };
+    });
 
-  return { store: serializeStore(result.store, result.merchant) };
+    return { store: serializeStore(result.store, result.merchant) };
+  } catch (error) {
+    if (isCommercialDocumentUniqueConflict(error)) {
+      throw commercialDocumentConflictError(data.type);
+    }
+
+    throw error;
+  }
 }

@@ -42,20 +42,6 @@ export function StoreCourierRequestScreen({ navigation, route }) {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    const expiresAt = dispatch.currentRequest?.expiresAt;
-    if (!expiresAt) return undefined;
-    const delay = Math.max(0, new Date(expiresAt).getTime() - Date.now()) + 250;
-    const timer = setTimeout(() => load({ silent: true }), delay);
-    return () => clearTimeout(timer);
-  }, [dispatch.currentRequest?.expiresAt, load]);
-  useEffect(() => {
-    const expiresAt = dispatch.currentRequest?.expiresAt;
-    if (!expiresAt) return undefined;
-    const delay = Math.max(0, new Date(expiresAt).getTime() - Date.now()) + 250;
-    const timeout = setTimeout(() => load({ silent: true }), delay);
-    return () => clearTimeout(timeout);
-  }, [dispatch.currentRequest?.expiresAt, load]);
-  useEffect(() => {
     if (!session?.accessToken) return undefined;
     const socket = getRealtimeSocket(session.accessToken);
     const handleUpdate = async ({ request } = {}) => {
@@ -106,7 +92,7 @@ export function StoreCourierRequestScreen({ navigation, route }) {
 
   return (
     <ScreenContainer contentContainerStyle={styles.content}>
-      <PageHeader eyebrow="Entrega da loja" subtitle="Informe a rota. A conversa abre somente quando um motoboy aceitar." title="Chamar motoboy" />
+      <PageHeader eyebrow="Entrega da loja" subtitle="Informe a rota. O primeiro entregador que aceitar assume a corrida e abre a conversa." title="Chamar entregador" />
       <View style={styles.storeCard}><View style={styles.icon}><Ionicons color={colors.primaryDark} name="storefront-outline" size={21} /></View><View style={styles.copy}><Text style={styles.label}>RETIRADA</Text><Text style={styles.storeName}>{store?.name}</Text></View><Pressable onPress={() => navigation.navigate("StoreCourierTeam", { store })} style={styles.teamLink}><Ionicons color={colors.primaryDark} name="people-outline" size={16} /><Text style={styles.teamLinkText}>Equipe</Text></Pressable></View>
 
       <View style={styles.formCard}>
@@ -127,8 +113,8 @@ export function StoreCourierRequestScreen({ navigation, route }) {
 
       {!loading && !dispatch.currentRequest ? (
         <>
-          {dispatch.team.length ? <View style={styles.section}><SectionTitle subtitle="Chamada reservada para quem trabalha com sua loja" title="Motoboys cadastrados" />{dispatch.team.map((member) => <Pressable disabled={!member.isOnline || saving || !canRequest} key={member.id} onPress={() => callCourier(member.id)} style={[styles.memberCard, !member.isOnline && styles.disabled]}><View style={styles.memberAvatar}><Ionicons color={colors.primaryDark} name="bicycle-outline" size={20} /></View><View style={styles.copy}><Text style={styles.memberName}>{member.name}</Text><Text style={styles.memberMeta}>{member.isOnline ? `${member.vehicle} - disponivel` : "Offline agora"}</Text></View><Ionicons color={member.isOnline ? colors.primaryDark : colors.textMuted} name="arrow-forward" size={19} /></Pressable>)}</View> : null}
-          <View style={styles.section}><SectionTitle subtitle="O primeiro profissional da plataforma que aceitar assume a corrida" title="Chamada geral" /><View style={styles.platformCard}><View style={styles.platformIcon}><Ionicons color={colors.card} name="radio-outline" size={25} /></View><View style={styles.copy}><Text style={styles.platformTitle}>Chamar motoboy</Text><Text style={styles.platformText}>{dispatch.platformAvailable ? "Ha cobertura para sua loja agora." : "Sem cobertura neste momento."}</Text></View><Pressable disabled={!dispatch.platformAvailable || !canRequest || saving} onPress={() => callCourier()} style={[styles.callButton, (!dispatch.platformAvailable || !canRequest) && styles.disabled]}>{saving ? <ActivityIndicator color={colors.card} /> : <Ionicons color={colors.card} name="arrow-forward" size={20} />}</Pressable></View></View>
+          {dispatch.team.length ? <View style={styles.section}><SectionTitle subtitle="Escolha um entregador credenciado pela sua loja" title="Equipe credenciada" />{dispatch.team.map((member) => <Pressable disabled={!member.available || saving || !canRequest} key={member.id} onPress={() => callCourier(member.id)} style={[styles.memberCard, !member.available && styles.disabled]}><View style={styles.memberAvatar}><Ionicons color={colors.primaryDark} name="bicycle-outline" size={20} /></View><View style={styles.copy}><Text style={styles.memberName}>{member.name}</Text><Text style={styles.memberMeta}>{member.available ? `${member.vehicle} - disponivel` : member.isBusy ? "Em outra corrida" : "Offline agora"}</Text></View><Ionicons color={member.available ? colors.primaryDark : colors.textMuted} name="arrow-forward" size={19} /></Pressable>)}</View> : null}
+          <View style={styles.section}><SectionTitle subtitle="A plataforma avisa quem esta disponivel na sua cidade" title="Chamada geral" /><View style={styles.platformCard}><View style={styles.platformIcon}><Ionicons color={colors.card} name="radio-outline" size={25} /></View><View style={styles.copy}><Text style={styles.platformTitle}>Chamar entregador</Text><Text style={styles.platformText}>{dispatch.platformAvailable ? "Servico disponivel agora." : "Servico indisponivel agora."}</Text></View><Pressable disabled={!dispatch.platformAvailable || !canRequest || saving} onPress={() => callCourier()} style={[styles.callButton, (!dispatch.platformAvailable || !canRequest) && styles.disabled]}>{saving ? <ActivityIndicator color={colors.card} /> : <Ionicons color={colors.card} name="arrow-forward" size={20} />}</Pressable></View></View>
         </>
       ) : null}
     </ScreenContainer>

@@ -38,6 +38,8 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(
   rateLimit({
+    message: { message: "Muitas solicitacoes. Aguarde um minuto e tente novamente." },
+    skip: (req) => env.nodeEnv === "test" || req.path === "/api/webhooks/asaas",
     windowMs: 60 * 1000,
     limit: 120,
   }),

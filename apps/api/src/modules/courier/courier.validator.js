@@ -37,3 +37,14 @@ export const createCourierRequestSchema = z.object({
   origin: z.string().trim().min(5, "Informe o local da retirada").max(300),
   teamMemberId: z.coerce.number().int().positive().optional(),
 });
+
+export const createCustomerCourierRequestSchema = z.object({
+  description: z.string().trim().max(1200).optional().default(""),
+  destination: z.string().trim().max(300).optional().default(""),
+  origin: z.string().trim().max(300).optional().default(""),
+  serviceTypeId: z.coerce.number().int().positive("Servico invalido"),
+});
+
+export const updateCourierDispatchScopeSchema = z.object({
+  acceptsPlatformCalls: z.boolean(),
+});

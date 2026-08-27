@@ -17,24 +17,31 @@ import { adminUsersRoutes } from "./admin-users.routes.js";
 import { adminWalletRoutes } from "./admin-wallet.routes.js";
 import { adminWithdrawalsRoutes } from "./admin-withdrawals.routes.js";
 import { adminAuthMiddleware } from "../middlewares/admin-auth.middleware.js";
+import { roleMiddleware } from "../middlewares/role.middleware.js";
 
 export const adminRoutes = Router();
 
 adminRoutes.use("/auth", adminAuthRoutes);
 adminRoutes.use(adminAuthMiddleware);
-adminRoutes.use("/dashboard", adminDashboardRoutes);
-adminRoutes.use("/users", adminUsersRoutes);
-adminRoutes.use("/categories", adminCategoriesRoutes);
-adminRoutes.use("/segments", adminSegmentsRoutes);
-adminRoutes.use("/service-types", adminServiceTypesRoutes);
-adminRoutes.use("/kyc", adminKycRoutes);
-adminRoutes.use("/merchants", adminMerchantsRoutes);
-adminRoutes.use("/payments", adminPaymentsRoutes);
-adminRoutes.use("/wallet", adminWalletRoutes);
-adminRoutes.use("/ledger", adminLedgerRoutes);
-adminRoutes.use("/withdrawals", adminWithdrawalsRoutes);
-adminRoutes.use("/network", adminNetworkRoutes);
-adminRoutes.use("/bonus", adminBonusRoutes);
-adminRoutes.use("/fraud", adminFraudRoutes);
-adminRoutes.use("/fiscal", adminFiscalRoutes);
-adminRoutes.use("/settings", adminSettingsRoutes);
+
+const anyActiveAdmin = ["super_admin", "admin", "operacoes", "suporte", "financeiro", "compliance", "kyc"];
+const operationsRoles = ["super_admin", "admin", "operacoes"];
+const financialRoles = ["super_admin", "admin", "financeiro"];
+const complianceRoles = ["super_admin", "admin", "compliance", "kyc"];
+
+adminRoutes.use("/dashboard", roleMiddleware(...anyActiveAdmin), adminDashboardRoutes);
+adminRoutes.use("/users", roleMiddleware(...operationsRoles, "financeiro", "compliance", "kyc"), adminUsersRoutes);
+adminRoutes.use("/categories", roleMiddleware(...operationsRoles), adminCategoriesRoutes);
+adminRoutes.use("/segments", roleMiddleware(...operationsRoles), adminSegmentsRoutes);
+adminRoutes.use("/service-types", roleMiddleware(...operationsRoles), adminServiceTypesRoutes);
+adminRoutes.use("/kyc", roleMiddleware(...complianceRoles), adminKycRoutes);
+adminRoutes.use("/merchants", roleMiddleware(...operationsRoles), adminMerchantsRoutes);
+adminRoutes.use("/payments", roleMiddleware(...financialRoles), adminPaymentsRoutes);
+adminRoutes.use("/wallet", roleMiddleware(...financialRoles), adminWalletRoutes);
+adminRoutes.use("/ledger", roleMiddleware(...financialRoles), adminLedgerRoutes);
+adminRoutes.use("/withdrawals", roleMiddleware(...financialRoles), adminWithdrawalsRoutes);
+adminRoutes.use("/network", roleMiddleware(...operationsRoles), adminNetworkRoutes);
+adminRoutes.use("/bonus", roleMiddleware(...financialRoles), adminBonusRoutes);
+adminRoutes.use("/fraud", roleMiddleware("super_admin", "admin", "compliance"), adminFraudRoutes);
+adminRoutes.use("/fiscal", roleMiddleware(...financialRoles), adminFiscalRoutes);
+adminRoutes.use("/settings", roleMiddleware("super_admin", "admin", "financeiro", "suporte"), adminSettingsRoutes);

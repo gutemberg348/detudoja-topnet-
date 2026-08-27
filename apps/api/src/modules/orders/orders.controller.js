@@ -1,4 +1,5 @@
 import {
+  cancelCustomerOrder,
   acceptCustomerOrderProposal,
   completeCustomerOrder,
   createCheckoutOrder,
@@ -9,10 +10,31 @@ import {
   listCustomerOrders,
   payCustomerOrderProposal,
 } from "./orders.service.js";
+import { AppError } from "../../utils/errors.js";
+
+function idempotencyKeyFromRequest(req) {
+  const key = String(req.get("idempotency-key") ?? "").trim();
+
+  if (key.length < 12 || key.length > 120) {
+    throw new AppError("Envie uma chave de idempotencia valida para criar o pedido", 400);
+  }
+
+  return key;
+}
+
+export async function cancelCustomerOrderController(req, res, next) {
+  try {
+    res.json(await cancelCustomerOrder(req.auth.user.id, req.params.orderId));
+  } catch (error) {
+    next(error);
+  }
+}
 
 export async function createOnlineOrderRequestController(req, res, next) {
   try {
-    res.status(201).json(await createOnlineOrderRequest(req.auth.user.id, req.body));
+    res.status(201).json(await createOnlineOrderRequest(req.auth.user.id, req.body, {
+      idempotencyKey: idempotencyKeyFromRequest(req),
+    }));
   } catch (error) {
     next(error);
   }
@@ -20,7 +42,9 @@ export async function createOnlineOrderRequestController(req, res, next) {
 
 export async function createCheckoutOrderController(req, res, next) {
   try {
-    res.status(201).json(await createCheckoutOrder(req.auth.user.id, req.body));
+    res.status(201).json(await createCheckoutOrder(req.auth.user.id, req.body, {
+      idempotencyKey: idempotencyKeyFromRequest(req),
+    }));
   } catch (error) {
     next(error);
   }

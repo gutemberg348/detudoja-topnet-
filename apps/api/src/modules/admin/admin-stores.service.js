@@ -1,34 +1,8 @@
-import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../utils/errors.js";
 import { parsePositiveId } from "../../utils/ids.js";
 import { getPagination } from "../../utils/pagination.js";
 import { serializeAdminStore } from "./admin.serializer.js";
-
-const storeInclude = {
-  _count: {
-    select: {
-      pedidos: true,
-      produtos: { where: { excluido_em: null } },
-    },
-  },
-  categoria: {
-    include: { segmento_venda: true },
-  },
-  segmento_venda: true,
-  lojista: {
-    include: {
-      usuario: {
-        select: {
-          email: true,
-          id: true,
-          nome: true,
-          status: true,
-          telefone: true,
-        },
-      },
-    },
-  },
-};
+import { adminStoresRepository } from "./admin-stores.repository.js";
 
 function onlyDigits(value = "") {
   return String(value).replace(/\D/g, "");
@@ -74,10 +48,7 @@ function buildStoreWhere(query = {}) {
 }
 
 async function ensureCategoryExists(categoryId) {
-  const category = await prisma.categoriaLoja.findFirst({
-    select: { id: true },
-    where: { excluido_em: null, id: categoryId },
-  });
+  const category = await adminStoresRepository.findCategory(categoryId);
 
   if (!category) {
     throw new AppError("Categoria nao encontrada", 404);
@@ -85,15 +56,7 @@ async function ensureCategoryExists(categoryId) {
 }
 
 async function getStoreSegment(segmentId, categoryId) {
-  const segment = await prisma.segmentoVenda.findFirst({
-    include: {
-      categoria_loja: true,
-      categorias_loja: {
-        where: { excluido_em: null, status: "ATIVA" },
-      },
-    },
-    where: { excluido_em: null, id: segmentId, status: "ATIVO" },
-  });
+  const segment = await adminStoresRepository.findSegment(segmentId);
   const category = segment?.categoria_loja
     ?? segment?.categorias_loja.find((item) => item.id === categoryId)
     ?? null;
@@ -107,12 +70,9 @@ async function getStoreSegment(segmentId, categoryId) {
 
 async function ensureUniqueOwnerContact({ email, phone, userId }) {
   if (email) {
-    const user = await prisma.usuario.findFirst({
-      select: { id: true },
-      where: {
-        email,
-        id: { not: userId },
-      },
+    const user = await adminStoresRepository.findUserContactConflict({
+      email,
+      userId,
     });
 
     if (user) {
@@ -121,12 +81,9 @@ async function ensureUniqueOwnerContact({ email, phone, userId }) {
   }
 
   if (phone) {
-    const user = await prisma.usuario.findFirst({
-      select: { id: true },
-      where: {
-        id: { not: userId },
-        telefone: phone,
-      },
+    const user = await adminStoresRepository.findUserContactConflict({
+      phone,
+      userId,
     });
 
     if (user) {
@@ -139,14 +96,8 @@ export async function listAdminStores(query = {}) {
   const { page, perPage } = getPagination(query);
   const where = buildStoreWhere(query);
   const [stores, total] = await Promise.all([
-    prisma.loja.findMany({
-      include: storeInclude,
-      orderBy: { criado_em: "desc" },
-      skip: (page - 1) * perPage,
-      take: perPage,
-      where,
-    }),
-    prisma.loja.count({ where }),
+    adminStoresRepository.list({ page, perPage, where }),
+    adminStoresRepository.count(where),
   ]);
 
   return {
@@ -162,10 +113,7 @@ export async function listAdminStores(query = {}) {
 
 export async function getAdminStore(storeId) {
   const parsedStoreId = parsePositiveId(storeId, "Loja invalida");
-  const store = await prisma.loja.findFirst({
-    include: storeInclude,
-    where: { excluido_em: null, id: parsedStoreId },
-  });
+  const store = await adminStoresRepository.findStore(parsedStoreId);
 
   if (!store) {
     throw new AppError("Loja nao encontrada", 404);
@@ -176,10 +124,7 @@ export async function getAdminStore(storeId) {
 
 export async function updateAdminStore(adminId, storeId, data) {
   const parsedStoreId = parsePositiveId(storeId, "Loja invalida");
-  const currentStore = await prisma.loja.findFirst({
-    include: { lojista: true },
-    where: { excluido_em: null, id: parsedStoreId },
-  });
+  const currentStore = await adminStoresRepository.findCurrentStore(parsedStoreId);
 
   if (!currentStore) {
     throw new AppError("Loja nao encontrada", 404);
@@ -208,15 +153,12 @@ export async function updateAdminStore(adminId, storeId, data) {
     });
   }
 
-  const result = await prisma.$transaction(async (database) => {
+  const result = await adminStoresRepository.transaction(async (repository) => {
     if (shouldUpdateOwner) {
-      await database.usuario.update({
-        data: {
-          ...(data.ownerEmail ? { email: data.ownerEmail } : {}),
-          ...(data.ownerName ? { nome: data.ownerName } : {}),
-          ...(data.ownerPhone !== undefined ? { telefone: ownerPhone || null } : {}),
-        },
-        where: { id: currentStore.lojista.usuario_id },
+      await repository.updateOwner(currentStore.lojista.usuario_id, {
+        ...(data.ownerEmail ? { email: data.ownerEmail } : {}),
+        ...(data.ownerName ? { nome: data.ownerName } : {}),
+        ...(data.ownerPhone !== undefined ? { telefone: ownerPhone || null } : {}),
       });
     }
 
@@ -225,25 +167,21 @@ export async function updateAdminStore(adminId, storeId, data) {
       data.merchantKycStatus !== undefined ||
       data.merchantMonthlySalesLimitCents !== undefined
     ) {
-      await database.lojista.update({
-        data: {
-          ...(data.merchantKycStatus ? { status_kyc: data.merchantKycStatus } : {}),
-          ...(data.merchantMonthlySalesLimitCents !== undefined
-            ? {
-                limite_faturamento_mensal_centavos:
-                  data.merchantMonthlySalesLimitCents == null
-                    ? null
-                    : BigInt(data.merchantMonthlySalesLimitCents),
-              }
-            : {}),
-          ...(data.merchantStatus ? { status: data.merchantStatus } : {}),
-        },
-        where: { id: currentStore.lojista_id },
+      await repository.updateMerchant(currentStore.lojista_id, {
+        ...(data.merchantKycStatus ? { status_kyc: data.merchantKycStatus } : {}),
+        ...(data.merchantMonthlySalesLimitCents !== undefined
+          ? {
+              limite_faturamento_mensal_centavos:
+                data.merchantMonthlySalesLimitCents == null
+                  ? null
+                  : BigInt(data.merchantMonthlySalesLimitCents),
+            }
+          : {}),
+        ...(data.merchantStatus ? { status: data.merchantStatus } : {}),
       });
     }
 
-    return database.loja.update({
-      data: {
+    return repository.updateStore(parsedStoreId, {
         ...(data.acceptsOnlinePayment !== undefined
           ? { aceita_pagamento_online: data.acceptsOnlinePayment }
           : {}),
@@ -274,9 +212,6 @@ export async function updateAdminStore(adminId, storeId, data) {
               taxa_plataforma_personalizada_percentual: data.customFeePercent,
             }
           : {}),
-      },
-      include: storeInclude,
-      where: { id: parsedStoreId },
     });
   });
 
@@ -285,23 +220,13 @@ export async function updateAdminStore(adminId, storeId, data) {
 
 export async function deleteAdminStore(storeId) {
   const parsedStoreId = parsePositiveId(storeId, "Loja invalida");
-  const store = await prisma.loja.findFirst({
-    select: { id: true },
-    where: { excluido_em: null, id: parsedStoreId },
-  });
+  const store = await adminStoresRepository.findStoreId(parsedStoreId);
 
   if (!store) {
     throw new AppError("Loja nao encontrada", 404);
   }
 
-  await prisma.loja.update({
-    data: {
-      excluido_em: new Date(),
-      status: "PAUSADA",
-      visivel_no_app: false,
-    },
-    where: { id: parsedStoreId },
-  });
+  await adminStoresRepository.softDelete(parsedStoreId);
 
   return { deleted: true, storeId: parsedStoreId };
 }

@@ -2,7 +2,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useFocusEffect } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { useCallback, useEffect, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { Platform, StyleSheet, Vibration, View } from "react-native";
 import { HomeScreen } from "../app/HomeScreen";
 import { NetworkScreen } from "../app/NetworkScreen";
 import { ProfileScreen } from "../app/ProfileScreen";
@@ -42,6 +42,11 @@ const activeOrderStatuses = new Set([
   "PRONTO_RETIRADA",
 ]);
 const sellerAttentionStatuses = new Set(["NEGOCIANDO", "RECEBIDO"]);
+const activeServiceConversationStatuses = new Set([
+  "ABERTA",
+  "ACORDADA",
+  "AGUARDANDO_CONFIRMACAO",
+]);
 
 function isActiveOrder(order) {
   return activeOrderStatuses.has(order.status);
@@ -149,13 +154,18 @@ export function MainTabs() {
         getCourierRequests(session.accessToken),
       ]);
       const conversations = response.conversations ?? [];
+      const pendingCourierRequests = (courierResponse.requests ?? []).filter((request) => (
+        request.status === "PENDENTE"
+        && new Date(request.expiresAt).getTime() > Date.now()
+      ));
 
       setSellerServiceNotificationCount(
         conversations.filter(
           (conversation) =>
             conversation.isSeller
+            && activeServiceConversationStatuses.has(conversation.status)
             && (conversation.isNewForSeller || Number(conversation.unreadCount ?? 0) > 0),
-        ).length + (courierResponse.requests ?? []).length,
+        ).length + pendingCourierRequests.length,
       );
       setCustomerServiceNotificationCount(
         conversations.filter(
@@ -233,18 +243,22 @@ export function MainTabs() {
     if (!session?.accessToken) return undefined;
     const socket = getRealtimeSocket(session.accessToken);
     const refreshServices = () => loadServiceNotifications();
+    const notifyCourierRequest = () => {
+      if (Platform.OS !== "web") Vibration.vibrate([0, 180, 100, 240]);
+      loadServiceNotifications();
+    };
 
     socket?.on(realtimeEvents.serviceChatCreated, refreshServices);
     socket?.on(realtimeEvents.serviceChatMessageCreated, refreshServices);
     socket?.on(realtimeEvents.serviceChatUpdated, refreshServices);
-    socket?.on(realtimeEvents.courierRequestCreated, refreshServices);
+    socket?.on(realtimeEvents.courierRequestCreated, notifyCourierRequest);
     socket?.on(realtimeEvents.courierRequestUpdated, refreshServices);
 
     return () => {
       socket?.off(realtimeEvents.serviceChatCreated, refreshServices);
       socket?.off(realtimeEvents.serviceChatMessageCreated, refreshServices);
       socket?.off(realtimeEvents.serviceChatUpdated, refreshServices);
-      socket?.off(realtimeEvents.courierRequestCreated, refreshServices);
+      socket?.off(realtimeEvents.courierRequestCreated, notifyCourierRequest);
       socket?.off(realtimeEvents.courierRequestUpdated, refreshServices);
     };
   }, [loadServiceNotifications, session?.accessToken]);

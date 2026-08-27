@@ -1,9 +1,10 @@
-import { prisma } from "../../config/prisma.js";
 import { emitCourierTeamUpdated } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
 import { isValidCpf, normalizeCpf } from "../../utils/cpf.js";
 import { parsePositiveId } from "../../utils/ids.js";
-import { requireUserBaseAddress, sameCity } from "../../utils/location.js";
+import { sameCity } from "../../utils/location.js";
+import { getBusyCourierSellerIds } from "./courier-availability.js";
+import { courierRepository } from "./courier.repository.js";
 
 function serializeCourierProfile(profile) {
   if (!profile) return null;
@@ -11,6 +12,7 @@ function serializeCourierProfile(profile) {
   return {
     baseCity: profile.cidade_base,
     baseState: profile.estado_base,
+    acceptsPlatformCalls: profile.aceita_chamadas_plataforma,
     color: profile.cor_moto,
     contactPhone: profile.telefone_contato,
     createdAt: profile.criado_em.toISOString(),
@@ -36,7 +38,7 @@ function matchesStoreCity(courier, address) {
 
 async function findAccessibleStore(userId, storeId, { manageTeam = false } = {}) {
   const id = parsePositiveId(storeId, "Loja invalida");
-  const store = await prisma.loja.findFirst({
+  const store = await courierRepository.findStore({
     select: { endereco: { select: { cidade: true, estado: true } }, id: true, nome: true },
     where: {
       excluido_em: null,
@@ -84,7 +86,7 @@ const teamMemberInclude = {
   },
 };
 
-function serializeTeamMember(member) {
+function serializeTeamMember(member, busySellerIds = new Set()) {
   const courier = member.motoboy;
   const services = courier.vendedor.servicos ?? [];
   const preferredService = services.find((service) => service.tipo_servico.slug === "motoboy" && service.disponivel_agora)
@@ -93,6 +95,7 @@ function serializeTeamMember(member) {
     ?? services[0]
     ?? null;
   const isOnline = courier.status === "ATIVO" && Boolean(preferredService?.disponivel_agora);
+  const isBusy = busySellerIds.has(courier.vendedor_id);
 
   return {
     courier: {
@@ -101,6 +104,8 @@ function serializeTeamMember(member) {
       baseState: courier.estado_base,
       displayName: courier.nome_exibicao,
       id: courier.id,
+      isAvailable: isOnline && !isBusy,
+      isBusy,
       isOnline,
       name: courier.vendedor.nome_publico || courier.vendedor.usuario.nome,
       photoUrl: courier.vendedor.usuario.foto_url,
@@ -120,22 +125,52 @@ function serializeTeamMember(member) {
 }
 
 async function findTeamMember(memberId) {
-  return prisma.motoboyLoja.findUnique({
+  return courierRepository.findTeamMemberById({
     include: teamMemberInclude,
     where: { id: memberId },
   });
 }
 
 export async function getCourierProfile(userId) {
-  const profile = await prisma.motoboy.findFirst({
+  const profile = await courierRepository.findCourier({
+    include: { lojas: { where: { ativo: true } } },
     where: { vendedor: { excluido_em: null, usuario_id: userId } },
   });
 
-  return { profile: serializeCourierProfile(profile) };
+  return {
+    profile: profile ? {
+      ...serializeCourierProfile(profile),
+      linkedStoreCount: profile.lojas.length,
+    } : null,
+  };
+}
+
+export async function updateCourierDispatchScope(userId, { acceptsPlatformCalls }) {
+  const profile = await courierRepository.findCourier({
+    include: { lojas: { where: { ativo: true } } },
+    where: { vendedor: { excluido_em: null, usuario_id: userId } },
+  });
+  if (!profile) throw new AppError("Cadastre seu perfil de motoboy antes de definir a disponibilidade", 428);
+  if (!acceptsPlatformCalls && !profile.lojas.length) {
+    throw new AppError("Vincule-se a uma loja antes de receber somente chamadas credenciadas", 409);
+  }
+
+  const updated = await courierRepository.updateCourier({
+    data: { aceita_chamadas_plataforma: acceptsPlatformCalls },
+    include: { lojas: { where: { ativo: true } } },
+    where: { id: profile.id },
+  });
+
+  return {
+    profile: {
+      ...serializeCourierProfile(updated),
+      linkedStoreCount: updated.lojas.length,
+    },
+  };
 }
 
 export async function saveCourierProfile(userId, data) {
-  const seller = await prisma.vendedor.findFirst({
+  const seller = await courierRepository.findSeller({
     include: { usuario: { select: { cpf: true } } },
     where: { excluido_em: null, usuario_id: userId },
   });
@@ -153,14 +188,14 @@ export async function saveCourierProfile(userId, data) {
     throw new AppError("Confirme um CPF valido na sua conta antes de cadastrar o motoboy", 428);
   }
 
-  const baseAddress = await requireUserBaseAddress(prisma, userId);
+  const baseAddress = await courierRepository.getUserBaseAddress(userId);
   if (!sameCity(baseAddress, { city: data.baseCity, state: data.baseState })) {
     throw new AppError("O motoboy atende somente a cidade-base da sua conta", 409);
   }
 
   let profile;
   try {
-    profile = await prisma.motoboy.upsert({
+    profile = await courierRepository.upsertCourier({
       create: {
         cnh: data.driverLicense,
         cidade_base: data.baseCity,
@@ -195,31 +230,40 @@ export async function saveCourierProfile(userId, data) {
     throw error;
   }
 
-  return { profile: serializeCourierProfile(profile) };
+  return {
+    profile: {
+      ...serializeCourierProfile(profile),
+      linkedStoreCount: 0,
+    },
+  };
 }
 
 export async function listStoreCourierTeam(userId, storeId) {
   const store = await findAccessibleStore(userId, storeId);
-  const members = await prisma.motoboyLoja.findMany({
+  const members = await courierRepository.findTeamMembers({
     include: teamMemberInclude,
     orderBy: [{ criado_em: "asc" }],
     where: { ativo: true, loja_id: store.id },
   });
+  const busySellerIds = await getBusyCourierSellerIds(
+    courierRepository,
+    members.map((member) => member.motoboy.vendedor_id),
+  );
 
   return {
-    members: members.map(serializeTeamMember),
+    members: members.map((member) => serializeTeamMember(member, busySellerIds)),
     store: { id: store.id, name: store.nome },
   };
 }
 
 export async function addStoreCourier(userId, storeId, data) {
   const store = await findAccessibleStore(userId, storeId, { manageTeam: true });
-  const teamSize = await prisma.motoboyLoja.count({
+  const teamSize = await courierRepository.countTeamMembers({
     where: { ativo: true, loja_id: store.id },
   });
   if (teamSize >= 30) throw new AppError("Esta loja atingiu o limite de 30 motoboys", 409);
 
-  const courier = await prisma.motoboy.findFirst({
+  const courier = await courierRepository.findCourier({
     include: { vendedor: { select: { usuario_id: true } } },
     where: {
       status: { not: "BLOQUEADO" },
@@ -240,27 +284,28 @@ export async function addStoreCourier(userId, storeId, data) {
     throw new AppError("Use outro motoboy: voce nao pode chamar o proprio perfil", 409);
   }
 
-  const member = await prisma.motoboyLoja.upsert({
+  const member = await courierRepository.upsertTeamMember({
     create: { loja_id: store.id, motoboy_id: courier.id },
     update: { ativo: true },
     where: { loja_id_motoboy_id: { loja_id: store.id, motoboy_id: courier.id } },
   });
   const completeMember = await findTeamMember(member.id);
+  const busySellerIds = await getBusyCourierSellerIds(courierRepository, [completeMember.motoboy.vendedor_id]);
 
   emitCourierTeamUpdated({ courierUserId: courier.vendedor.usuario_id, storeId: store.id });
-  return { member: serializeTeamMember(completeMember) };
+  return { member: serializeTeamMember(completeMember, busySellerIds) };
 }
 
 export async function removeStoreCourier(userId, storeId, memberId) {
   const store = await findAccessibleStore(userId, storeId, { manageTeam: true });
   const id = parsePositiveId(memberId, "Motoboy da equipe invalido");
-  const member = await prisma.motoboyLoja.findFirst({
+  const member = await courierRepository.findTeamMember({
     include: { motoboy: { include: { vendedor: { select: { usuario_id: true } } } } },
     where: { id, loja_id: store.id },
   });
   if (!member) throw new AppError("Motoboy nao encontrado nesta equipe", 404);
 
-  await prisma.motoboyLoja.delete({ where: { id: member.id } });
+  await courierRepository.deleteTeamMember({ where: { id: member.id } });
   emitCourierTeamUpdated({ courierUserId: member.motoboy.vendedor.usuario_id, storeId: store.id });
   return { removed: true };
 }

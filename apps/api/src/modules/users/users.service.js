@@ -1,16 +1,6 @@
-import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../utils/errors.js";
 import { addressData } from "../../utils/location.js";
-
-const userInclude = {
-  enderecos: {
-    orderBy: [{ principal: "desc" }, { criado_em: "desc" }],
-    where: { excluido_em: null },
-  },
-  kyc: true,
-  lojista: true,
-  vendedor: true,
-};
+import { usersRepository } from "./users.repository.js";
 
 function serializeAddress(address) {
   return {
@@ -76,15 +66,7 @@ function deriveProfiles(user) {
 }
 
 async function getAccountLevel(user) {
-  const directVerifiedCount = await prisma.indicacao.count({
-    where: {
-      indicador_usuario_id: user.id,
-      indicado: {
-        status: "ATIVO",
-        kyc: { is: { status: "APROVADO" } },
-      },
-    },
-  });
+  const directVerifiedCount = await usersRepository.countVerifiedDirects(user.id);
   const isKycApproved = user.kyc?.status === "APROVADO";
   const isNetworkQualified = isKycApproved && directVerifiedCount >= 2;
 
@@ -98,10 +80,7 @@ async function getAccountLevel(user) {
 }
 
 export async function getCurrentUser(userId) {
-  const user = await prisma.usuario.findUnique({
-    include: userInclude,
-    where: { id: userId },
-  });
+  const user = await usersRepository.findUser(userId);
 
   if (!user) {
     throw new AppError("Usuario nao encontrado", 404);
@@ -111,44 +90,30 @@ export async function getCurrentUser(userId) {
 }
 
 export async function listCurrentUserAddresses(userId) {
-  const addresses = await prisma.enderecoUsuario.findMany({
-    orderBy: [{ principal: "desc" }, { criado_em: "desc" }],
-    where: { excluido_em: null, usuario_id: userId },
-  });
+  const addresses = await usersRepository.findAddresses(userId);
 
   return { addresses: addresses.map(serializeAddress) };
 }
 
 export async function updateCurrentUser(userId, data) {
   try {
-    await prisma.$transaction(async (database) => {
+    await usersRepository.transaction(async (repository) => {
       const currentAddress = data.address
-        ? await database.enderecoUsuario.findFirst({
-            orderBy: [{ principal: "desc" }, { criado_em: "asc" }],
-            where: { excluido_em: null, usuario_id: userId },
-          })
+        ? await repository.findCurrentAddress(userId)
         : null;
 
-      await database.usuario.update({
-        data: {
-          ...(data.email ? { email: data.email } : {}),
-          ...(data.name ? { nome: data.name } : {}),
-          ...(data.phone ? { telefone: data.phone } : {}),
-        },
-        where: { id: userId },
+      await repository.updateUser(userId, {
+        ...(data.email ? { email: data.email } : {}),
+        ...(data.name ? { nome: data.name } : {}),
+        ...(data.phone ? { telefone: data.phone } : {}),
       });
 
       if (data.address) {
         const savedAddress = addressData(data.address);
         if (currentAddress) {
-          await database.enderecoUsuario.update({
-            data: { ...savedAddress, principal: true },
-            where: { id: currentAddress.id },
-          });
+          await repository.updateAddress(currentAddress.id, savedAddress);
         } else {
-          await database.enderecoUsuario.create({
-            data: { ...savedAddress, nome_endereco: "Endereco principal", principal: true, usuario_id: userId },
-          });
+          await repository.createMainAddress(userId, savedAddress);
         }
       }
     });

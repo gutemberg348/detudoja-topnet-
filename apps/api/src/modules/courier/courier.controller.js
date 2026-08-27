@@ -4,11 +4,14 @@ import {
   listStoreCourierTeam,
   removeStoreCourier,
   saveCourierProfile,
+  updateCourierDispatchScope,
 } from "./courier.service.js";
 import {
   acceptCourierRequest,
   cancelCourierRequest,
+  createCustomerCourierRequest,
   createCourierRequest,
+  getCustomerCourierRequestState,
   getStoreCourierDispatch,
   listCourierRequests,
 } from "./courier-dispatch.service.js";
@@ -24,6 +27,14 @@ export async function getCourierProfileController(req, res, next) {
 export async function saveCourierProfileController(req, res, next) {
   try {
     res.json(await saveCourierProfile(req.auth.user.id, req.body));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateCourierDispatchScopeController(req, res, next) {
+  try {
+    res.json(await updateCourierDispatchScope(req.auth.user.id, req.body));
   } catch (error) {
     next(error);
   }
@@ -71,4 +82,12 @@ export async function acceptCourierRequestController(req, res, next) {
 
 export async function cancelCourierRequestController(req, res, next) {
   try { res.json(await cancelCourierRequest(req.auth.user.id, req.params.requestId)); } catch (error) { next(error); }
+}
+
+export async function getCustomerCourierRequestStateController(req, res, next) {
+  try { res.json(await getCustomerCourierRequestState(req.auth.user.id, req.query.serviceTypeId)); } catch (error) { next(error); }
+}
+
+export async function createCustomerCourierRequestController(req, res, next) {
+  try { res.status(201).json(await createCustomerCourierRequest(req.auth.user.id, req.body)); } catch (error) { next(error); }
 }

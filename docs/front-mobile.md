@@ -1116,6 +1116,13 @@ nao podem ficar online sem um perfil de motoboy ativo. O primeiro acionamento
 abre `service/CourierRegistrationModal.jsx`, com nome profissional, contato,
 CNH, placa, moto, cor, cidade, UF e raio de atendimento.
 
+Com o perfil criado, a mesma tela mostra a `Central do entregador`. O motoboy
+define se recebe chamadas de `Toda a cidade` ou somente de `Minhas lojas`
+credenciadas. Essa escolha nao altera o switch online: ele apenas filtra a
+origem das chamadas. A corrida pendente chega pelo Socket.IO, vibra com o app
+aberto e aparece antes das conversas. O app publico nunca mostra nome ou total
+de profissionais disponiveis; apenas informa se o servico esta disponivel.
+
 Depois do cadastro, o perfil resumido fica visivel acima dos switches e pode
 ser editado. Chamados de loja usam card diferenciado com loja, origem, destino,
 estado e contador de mensagens. A entrada no chat mostra a rota antes das
@@ -1125,6 +1132,8 @@ O painel de cada loja possui `Chamar motoboy`. A tela
 `StoreCourierRequestScreen.jsx` preenche a retirada com o endereco da loja e
 recebe destino e detalhes. A chamada geral e uma acao unica e nao revela nomes
 ou quantidade de profissionais; o primeiro motoboy que aceitar abre o chat.
+Quando a loja tiver equipe credenciada, ela pode chamar um integrante especifico
+na secao privada `Equipe credenciada`; a chamada geral continua anonima.
 
 Na busca comum, os tipos de entrega tambem usam cards especializados. Clientes
 podem chamar o profissional e combinar a rota no chat; lojas usam a tela de
@@ -1229,6 +1238,53 @@ alimentam o badge da aba `Vender`. Nao existe polling para localizar aceite.
 Esta entrega exige a migration `chamadas_motoboy_aceite`, descrita em
 `docs/codex.md`.
 
+### Central operacional do motoboy (2026-08-24)
+
+Disponibilidade de entrega deixou de significar apenas que o interruptor esta
+ligado. O backend considera o motoboy `Disponivel` somente quando o cadastro e
+o servico estao ativos e ele nao possui outra conversa de entrega em estado
+`ABERTA`, `ACORDADA` ou `AGUARDANDO_CONFIRMACAO`. Durante uma corrida ele fica
+`Ocupado`, desaparece das opcoes publicas e nao recebe novos chamados.
+
+Clientes e lojas externas recebem somente o estado `Disponivel` ou
+`Indisponivel`; nomes e quantidades de motoboys da plataforma nao sao
+expostos. A equipe credenciada da propria loja continua identificada, mas um
+membro ocupado aparece como `Em corrida` e nao pode ser chamado. A chamada
+geral permanece visivel em `Aguardando aceite` ate um profissional livre
+aceitar ou a loja cancelar. Existe apenas uma janela tecnica de 24 horas para
+limpar chamadas abandonadas, sem contagem regressiva na interface.
+
+`ServiceDeskScreen` agora possui uma mini central do motoboy com estado
+operacional (`Pronto para receber`, `Corrida em andamento` ou `Operacao
+pausada`), entregas concluidas hoje, total, lojas vinculadas, corrida atual e
+atividade recente. Chamadas pendentes vibram periodicamente enquanto a tela
+esta aberta, permanecem no badge de `Vender` e somem em tempo real assim que
+alguem aceita. Corridas ficam separadas dos chamados de outros servicos.
+
+Nenhuma migration nova foi criada nesta etapa.
+
+### Chamada publica com aceite (2026-08-24)
+
+O antigo `ServiceProvidersScreen` nao lista mais nome, foto, moto, avaliacao ou
+quantidade de motoboys. Para entrega local ele mostra apenas `Servico
+disponivel` ou `Servico indisponivel` e a acao unica `Chamar motoboy`.
+
+Tocar na acao cria uma `solicitacao_motoboy` pendente; isso ainda nao deixa
+nenhum profissional ocupado e nao abre conversa. Todos os motoboys livres e
+elegiveis da mesma cidade recebem o evento em tempo real. O primeiro que tocar
+em `Aceitar corrida` reserva a chamada; somente nesse momento a conversa e
+criada, o motoboy passa a `Ocupado` e sua identidade fica visivel ao cliente.
+
+Enquanto aguarda, a tela exibe `Procurando motoboy` com opcao de cancelar. A
+mesma chamada aparece em `Meus atendimentos`, permitindo sair da tela e voltar
+depois. Quando houver aceite, o item pendente desaparece e a conversa normal
+assume seu lugar com `Voltar para o chat` e contador de mensagens nao lidas. Ao
+reabrir uma chamada ja aceita, o app encaminha direto para o chat, mesmo que o
+motoboy nao apareca mais como livre porque esta atendendo aquele cliente.
+
+Esta etapa torna `solicitacoes_motoboy.loja_id` opcional, pois a solicitacao
+pode ser criada por um consumidor sem loja. Exige migration Prisma manual.
+
 ### Cancelar e concluir corrida
 
 Dentro de `ServiceConversationScreen`, loja e motoboy veem `Cancelar corrida`
@@ -1257,10 +1313,76 @@ concluida.
   recebido` e volta automaticamente ao terminar a animacao.
 - Implementacao sem biblioteca adicional e sem migration.
 
+## Login social
+
+Os botoes Google e Apple no onboarding, login e cadastro agora iniciam login
+real. Google abre OAuth no navegador e Apple usa a folha nativa no iPhone. Ao
+concluir, a sessao retornada e a mesma do login por e-mail, sem tipo especial
+de usuario no restante do app.
+
+No primeiro acesso social, a conta recebe e-mail verificado, carteiras, KYC
+pendente e posicao na rede. CPF segue para o primeiro uso financeiro;
+telefone e endereco podem ser completados no Perfil antes de navegar no
+comercio local. Android e web exibem o botao Apple, mas informam que o acesso
+nativo desta etapa e exclusivo do iPhone.
+
 ### Chat de corrida compacto
 
 `ServiceConversationScreen` prioriza a conversa: cabecalho do prestador,
 resumo da corrida e proposta usam faixas compactas; retirada e destino ficam em
 uma linha, e o compositor permanece preso ao rodape. A regra vale tanto para
-corridas de loja quanto para conversa direta com motoboy: antes do pagamento
-ha `Cancelar corrida`; depois, o motoboy finaliza e a outra parte confirma.
+corridas de loja quanto para chamadas publicas aceitas: antes do pagamento ha
+`Cancelar corrida`; depois, o motoboy finaliza e a outra parte confirma.
+
+### Consulta manual do Pix no pedido
+
+O botao de atualizar em `CustomerOrderDetailsScreen` continua recarregando o
+pedido e a conversa. Quando o pedido e seu pagamento Asaas ainda estao em
+`AGUARDANDO_PAGAMENTO`, ele tambem solicita ao backend uma consulta pontual ao
+gateway. A tela informa se o Pix continua pendente ou foi confirmado. Foco de
+tela, Socket.IO e atualizacoes silenciosas nao consultam o Asaas; somente o
+toque explicito do cliente faz isso, respeitando o limite da API.
+
+### Cancelamento e suporte
+
+`CustomerOrderDetailsScreen` diferencia cancelamento simples de solicitacao ao
+suporte. Antes do pagamento, `Cancelar pedido` pede confirmacao e chama
+`PATCH /api/app/orders/:orderId/cancel`. Se existir pagamento confirmado ou o
+atendimento ja tiver comecado, a acao vira `Solicitar cancelamento` e abre
+`SupportScreen` com pedido, loja, valor e status preenchidos na mensagem do
+WhatsApp.
+
+A tela de suporte apresenta as regras sem prometer um prazo bancario que o app
+nao controla: saldo de carteira volta imediatamente depois da aprovacao; Pix e
+solicitado ao gateway em ate 24 horas e pode levar mais tempo para aparecer no
+banco; depois da entrega, ganhos distribuidos tambem precisam ser analisados.
+# Pagamento Pix externo e atualizacao manual (2026-08-26)
+
+No checkout normal e no pagamento de proposta pelo chat, o app trata Pix como
+externo. Pagamento integral por carteiras confirma na hora; qualquer valor Pix
+abre `GatewayPixPayment` com QR do Asaas e mantem o pedido em
+`AGUARDANDO_PAGAMENTO`.
+
+O detalhe do pedido consulta o Asaas quando o usuario entra ou volta para um
+pedido pendente, no maximo uma vez a cada 15 segundos. O icone de atualizar
+faz a mesma consulta manual. A API aceita essas consultas apenas para o dono
+do pedido pendente e limita cinco por minuto. Webhook e consulta manual usam o
+mesmo evento idempotente, por isso uma confirmacao duplicada nao duplica
+pedido, mensagem ou pagamento.
+
+Quando o gateway nao esta configurado, o app recebe erro de indisponibilidade
+antes de existir pedido Pix ou debito. Pagamento misto entre carteiras e Pix
+permanece indisponivel nesta etapa.
+
+## Convite da loja e cadastro reverso
+
+O painel interno de cada loja possui a acao `Indicar loja`. Ela abre
+`StoreReferralModal`, com QR grande, codigo `LOJA-<id>`, copia de link e
+compartilhamento nativo. O QR leva a uma pagina publica que permite abrir o app,
+baixar o app ou concluir o cadastro no navegador.
+
+O app registra o scheme `detudoja://` e a rota
+`cadastro/loja/:storeSlug`. Ao entrar por ela, `RegisterScreen` abre o formulario
+de e-mail automaticamente, mostra que a origem da loja ja foi aplicada e envia
+`storeSlug` sem pedir outro convite. Quem recebeu somente o codigo pode digitar
+`LOJA-<id>` no campo `Codigo de convite ou da loja`.

@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { PageHeader } from "../components/PageHeader";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { StatePanel } from "../components/StatePanel";
+import { getCustomerCourierRequests } from "../services/courier.api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import { getServiceConversations } from "../services/service-chats.api";
 import { useAuthStore } from "../stores/useAuthStore";
@@ -22,6 +23,7 @@ export function ServiceInboxScreen({ navigation }) {
   const [conversations, setConversations] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [pendingCourierRequests, setPendingCourierRequests] = useState([]);
   const customerConversations = useMemo(
     () => conversations.filter((conversation) => !conversation.isSeller),
     [conversations],
@@ -35,8 +37,12 @@ export function ServiceInboxScreen({ navigation }) {
     }
 
     try {
-      const response = await getServiceConversations(session.accessToken);
+      const [response, courierResponse] = await Promise.all([
+        getServiceConversations(session.accessToken),
+        getCustomerCourierRequests(session.accessToken),
+      ]);
       setConversations(response.conversations ?? []);
+      setPendingCourierRequests((courierResponse.requests ?? []).filter((request) => request.status === "PENDENTE"));
     } catch (requestError) {
       if (!silent) setError(requestError.message ?? "Nao foi possivel carregar seus atendimentos.");
     } finally {
@@ -56,11 +62,15 @@ export function ServiceInboxScreen({ navigation }) {
     socket?.on(realtimeEvents.serviceChatCreated, refresh);
     socket?.on(realtimeEvents.serviceChatMessageCreated, refresh);
     socket?.on(realtimeEvents.serviceChatUpdated, refresh);
+    socket?.on(realtimeEvents.courierRequestCreated, refresh);
+    socket?.on(realtimeEvents.courierRequestUpdated, refresh);
 
     return () => {
       socket?.off(realtimeEvents.serviceChatCreated, refresh);
       socket?.off(realtimeEvents.serviceChatMessageCreated, refresh);
       socket?.off(realtimeEvents.serviceChatUpdated, refresh);
+      socket?.off(realtimeEvents.courierRequestCreated, refresh);
+      socket?.off(realtimeEvents.courierRequestUpdated, refresh);
     };
   }, [load, session?.accessToken]);
 
@@ -76,8 +86,29 @@ export function ServiceInboxScreen({ navigation }) {
         <StatePanel icon="chatbubbles-outline" loading text="Carregando conversas..." />
       ) : error ? (
         <StatePanel actionLabel="Tentar novamente" danger icon="alert-circle-outline" onAction={load} text={error} />
-      ) : customerConversations.length ? (
+      ) : customerConversations.length || pendingCourierRequests.length ? (
         <View style={styles.list}>
+          {pendingCourierRequests.map((request) => (
+            <Pressable
+              key={`courier-${request.id}`}
+              onPress={() => navigation.navigate("ServiceProviders", {
+                serviceType: {
+                  id: request.serviceType.id,
+                  name: request.serviceType.name,
+                  operationalType: "ENTREGA_LOCAL",
+                },
+              })}
+              style={({ pressed }) => [styles.pendingCard, pressed && styles.pressed]}
+            >
+              <View style={styles.pendingIcon}><Ionicons color={colors.card} name="radio-outline" size={21} /></View>
+              <View style={styles.copy}>
+                <Text style={styles.pendingEyebrow}>PROCURANDO MOTOBOY</Text>
+                <Text style={styles.title}>Chamada em andamento</Text>
+                <Text numberOfLines={1} style={styles.message}>Toque para acompanhar ou cancelar.</Text>
+              </View>
+              <Ionicons color={colors.primaryDark} name="chevron-forward" size={18} />
+            </Pressable>
+          ))}
           {customerConversations.map((conversation) => (
             <Pressable
               key={conversation.id}
@@ -134,6 +165,9 @@ const styles = StyleSheet.create({
   message: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 11 },
   name: { color: colors.textSecondary, fontFamily: fonts.medium, fontSize: typography.caption },
   pressed: { opacity: 0.8 },
+  pendingCard: { alignItems: "center", backgroundColor: colors.primarySoft, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.md, minHeight: 84, padding: spacing.md },
+  pendingEyebrow: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: 9 },
+  pendingIcon: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.round, height: 44, justifyContent: "center", width: 44 },
   status: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 9 },
   title: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.small },
 });

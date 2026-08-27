@@ -460,6 +460,28 @@ tbody tr:hover { background: #f8fcf9; }
 .empty-state { flex-direction: column; }
 .empty-state svg { color: var(--primary); }
 .empty-state p { margin: 0; font-size: 11px; }
+
+/* Pagamentos */
+.payments-page { max-width: 1380px; }
+.payments-policy { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; border: 1px solid var(--primary-border); border-radius: 8px; padding: 14px 16px; color: var(--primary-dark); background: var(--primary-soft); }
+.payments-policy strong { display: block; color: var(--ink); font-size: 12px; }
+.payments-policy p { margin: 3px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.payments-toolbar { display: grid; grid-template-columns: minmax(260px, 1fr) 210px; gap: 10px; margin-bottom: 14px; }
+.payments-toolbar select { min-height: 42px; border: 1px solid var(--border-strong); border-radius: 6px; padding: 0 11px; color: var(--ink); background: var(--surface); }
+.payments-search { display: flex; min-height: 42px; align-items: center; gap: 9px; border: 1px solid var(--border-strong); border-radius: 6px; padding: 0 11px; color: var(--weak); background: var(--surface); }
+.payments-search:focus-within { border-color: #79cda0; box-shadow: 0 0 0 3px rgb(11 138 92 / 8%); }
+.payments-search input { width: 100%; border: 0; outline: 0; color: var(--ink); background: transparent; }
+.payments-table { min-width: 980px; }
+.payment-value { color: var(--ink); font-size: 13px; font-weight: 800; }
+.refund-modal { width: min(100%, 570px); }
+.refund-summary { display: grid; gap: 4px; margin: 18px 0 12px; border: 1px solid var(--border); border-radius: 8px; padding: 14px; background: var(--canvas); }
+.refund-summary span, .refund-summary small { color: var(--muted); font-size: 11px; }
+.refund-summary strong { color: var(--ink); font-size: 25px; }
+.refund-destination { display: flex; align-items: flex-start; gap: 9px; border: 1px solid #f2cf9f; border-radius: 8px; padding: 12px; color: #8a5000; background: #fff8eb; }
+.refund-destination p { margin: 0; font-size: 11px; line-height: 1.55; }
+.refund-form { display: grid; gap: 14px; margin-top: 16px; }
+.refund-form label { display: grid; gap: 7px; color: var(--ink); font-size: 12px; font-weight: 700; }
+.refund-form textarea { resize: vertical; }
 .spin { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 

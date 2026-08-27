@@ -58,7 +58,7 @@ export function App() {
 
   async function handleLogout() {
     try {
-      await logoutAdmin(session.accessToken);
+      await logoutAdmin(session.accessToken, session.refreshToken);
     } catch {
       // A sessão local deve ser encerrada mesmo se a API estiver indisponível.
     }

@@ -5,6 +5,7 @@ import {
   getOrderEarningsDistribution,
   getSegmentCommissionDistribution,
 } from "./order-earnings.config.js";
+import { createOrderEarningsRepository } from "./order-earnings.repository.js";
 
 const validIndicationStatuses = ["ATIVA", "CONVERTIDA", "PENDENTE"];
 
@@ -130,7 +131,7 @@ function distributeEvenly(valueCents, userIds) {
 }
 
 async function findDirectSponsor(database, userId) {
-  const indication = await database.indicacao.findUnique({
+  const indication = await createOrderEarningsRepository(database).findIndication({
     include: {
       indicador: {
         select: {
@@ -163,7 +164,7 @@ async function findQualifiedMatrixUplines(database, sellerUserId) {
   let currentUserId = sellerUserId;
 
   for (let depth = 0; depth < 20; depth += 1) {
-    const position = await database.indicacao.findUnique({
+    const position = await createOrderEarningsRepository(database).findIndication({
       select: { alocado_sob_usuario_id: true },
       where: { indicado_usuario_id: currentUserId },
     });
@@ -176,7 +177,7 @@ async function findQualifiedMatrixUplines(database, sellerUserId) {
     visited.add(parentUserId);
     currentUserId = parentUserId;
 
-    const parentUser = await database.usuario.findUnique({
+    const parentUser = await createOrderEarningsRepository(database).findUser({
       include: networkQualificationInclude,
       where: { id: parentUserId },
     });
@@ -202,7 +203,7 @@ async function creditReward(database, {
     return null;
   }
 
-  const reward = await database.recompensa.create({
+  const reward = await createOrderEarningsRepository(database).createReward({
     data: {
       liberado_em: new Date(),
       motivo: description,
@@ -233,7 +234,7 @@ async function creditCompanyRevenue(database, transactionId, valueCents) {
     return null;
   }
 
-  const account = await database.contaPlataforma.upsert({
+  const account = await createOrderEarningsRepository(database).upsertPlatformAccount({
     create: {
       nome: "Receita da empresa",
       status: "ATIVA",
@@ -243,12 +244,12 @@ async function creditCompanyRevenue(database, transactionId, valueCents) {
     where: { tipo_conta: "RECEITA_EMPRESA" },
   });
 
-  await database.contaPlataforma.update({
+  await createOrderEarningsRepository(database).updatePlatformAccount({
     data: { saldo_centavos: { increment: BigInt(valueCents) } },
     where: { id: account.id },
   });
 
-  return database.lancamentoPlataforma.create({
+  return createOrderEarningsRepository(database).createPlatformEntry({
     data: {
       conta_plataforma_id: account.id,
       descricao: "Receita retida da taxa da venda concluida.",
@@ -265,7 +266,7 @@ async function markIndicationConverted(database, indicationId, field) {
     return;
   }
 
-  await database.indicacao.updateMany({
+  await createOrderEarningsRepository(database).updateIndications({
     data: {
       [field]: new Date(),
       status: "CONVERTIDA",
@@ -277,8 +278,203 @@ async function markIndicationConverted(database, indicationId, field) {
   });
 }
 
+const reversibleWalletOrigins = [
+  "VENDA",
+  "CASHBACK",
+  "BONUS_INDICACAO",
+  "BONUS_VENDEDOR",
+  "BONUS_REDE",
+];
+
+async function debitSettlementWalletCredit(database, credit, { paymentId, reason }) {
+  const amount = cents(credit.valor_centavos);
+  const claimed = await createOrderEarningsRepository(database).updateWallets({
+    data: { saldo_disponivel_centavos: { decrement: BigInt(amount) } },
+    where: {
+      id: credit.carteira_id,
+      saldo_disponivel_centavos: { gte: BigInt(amount) },
+    },
+  });
+
+  if (claimed.count !== 1) {
+    throw new AppError(
+      "Um dos ganhos desta venda ja foi usado. O estorno precisa de revisao financeira para nao criar saldo sem lastro.",
+      409,
+    );
+  }
+
+  const wallet = await createOrderEarningsRepository(database).findWallet({
+    select: { saldo_disponivel_centavos: true },
+    where: { id: credit.carteira_id },
+  });
+  const balanceAfter = cents(wallet.saldo_disponivel_centavos);
+
+  await createOrderEarningsRepository(database).createWalletEntry({
+    data: {
+      carteira_id: credit.carteira_id,
+      descricao: `Estorno do pagamento ${paymentId}. ${reason}`,
+      origem: "ESTORNO",
+      origem_id: credit.origem_id,
+      saldo_anterior_centavos: BigInt(balanceAfter + amount),
+      saldo_posterior_centavos: BigInt(balanceAfter),
+      status: "PROCESSADO",
+      tipo_lancamento: "DEBITO",
+      usuario_id: credit.usuario_id,
+      valor_centavos: BigInt(amount),
+    },
+  });
+}
+
+export async function assertCommercialSettlementReversible(database, paymentId) {
+  const transaction = await createOrderEarningsRepository(database).findCommercialTransaction({
+    include: {
+      lancamentos_plataforma: {
+        include: { conta_plataforma: { select: { saldo_centavos: true } } },
+        where: { status: "PROCESSADO", tipo_lancamento: "CREDITO" },
+      },
+    },
+    where: { pagamento_id: paymentId },
+  });
+
+  if (!transaction || transaction.status !== "LIQUIDADA") {
+    return { transactionId: transaction?.id ?? null, reversible: true };
+  }
+
+  const walletCredits = await createOrderEarningsRepository(database).findWalletEntries({
+    include: { carteira: { select: { saldo_disponivel_centavos: true } } },
+    where: {
+      origem: { in: reversibleWalletOrigins },
+      origem_id: transaction.id,
+      status: "PROCESSADO",
+      tipo_lancamento: "CREDITO",
+    },
+  });
+  const missingWalletCredit = walletCredits.find(
+    (credit) => cents(credit.carteira.saldo_disponivel_centavos) < cents(credit.valor_centavos),
+  );
+  const missingPlatformCredit = transaction.lancamentos_plataforma.find(
+    (entry) => cents(entry.conta_plataforma.saldo_centavos) < cents(entry.valor_centavos),
+  );
+
+  if (missingWalletCredit || missingPlatformCredit) {
+    throw new AppError(
+      "Este pagamento possui ganhos ja utilizados. Encaminhe para revisao financeira antes de solicitar o estorno externo.",
+      409,
+    );
+  }
+
+  return { transactionId: transaction.id, reversible: true };
+}
+
+export async function reverseCommercialSettlement(database, paymentId, { reason }) {
+  const transaction = await createOrderEarningsRepository(database).findCommercialTransaction({
+    include: {
+      lancamentos_plataforma: {
+        where: { status: "PROCESSADO", tipo_lancamento: "CREDITO" },
+      },
+    },
+    where: { pagamento_id: paymentId },
+  });
+
+  if (!transaction || ["PENDENTE", "PAGA", "VALIDADA", "CANCELADA"].includes(transaction.status)) {
+    return { alreadyReversed: false, transactionId: transaction?.id ?? null, walletUserIds: [] };
+  }
+
+  if (transaction.status === "ESTORNADA") {
+    return { alreadyReversed: true, transactionId: transaction.id, walletUserIds: [] };
+  }
+
+  const claimed = await createOrderEarningsRepository(database).updateCommercialTransactions({
+    data: { estornada_em: new Date(), status: "ESTORNADA" },
+    where: { id: transaction.id, status: "LIQUIDADA" },
+  });
+
+  if (claimed.count !== 1) {
+    throw new AppError("A distribuicao financeira desta venda mudou durante o estorno", 409);
+  }
+
+  const walletCredits = await createOrderEarningsRepository(database).findWalletEntries({
+    where: {
+      origem: { in: reversibleWalletOrigins },
+      origem_id: transaction.id,
+      status: "PROCESSADO",
+      tipo_lancamento: "CREDITO",
+    },
+  });
+
+  for (const credit of walletCredits) {
+    await debitSettlementWalletCredit(database, credit, { paymentId, reason });
+  }
+
+  for (const entry of transaction.lancamentos_plataforma) {
+    const amount = cents(entry.valor_centavos);
+    const claimedPlatformBalance = await createOrderEarningsRepository(database).updatePlatformAccounts({
+      data: { saldo_centavos: { decrement: BigInt(amount) } },
+      where: {
+        id: entry.conta_plataforma_id,
+        saldo_centavos: { gte: BigInt(amount) },
+      },
+    });
+
+    if (claimedPlatformBalance.count !== 1) {
+      throw new AppError(
+        "A receita da plataforma desta venda ja foi movimentada. Encaminhe para revisao financeira.",
+        409,
+      );
+    }
+
+    await createOrderEarningsRepository(database).createPlatformEntry({
+      data: {
+        conta_plataforma_id: entry.conta_plataforma_id,
+        descricao: `Estorno do pagamento ${paymentId}. ${reason}`,
+        status: "PROCESSADO",
+        tipo_lancamento: "ESTORNO",
+        transacao_comercial_id: transaction.id,
+        valor_centavos: BigInt(amount),
+      },
+    });
+  }
+
+  await Promise.all([
+    createOrderEarningsRepository(database).updateRewards({
+      data: { estornado_em: new Date(), status: "ESTORNADA" },
+      where: {
+        status: { in: ["PENDENTE", "LIBERADA", "BLOQUEADA"] },
+        transacao_comercial_id: transaction.id,
+      },
+    }),
+    createOrderEarningsRepository(database).updateReceivables({
+      data: {
+        bloqueado_em: new Date(),
+        motivo_bloqueio: `Estorno do pagamento ${paymentId}. ${reason}`,
+        status: "ESTORNADO",
+      },
+      where: { status: { not: "ESTORNADO" }, transacao_comercial_id: transaction.id },
+    }),
+    createOrderEarningsRepository(database).createFinancialEvent({
+      data: {
+        dados_json: {
+          paymentId,
+          reversedPlatformEntries: transaction.lancamentos_plataforma.length,
+          reversedWalletCredits: walletCredits.length,
+        },
+        descricao: `Ganhos revertidos no estorno do pagamento ${paymentId}. ${reason}`,
+        pagamento_id: paymentId,
+        tipo_evento: "ESTORNO_REALIZADO",
+        transacao_comercial_id: transaction.id,
+      },
+    }),
+  ]);
+
+  return {
+    alreadyReversed: false,
+    transactionId: transaction.id,
+    walletUserIds: [...new Set(walletCredits.map((credit) => credit.usuario_id))],
+  };
+}
+
 export async function settleCompletedStoreOrderEarnings(database, orderId) {
-  const order = await database.pedidoLoja.findUnique({
+  const order = await createOrderEarningsRepository(database).findOrder({
     include: {
       loja: {
         include: {
@@ -304,7 +500,7 @@ export async function settleCompletedStoreOrderEarnings(database, orderId) {
     throw new AppError("Pagamento precisa estar confirmado para distribuir ganhos", 409);
   }
 
-  const existingTransaction = await database.transacaoComercial.findUnique({
+  const existingTransaction = await createOrderEarningsRepository(database).findCommercialTransaction({
     where: { pagamento_id: order.pagamento_id },
   });
 
@@ -317,7 +513,7 @@ export async function settleCompletedStoreOrderEarnings(database, orderId) {
   const feePercent = storeCommission.commission.feePercent;
   const feeCents = percentageOf(grossCents, feePercent);
   const merchantNetCents = grossCents - feeCents;
-  const transaction = await database.transacaoComercial.upsert({
+  const transaction = await createOrderEarningsRepository(database).upsertCommercialTransaction({
     create: {
       comprador_usuario_id: order.usuario_id,
       loja_id: order.loja_id,
@@ -336,7 +532,7 @@ export async function settleCompletedStoreOrderEarnings(database, orderId) {
     update: {},
     where: { pagamento_id: order.pagamento_id },
   });
-  const claim = await database.transacaoComercial.updateMany({
+  const claim = await createOrderEarningsRepository(database).updateCommercialTransactions({
     data: {
       status: "VALIDADA",
       validada_em: new Date(),
@@ -373,7 +569,7 @@ export async function settleCompletedStoreOrderEarnings(database, orderId) {
     cashbackCents + consumerReferralCents + sellerReferralCents + networkCents;
   const companyCents = feeCents - rewardsPoolCents;
 
-  await database.recebivel.create({
+  await createOrderEarningsRepository(database).createReceivable({
     data: {
       disponivel_em: new Date(),
       loja_id: order.loja_id,
@@ -447,7 +643,7 @@ export async function settleCompletedStoreOrderEarnings(database, orderId) {
 
   await creditCompanyRevenue(database, transaction.id, companyCents);
 
-  await database.transacaoComercial.update({
+  await createOrderEarningsRepository(database).updateCommercialTransaction({
     data: {
       liquidada_em: new Date(),
       percentual_empresa: percentageFrom(companyCents, grossCents),
@@ -459,7 +655,7 @@ export async function settleCompletedStoreOrderEarnings(database, orderId) {
     where: { id: transaction.id },
   });
 
-  await database.eventoFinanceiro.create({
+  await createOrderEarningsRepository(database).createFinancialEvent({
     data: {
       dados_json: {
         cashbackCents,
@@ -498,7 +694,7 @@ export async function settleCompletedStoreOrderEarnings(database, orderId) {
 }
 
 export async function settlePaidStoreChargeEarnings(database, chargeId) {
-  const charge = await database.cobranca.findUnique({
+  const charge = await createOrderEarningsRepository(database).findCharge({
     include: {
       loja: {
         include: {
@@ -520,7 +716,7 @@ export async function settlePaidStoreChargeEarnings(database, chargeId) {
     throw new AppError("A cobranca precisa estar paga para distribuir ganhos", 409);
   }
 
-  const existingTransaction = await database.transacaoComercial.findUnique({
+  const existingTransaction = await createOrderEarningsRepository(database).findCommercialTransaction({
     where: { pagamento_id: charge.pagamento_id },
   });
 
@@ -533,7 +729,7 @@ export async function settlePaidStoreChargeEarnings(database, chargeId) {
   const feePercent = storeCommission.commission.feePercent;
   const feeCents = percentageOf(grossCents, feePercent);
   const merchantNetCents = grossCents - feeCents;
-  const transaction = await database.transacaoComercial.upsert({
+  const transaction = await createOrderEarningsRepository(database).upsertCommercialTransaction({
     create: {
       comprador_usuario_id: charge.pagamento.usuario_pagador_id,
       loja_id: charge.loja_id,
@@ -552,7 +748,7 @@ export async function settlePaidStoreChargeEarnings(database, chargeId) {
     update: {},
     where: { pagamento_id: charge.pagamento_id },
   });
-  const claim = await database.transacaoComercial.updateMany({
+  const claim = await createOrderEarningsRepository(database).updateCommercialTransactions({
     data: { status: "VALIDADA", validada_em: new Date() },
     where: { id: transaction.id, status: "PENDENTE" },
   });
@@ -583,7 +779,7 @@ export async function settlePaidStoreChargeEarnings(database, chargeId) {
   const companyCents = feeCents - rewardsPoolCents;
   const reference = `cobranca ${charge.codigo_publico}`;
 
-  await database.recebivel.create({
+  await createOrderEarningsRepository(database).createReceivable({
     data: {
       disponivel_em: new Date(),
       loja_id: charge.loja_id,
@@ -654,7 +850,7 @@ export async function settlePaidStoreChargeEarnings(database, chargeId) {
   }
 
   await creditCompanyRevenue(database, transaction.id, companyCents);
-  await database.transacaoComercial.update({
+  await createOrderEarningsRepository(database).updateCommercialTransaction({
     data: {
       liquidada_em: new Date(),
       percentual_empresa: percentageFrom(companyCents, grossCents),
@@ -665,7 +861,7 @@ export async function settlePaidStoreChargeEarnings(database, chargeId) {
     },
     where: { id: transaction.id },
   });
-  await database.eventoFinanceiro.create({
+  await createOrderEarningsRepository(database).createFinancialEvent({
     data: {
       dados_json: {
         cashbackCents,
@@ -704,7 +900,7 @@ export async function settlePaidStoreChargeEarnings(database, chargeId) {
 }
 
 export async function settlePaidAutonomousChargeEarnings(database, chargeId) {
-  const charge = await database.cobranca.findUnique({
+  const charge = await createOrderEarningsRepository(database).findCharge({
     include: {
       pagamento: { select: { id: true, status: true, usuario_pagador_id: true } },
       proposta_servico: {
@@ -730,7 +926,7 @@ export async function settlePaidAutonomousChargeEarnings(database, chargeId) {
     throw new AppError("A cobranca precisa estar paga para distribuir ganhos", 409);
   }
 
-  const existingTransaction = await database.transacaoComercial.findUnique({
+  const existingTransaction = await createOrderEarningsRepository(database).findCommercialTransaction({
     where: { pagamento_id: charge.pagamento_id },
   });
 
@@ -749,7 +945,7 @@ export async function settlePaidAutonomousChargeEarnings(database, chargeId) {
   const feePercent = segmentDistribution.feePercent;
   const feeCents = percentageOf(grossCents, feePercent);
   const sellerNetCents = grossCents - feeCents;
-  const transaction = await database.transacaoComercial.upsert({
+  const transaction = await createOrderEarningsRepository(database).upsertCommercialTransaction({
     create: {
       comprador_usuario_id: charge.pagamento.usuario_pagador_id,
       pagamento_id: charge.pagamento_id,
@@ -767,7 +963,7 @@ export async function settlePaidAutonomousChargeEarnings(database, chargeId) {
     update: {},
     where: { pagamento_id: charge.pagamento_id },
   });
-  const claim = await database.transacaoComercial.updateMany({
+  const claim = await createOrderEarningsRepository(database).updateCommercialTransactions({
     data: { status: "VALIDADA", validada_em: new Date() },
     where: { id: transaction.id, status: "PENDENTE" },
   });
@@ -798,7 +994,7 @@ export async function settlePaidAutonomousChargeEarnings(database, chargeId) {
   const companyCents = feeCents - rewardsPoolCents;
   const reference = `cobranca ${charge.codigo_publico}`;
 
-  await database.recebivel.create({
+  await createOrderEarningsRepository(database).createReceivable({
     data: {
       disponivel_em: new Date(),
       status: "DISPONIVEL",
@@ -868,7 +1064,7 @@ export async function settlePaidAutonomousChargeEarnings(database, chargeId) {
   }
 
   await creditCompanyRevenue(database, transaction.id, companyCents);
-  await database.transacaoComercial.update({
+  await createOrderEarningsRepository(database).updateCommercialTransaction({
     data: {
       liquidada_em: new Date(),
       percentual_empresa: percentageFrom(companyCents, grossCents),
@@ -879,7 +1075,7 @@ export async function settlePaidAutonomousChargeEarnings(database, chargeId) {
     },
     where: { id: transaction.id },
   });
-  await database.eventoFinanceiro.create({
+  await createOrderEarningsRepository(database).createFinancialEvent({
     data: {
       dados_json: {
         cashbackCents,

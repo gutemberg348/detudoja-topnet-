@@ -7,6 +7,13 @@ export function loginApp(credentials) {
   });
 }
 
+export function loginWithSocialApp(data) {
+  return apiRequest("/api/app/auth/social", {
+    body: data,
+    method: "POST",
+  });
+}
+
 export function registerApp(data) {
   return apiRequest("/api/app/auth/register", {
     body: data,
@@ -33,8 +40,9 @@ export function refreshAppSession(refreshToken) {
   });
 }
 
-export function logoutApp(accessToken) {
+export function logoutApp(accessToken, refreshToken) {
   return apiRequest("/api/app/auth/logout", {
+    body: { refreshToken },
     method: "POST",
     token: accessToken,
   });

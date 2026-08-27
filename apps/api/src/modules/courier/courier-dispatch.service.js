@@ -1,19 +1,36 @@
-import { prisma } from "../../config/prisma.js";
 import {
   emitCourierRequestCreated,
   emitCourierRequestUpdated,
+  emitServiceAvailabilityUpdated,
   emitServiceChatCreated,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
 import { sameCity } from "../../utils/location.js";
 import { getServiceConversation } from "../service-chats/service-chats.service.js";
+import {
+  activeCourierConversationStatuses,
+  getBusyCourierSellerIds,
+  isCourierSellerBusy,
+} from "./courier-availability.js";
+import { courierRepository, createCourierRepository } from "./courier.repository.js";
+
+const courierRequestLifetimeMs = 24 * 60 * 60 * 1000;
 
 const requestInclude = {
-  conversa_servico: { select: { id: true } },
+  conversa_servico: { select: { id: true, status: true } },
   loja: { include: { endereco: true } },
   motoboy_aceite: { include: { vendedor: { include: { usuario: { select: { id: true, nome: true } } } } } },
   motoboy_direcionado: { include: { vendedor: { include: { usuario: { select: { id: true, nome: true } } } } } },
   pedido_loja: { select: { codigo: true, id: true } },
+  solicitante: {
+    include: {
+      enderecos: {
+        orderBy: [{ principal: "desc" }, { criado_em: "asc" }],
+        take: 1,
+        where: { excluido_em: null },
+      },
+    },
+  },
   tipo_servico: { include: { segmento_venda: true } },
 };
 
@@ -21,6 +38,14 @@ function parseId(value, message) {
   const id = Number(value);
   if (!Number.isInteger(id) || id <= 0) throw new AppError(message, 400);
   return id;
+}
+
+function formatAddress(address) {
+  return [
+    [address?.rua, address?.numero].filter(Boolean).join(", "),
+    address?.bairro,
+    [address?.cidade, address?.estado].filter(Boolean).join(" - "),
+  ].filter(Boolean).join(" - ");
 }
 
 function serializeRequest(request) {
@@ -33,6 +58,7 @@ function serializeRequest(request) {
     } : null,
     acceptedCourierUserId: request.motoboy_aceite?.vendedor?.usuario_id ?? null,
     conversationId: request.conversa_servico_id,
+    conversationStatus: request.conversa_servico?.status ?? null,
     createdAt: request.criado_em.toISOString(),
     description: request.descricao,
     destination: request.destino,
@@ -44,7 +70,7 @@ function serializeRequest(request) {
     requesterUserId: request.solicitante_usuario_id,
     serviceType: { id: request.tipo_servico.id, name: request.tipo_servico.nome },
     status: request.status,
-    store: { id: request.loja.id, name: request.loja.nome },
+    store: request.loja ? { id: request.loja.id, name: request.loja.nome } : null,
     storeId: request.loja_id,
     teamCourier: request.motoboy_direcionado ? {
       displayName: request.motoboy_direcionado.nome_exibicao,
@@ -60,7 +86,7 @@ function serializeRequest(request) {
 }
 
 async function accessibleStore(userId, storeId) {
-  const store = await prisma.loja.findFirst({
+  const store = await courierRepository.findStore({
     include: { endereco: true },
     where: {
       excluido_em: null,
@@ -76,11 +102,16 @@ async function accessibleStore(userId, storeId) {
   return store;
 }
 
-async function deliveryType() {
-  const types = await prisma.tipoServico.findMany({
+async function deliveryType(serviceTypeId = null) {
+  const types = await courierRepository.findServiceTypes({
     include: { segmento_venda: true },
     orderBy: [{ ordem: "asc" }, { id: "asc" }],
-    where: { excluido_em: null, status: "ATIVO", tipo_operacao: "ENTREGA_LOCAL" },
+    where: {
+      excluido_em: null,
+      ...(serviceTypeId ? { id: parseId(serviceTypeId, "Servico invalido") } : {}),
+      status: "ATIVO",
+      tipo_operacao: "ENTREGA_LOCAL",
+    },
   });
   const type = types.find((item) => item.slug === "motoboy") ?? types[0];
   if (!type?.segmento_venda || type.segmento_venda.status !== "ATIVO") {
@@ -89,8 +120,21 @@ async function deliveryType() {
   return type;
 }
 
-async function onlineCandidates(store, typeId, { excludeTeam = false } = {}) {
-  return prisma.servicoVendedor.findMany({
+function platformDispatchEligibility() {
+  return {
+    OR: [
+      { aceita_chamadas_plataforma: true },
+      { lojas: { none: { ativo: true } } },
+    ],
+  };
+}
+
+function canReceivePlatformCalls(courier) {
+  return courier.aceita_chamadas_plataforma || !(courier.lojas ?? []).some((membership) => membership.ativo);
+}
+
+async function onlineCandidates(address, typeId, { excludeStoreTeamId = null } = {}) {
+  const services = await courierRepository.findSellerServices({
     include: { vendedor: { include: { motoboy: true, usuario: { select: { id: true } } } } },
     where: {
       disponivel_agora: true,
@@ -100,19 +144,25 @@ async function onlineCandidates(store, typeId, { excludeTeam = false } = {}) {
       vendedor: {
         excluido_em: null,
         motoboy: {
-          cidade_base: { equals: store.endereco.cidade, mode: "insensitive" },
-          estado_base: { equals: store.endereco.estado, mode: "insensitive" },
+          cidade_base: { equals: address.cidade, mode: "insensitive" },
+          estado_base: { equals: address.estado, mode: "insensitive" },
           status: "ATIVO",
-          ...(excludeTeam ? { lojas: { none: { ativo: true, loja_id: store.id } } } : {}),
+          ...platformDispatchEligibility(),
+          ...(excludeStoreTeamId ? { lojas: { none: { ativo: true, loja_id: excludeStoreTeamId } } } : {}),
         },
         status: { in: ["ATIVO", "PENDENTE"] },
       },
     },
   });
+  const busySellerIds = await getBusyCourierSellerIds(
+    courierRepository,
+    services.map((service) => service.vendedor_id),
+  );
+  return services.filter((service) => !busySellerIds.has(service.vendedor_id));
 }
 
 async function activeRequestForStore(storeId, userId) {
-  return prisma.solicitacaoMotoboy.findFirst({
+  return courierRepository.findCourierRequest({
     include: requestInclude,
     orderBy: { criado_em: "desc" },
     where: {
@@ -124,8 +174,29 @@ async function activeRequestForStore(storeId, userId) {
   });
 }
 
+async function activeCustomerRequests(userId, serviceTypeId = null) {
+  return courierRepository.findCourierRequests({
+    include: requestInclude,
+    orderBy: { criado_em: "desc" },
+    where: {
+      loja_id: null,
+      solicitante_usuario_id: userId,
+      ...(serviceTypeId ? { tipo_servico_id: parseId(serviceTypeId, "Servico invalido") } : {}),
+      OR: [
+        { expira_em: { gt: new Date() }, status: "PENDENTE" },
+        {
+          conversa_servico: {
+            is: { status: { in: activeCourierConversationStatuses } },
+          },
+          status: "ACEITA",
+        },
+      ],
+    },
+  });
+}
+
 async function expireCourierRequests(where = {}) {
-  await prisma.solicitacaoMotoboy.updateMany({
+  await courierRepository.updateCourierRequests({
     data: { status: "EXPIRADA" },
     where: { ...where, expira_em: { lte: new Date() }, status: "PENDENTE" },
   });
@@ -136,25 +207,32 @@ export async function getStoreCourierDispatch(userId, storeId) {
   await expireCourierRequests({ loja_id: store.id });
   const type = await deliveryType();
   const [members, candidates, current] = await Promise.all([
-    prisma.motoboyLoja.findMany({
+    courierRepository.findTeamMembers({
       include: { motoboy: { include: { vendedor: { include: { servicos: true, usuario: { select: { foto_url: true, id: true, nome: true } } } } } } },
       orderBy: { criado_em: "asc" },
       where: { ativo: true, loja_id: store.id },
     }),
-    onlineCandidates(store, type.id, { excludeTeam: true }),
+    onlineCandidates(store.endereco, type.id, { excludeStoreTeamId: store.id }),
     activeRequestForStore(store.id, userId),
   ]);
+  const busySellerIds = await getBusyCourierSellerIds(
+    courierRepository,
+    members.map((member) => member.motoboy.vendedor_id),
+  );
   return {
     currentRequest: current ? serializeRequest(current) : null,
     platformAvailable: candidates.some((candidate) => candidate.vendedor.usuario_id !== userId),
     team: members.map((member) => {
       const service = member.motoboy.vendedor.servicos.find((item) => item.tipo_servico_id === type.id && item.status === "ATIVO");
+      const isOnline = member.motoboy.status === "ATIVO" && Boolean(service?.disponivel_agora);
+      const isBusy = busySellerIds.has(member.motoboy.vendedor_id);
       return {
-        available: member.motoboy.status === "ATIVO" && Boolean(service?.disponivel_agora),
+        available: isOnline && !isBusy,
+        isBusy,
         color: member.motoboy.cor_moto,
         displayName: member.motoboy.nome_exibicao,
         id: member.id,
-        isOnline: member.motoboy.status === "ATIVO" && Boolean(service?.disponivel_agora),
+        isOnline,
         name: member.motoboy.nome_exibicao,
         photoUrl: member.motoboy.vendedor.usuario.foto_url,
         plate: member.motoboy.placa,
@@ -175,32 +253,35 @@ export async function createCourierRequest(userId, storeId, data) {
   let target = null;
   let targetUsers = [];
   if (data.teamMemberId) {
-    const member = await prisma.motoboyLoja.findFirst({
+    const member = await courierRepository.findTeamMember({
       include: { motoboy: { include: { vendedor: { include: { servicos: true } } } } },
       where: { ativo: true, id: data.teamMemberId, loja_id: store.id },
     });
     const service = member?.motoboy?.vendedor?.servicos?.find((item) => item.tipo_servico_id === type.id && item.status === "ATIVO" && item.disponivel_agora);
     if (!member || member.motoboy.status !== "ATIVO" || !service) throw new AppError("Este motoboy da equipe esta offline", 409);
+    if (await isCourierSellerBusy(courierRepository, member.motoboy.vendedor_id)) {
+      throw new AppError("Este motoboy esta atendendo outra corrida", 409);
+    }
     target = member.motoboy;
     targetUsers = [member.motoboy.vendedor.usuario_id];
   } else {
-    const candidates = await onlineCandidates(store, type.id, { excludeTeam: true });
+    const candidates = await onlineCandidates(store.endereco, type.id, { excludeStoreTeamId: store.id });
     targetUsers = candidates.map((item) => item.vendedor.usuario_id).filter((id) => id !== userId);
     if (!targetUsers.length) throw new AppError("Nenhum motoboy esta disponivel agora", 409);
   }
 
   let orderId = null;
   if (data.orderId) {
-    const order = await prisma.pedidoLoja.findFirst({ where: { id: data.orderId, loja_id: store.id, status: { notIn: ["CANCELADO", "CONCLUIDO"] } } });
+    const order = await courierRepository.findOrder({ where: { id: data.orderId, loja_id: store.id, status: { notIn: ["CANCELADO", "CONCLUIDO"] } } });
     if (!order) throw new AppError("Pedido nao encontrado nesta loja", 404);
     orderId = order.id;
   }
-  const created = await prisma.solicitacaoMotoboy.create({
+  const created = await courierRepository.createCourierRequest({
     include: requestInclude,
     data: {
       descricao: data.description || null,
       destino: data.destination,
-      expira_em: new Date(Date.now() + 5 * 60 * 1000),
+      expira_em: new Date(Date.now() + courierRequestLifetimeMs),
       loja_id: store.id,
       motoboy_direcionado_id: target?.id ?? null,
       origem: data.origin,
@@ -215,16 +296,52 @@ export async function createCourierRequest(userId, storeId, data) {
   return { request };
 }
 
+export async function getCustomerCourierRequestState(userId, serviceTypeId = null) {
+  await expireCourierRequests({ loja_id: null, solicitante_usuario_id: userId });
+  const requests = await activeCustomerRequests(userId, serviceTypeId);
+  return { requests: requests.map(serializeRequest) };
+}
+
+export async function createCustomerCourierRequest(userId, data) {
+  const address = await courierRepository.getUserBaseAddress(userId);
+  const type = await deliveryType(data.serviceTypeId);
+  await expireCourierRequests({ loja_id: null, solicitante_usuario_id: userId });
+  const existing = (await activeCustomerRequests(userId, type.id))[0];
+  if (existing) return { request: serializeRequest(existing) };
+
+  const candidates = await onlineCandidates(address, type.id);
+  const targetUserIds = candidates
+    .map((service) => service.vendedor.usuario_id)
+    .filter((candidateUserId) => candidateUserId !== userId);
+  if (!targetUserIds.length) throw new AppError("Nenhum motoboy esta disponivel agora", 409);
+
+  const created = await courierRepository.createCourierRequest({
+    include: requestInclude,
+    data: {
+      descricao: data.description || "Quero combinar uma entrega.",
+      destino: data.destination || "A combinar no chat",
+      expira_em: new Date(Date.now() + courierRequestLifetimeMs),
+      origem: data.origin || formatAddress(address) || "A combinar no chat",
+      solicitante_usuario_id: userId,
+      tipo_chamada: "PLATAFORMA",
+      tipo_servico_id: type.id,
+    },
+  });
+  const request = serializeRequest(created);
+  emitCourierRequestCreated({ request, targetUserIds });
+  return { request };
+}
+
 export async function listCourierRequests(userId) {
   await expireCourierRequests();
-  const courier = await prisma.motoboy.findFirst({
-    include: { vendedor: { include: { servicos: true } } },
+  const courier = await courierRepository.findCourier({
+    include: { lojas: { where: { ativo: true }, select: { ativo: true } }, vendedor: { include: { servicos: true } } },
     where: { status: "ATIVO", vendedor: { excluido_em: null, usuario_id: userId } },
   });
-  if (!courier) return { requests: [] };
+  if (!courier) return { dashboard: null, requests: [] };
   const onlineTypeIds = courier.vendedor.servicos.filter((item) => item.disponivel_agora && item.status === "ATIVO").map((item) => item.tipo_servico_id).filter(Boolean);
-  if (!onlineTypeIds.length) return { requests: [] };
-  const requests = await prisma.solicitacaoMotoboy.findMany({
+  const isBusy = await isCourierSellerBusy(courierRepository, courier.vendedor_id);
+  const requests = !onlineTypeIds.length || isBusy ? [] : await courierRepository.findCourierRequests({
     include: requestInclude,
     orderBy: { criado_em: "desc" },
     where: {
@@ -234,7 +351,7 @@ export async function listCourierRequests(userId) {
       tipo_servico_id: { in: onlineTypeIds },
       OR: [
         { motoboy_direcionado_id: courier.id, tipo_chamada: "EQUIPE" },
-        {
+        ...(canReceivePlatformCalls(courier) ? [{
           tipo_chamada: "PLATAFORMA",
           motoboy_direcionado_id: null,
           loja: {
@@ -245,47 +362,105 @@ export async function listCourierRequests(userId) {
                   estado: { equals: courier.estado_base, mode: "insensitive" },
                 },
               },
-              motoboys_equipe: { none: { ativo: true, motoboy_id: courier.id } },
             },
           },
-        },
+        }, {
+          tipo_chamada: "PLATAFORMA",
+          loja_id: null,
+          motoboy_direcionado_id: null,
+          solicitante: {
+            is: {
+              enderecos: {
+                some: {
+                  cidade: { equals: courier.cidade_base, mode: "insensitive" },
+                  estado: { equals: courier.estado_base, mode: "insensitive" },
+                  excluido_em: null,
+                },
+              },
+            },
+          },
+        }] : []),
       ],
     },
   });
-  return { requests: requests.map(serializeRequest) };
+  const recentRides = await courierRepository.findCourierRequests({
+    include: requestInclude,
+    orderBy: { atualizado_em: "desc" },
+    take: 6,
+    where: {
+      motoboy_aceite_id: courier.id,
+      status: { in: ["ACEITA", "CONCLUIDA", "CANCELADA"] },
+    },
+  });
+  const activeRide = recentRides.find((request) => (
+    request.status === "ACEITA"
+    && activeCourierConversationStatuses.includes(request.conversa_servico?.status)
+  ));
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const [completedToday, totalDeliveries] = await Promise.all([
+    courierRepository.countCourierRequests({
+      where: {
+        atualizado_em: { gte: today },
+        motoboy_aceite_id: courier.id,
+        status: "CONCLUIDA",
+      },
+    }),
+    courierRepository.countCourierRequests({
+      where: { motoboy_aceite_id: courier.id, status: "CONCLUIDA" },
+    }),
+  ]);
+
+  return {
+    dashboard: {
+      completedToday,
+      currentRide: activeRide ? serializeRequest(activeRide) : null,
+      linkedStoreCount: courier.lojas.length,
+      operationalStatus: isBusy ? "BUSY" : onlineTypeIds.length ? "AVAILABLE" : "OFFLINE",
+      recentRides: recentRides
+        .filter((request) => request.id !== activeRide?.id)
+        .map(serializeRequest),
+      totalDeliveries,
+    },
+    requests: requests.map(serializeRequest),
+  };
 }
 
 export async function acceptCourierRequest(userId, requestId) {
   const id = parseId(requestId, "Chamada invalida");
   await expireCourierRequests({ id });
-  const courier = await prisma.motoboy.findFirst({
-    include: { vendedor: { include: { servicos: { include: { tipo_servico: { include: { segmento_venda: true } } } } } } },
+  const courier = await courierRepository.findCourier({
+    include: { lojas: { where: { ativo: true }, select: { ativo: true } }, vendedor: { include: { servicos: { include: { tipo_servico: { include: { segmento_venda: true } } } } } } },
     where: { status: "ATIVO", vendedor: { excluido_em: null, usuario_id: userId } },
   });
   if (!courier) throw new AppError("Cadastre seu perfil de motoboy", 428);
-  const original = await prisma.solicitacaoMotoboy.findUnique({ include: requestInclude, where: { id } });
+  const original = await courierRepository.findCourierRequestById({ include: requestInclude, where: { id } });
   if (!original || original.status !== "PENDENTE" || original.expira_em <= new Date()) throw new AppError("Esta chamada nao esta mais disponivel", 409);
   if (original.solicitante_usuario_id === userId) throw new AppError("Voce nao pode aceitar a propria chamada", 400);
   if (!sameCity(
     { city: courier.cidade_base, state: courier.estado_base },
-    original.loja.endereco,
+    original.loja?.endereco ?? original.solicitante.enderecos[0],
   )) throw new AppError("Esta corrida pertence a outra cidade", 403);
   if (original.tipo_chamada === "EQUIPE" && original.motoboy_direcionado_id !== courier.id) throw new AppError("Esta chamada pertence a outro motoboy", 403);
   if (original.tipo_chamada === "PLATAFORMA") {
-    const linked = await prisma.motoboyLoja.findFirst({ where: { ativo: true, loja_id: original.loja_id, motoboy_id: courier.id } });
-    if (linked) throw new AppError("Use a chamada direta da equipe desta loja", 409);
+    if (!canReceivePlatformCalls(courier)) throw new AppError("Sua disponibilidade esta limitada as lojas credenciadas", 409);
   }
   const sellerService = courier.vendedor.servicos.find((item) => item.tipo_servico_id === original.tipo_servico_id && item.status === "ATIVO" && item.disponivel_agora);
   const segment = sellerService?.tipo_servico?.segmento_venda;
   if (!sellerService || !segment || segment.status !== "ATIVO") throw new AppError("Voce esta offline para esta entrega", 409);
 
-  const result = await prisma.$transaction(async (database) => {
-    const claimed = await database.solicitacaoMotoboy.updateMany({
+  const result = await courierRepository.transaction(async (database) => {
+    const repository = createCourierRepository(database);
+    await repository.lockCourier(courier.id);
+    if (await isCourierSellerBusy(repository, courier.vendedor_id)) {
+      throw new AppError("Voce ja esta atendendo outra corrida", 409);
+    }
+    const claimed = await repository.updateCourierRequests({
       data: { aceito_em: new Date(), motoboy_aceite_id: courier.id, status: "ACEITA" },
       where: { expira_em: { gt: new Date() }, id, status: "PENDENTE" },
     });
     if (claimed.count !== 1) throw new AppError("Outro motoboy ja aceitou esta chamada", 409);
-    const conversation = await database.conversaServico.create({
+    const conversation = await repository.createServiceConversation({
       data: {
         cliente_usuario_id: original.solicitante_usuario_id,
         descricao_inicial: original.descricao,
@@ -299,13 +474,23 @@ export async function acceptCourierRequest(userId, requestId) {
         vendedor_id: courier.vendedor_id,
       },
     });
-    return database.solicitacaoMotoboy.update({ include: requestInclude, data: { conversa_servico_id: conversation.id }, where: { id } });
+    return repository.updateCourierRequest({ include: requestInclude, data: { conversa_servico_id: conversation.id }, where: { id } });
   });
   const response = await getServiceConversation(userId, result.conversa_servico_id);
   const candidates = original.tipo_chamada === "PLATAFORMA"
-    ? await onlineCandidates(original.loja, original.tipo_servico_id, { excludeTeam: true })
+    ? await onlineCandidates(
+        original.loja?.endereco ?? original.solicitante.enderecos[0],
+        original.tipo_servico_id,
+        { excludeStoreTeamId: original.loja_id },
+      )
     : [];
   emitServiceChatCreated(response.conversation);
+  emitServiceAvailabilityUpdated({
+    available: false,
+    sellerId: courier.vendedor_id,
+    sellerUserId: userId,
+    serviceTypeId: original.tipo_servico_id,
+  });
   emitCourierRequestUpdated({
     request: serializeRequest(result),
     targetUserIds: candidates.map((item) => item.vendedor.usuario_id),
@@ -315,13 +500,17 @@ export async function acceptCourierRequest(userId, requestId) {
 
 export async function cancelCourierRequest(userId, requestId) {
   const id = parseId(requestId, "Chamada invalida");
-  const original = await prisma.solicitacaoMotoboy.findFirst({ include: requestInclude, where: { id, solicitante_usuario_id: userId } });
+  const original = await courierRepository.findCourierRequest({ include: requestInclude, where: { id, solicitante_usuario_id: userId } });
   if (!original) throw new AppError("Chamada nao encontrada", 404);
   if (original.status !== "PENDENTE") throw new AppError("Esta chamada nao pode mais ser cancelada", 409);
   const candidates = original.tipo_chamada === "PLATAFORMA"
-    ? await onlineCandidates(original.loja, original.tipo_servico_id, { excludeTeam: true })
+    ? await onlineCandidates(
+        original.loja?.endereco ?? original.solicitante.enderecos[0],
+        original.tipo_servico_id,
+        { excludeStoreTeamId: original.loja_id },
+      )
     : [];
-  const updated = await prisma.solicitacaoMotoboy.update({ include: requestInclude, data: { cancelado_em: new Date(), status: "CANCELADA" }, where: { id } });
+  const updated = await courierRepository.updateCourierRequest({ include: requestInclude, data: { cancelado_em: new Date(), status: "CANCELADA" }, where: { id } });
   emitCourierRequestUpdated({
     request: serializeRequest(updated),
     targetUserIds: [

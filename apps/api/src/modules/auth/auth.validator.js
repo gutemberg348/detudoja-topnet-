@@ -33,6 +33,12 @@ export const loginSchema = z.object({
   password: z.string().min(1, "Informe a senha").max(72, "Senha muito longa"),
 });
 
+export const socialLoginSchema = z.object({
+  idToken: z.string().trim().min(20, "Token social invalido").max(12000),
+  name: z.string().trim().min(1).max(160).optional(),
+  provider: z.enum(["GOOGLE", "APPLE"]),
+});
+
 export const registrationSchema = z.object({
   address: accountAddressSchema,
   email: z.string().trim().toLowerCase().email("E-mail invalido").max(255),

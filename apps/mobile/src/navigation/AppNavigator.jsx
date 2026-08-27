@@ -10,6 +10,7 @@ import { ChargePaymentScreen } from "../app/ChargePaymentScreen";
 import { ChargeQrScreen } from "../app/ChargeQrScreen";
 import { ChargeScanScreen } from "../app/ChargeScanScreen";
 import { GeneratedChargesHistoryScreen } from "../app/GeneratedChargesHistoryScreen";
+import { GatewayPixPaymentScreen } from "../app/GatewayPixPaymentScreen";
 import { KycVerificationScreen } from "../app/KycVerificationScreen";
 import { OnlineOrderSuccessScreen } from "../app/OnlineOrderSuccessScreen";
 import { ProductDetailsScreen } from "../app/ProductDetailsScreen";
@@ -65,6 +66,15 @@ const navigationTheme = {
     medium: { fontFamily: "System", fontWeight: "600" },
     regular: { fontFamily: "System", fontWeight: "400" },
   },
+};
+
+const linking = {
+  config: {
+    screens: {
+      Register: "cadastro/loja/:storeSlug",
+    },
+  },
+  prefixes: ["detudoja://"],
 };
 
 function Routes() {
@@ -160,6 +170,11 @@ function Routes() {
         options={backHeaderOptions()}
       />
       <Stack.Screen
+        component={GatewayPixPaymentScreen}
+        name="GatewayPixPayment"
+        options={backHeaderOptions()}
+      />
+      <Stack.Screen
         component={OnlineOrderSuccessScreen}
         name="OnlineOrderSuccess"
         options={{ headerShown: false }}
@@ -217,7 +232,7 @@ export function AppNavigator() {
   return (
     <SafeAreaProvider>
       <AuthStoreProvider>
-        <NavigationContainer theme={navigationTheme}>
+        <NavigationContainer linking={linking} theme={navigationTheme}>
           <Routes />
         </NavigationContainer>
       </AuthStoreProvider>

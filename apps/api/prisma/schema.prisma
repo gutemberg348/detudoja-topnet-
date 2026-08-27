@@ -15,6 +15,11 @@ enum StatusUsuario {
   EXCLUIDO
 }
 
+enum ProvedorLoginSocial {
+  GOOGLE
+  APPLE
+}
+
 enum PapelAdministrador {
   SUPER_ADMIN
   ADMIN
@@ -532,6 +537,8 @@ model Administrador {
   atualizado_em   DateTime            @updatedAt @db.Timestamptz(3)
   excluido_em     DateTime?           @db.Timestamptz(3)
 
+  sessoes_autenticacao SessaoAutenticacao[]
+
   @@index([status])
   @@index([papel])
   @@map("administradores")
@@ -563,6 +570,7 @@ model Usuario {
   tipo_conta              TipoContaUsuario @default(CONSUMIDOR)
   nivel_kyc               NivelKyc         @default(TIER_1)
   loja_origem_cadastro_id Int?
+  asaas_cliente_id        String?          @unique @db.VarChar(255)
   email_verificado        Boolean          @default(false)
   telefone_verificado     Boolean          @default(false)
   ultimo_login_em         DateTime?        @db.Timestamptz(3)
@@ -584,10 +592,10 @@ model Usuario {
   mensagens_pedido_loja      PedidoLojaMensagem[]
   propostas_pedido_loja      PropostaPedidoLoja[]      @relation("UsuarioPropostasPedidoLoja")
   conversas_servico_cliente  ConversaServico[]         @relation("ConversaServicoCliente")
-  solicitacoes_motoboy       SolicitacaoMotoboy[]       @relation("UsuarioSolicitacoesMotoboy")
+  solicitacoes_motoboy       SolicitacaoMotoboy[]      @relation("UsuarioSolicitacoesMotoboy")
   mensagens_conversa_servico ConversaServicoMensagem[]
-  conversas_loja_cliente     ConversaLoja[]             @relation("ConversaLojaCliente")
-  mensagens_conversa_loja    ConversaLojaMensagem[]     @relation("ConversaLojaMensagemAutor")
+  conversas_loja_cliente     ConversaLoja[]            @relation("ConversaLojaCliente")
+  mensagens_conversa_loja    ConversaLojaMensagem[]    @relation("ConversaLojaMensagemAutor")
   saques                     Saque[]
   recompensas                Recompensa[]              @relation("UsuarioBeneficiado")
   lancamentos_carteira       LancamentoCarteira[]
@@ -597,6 +605,8 @@ model Usuario {
   transacoes_compradas       TransacaoComercial[]      @relation("UsuarioComprador")
   recebiveis                 Recebivel[]               @relation("UsuarioRecebedor")
   eventos_financeiros        EventoFinanceiro[]
+  identidades_sociais        IdentidadeSocialUsuario[]
+  sessoes_autenticacao       SessaoAutenticacao[]
   loja_origem_cadastro       Loja?                     @relation("UsuariosCadastroOrigemLoja", fields: [loja_origem_cadastro_id], references: [id], onDelete: SetNull)
 
   @@index([status])
@@ -604,6 +614,45 @@ model Usuario {
   @@index([nivel_kyc])
   @@index([loja_origem_cadastro_id])
   @@map("usuarios")
+}
+
+model SessaoAutenticacao {
+  id               Int       @id @default(autoincrement())
+  jti              String    @unique @db.VarChar(100)
+  usuario_id       Int?
+  administrador_id Int?
+  audiencia        String    @db.VarChar(40)
+  expira_em        DateTime  @db.Timestamptz(3)
+  revogada_em      DateTime? @db.Timestamptz(3)
+  rotacionada_em   DateTime? @db.Timestamptz(3)
+  criado_em        DateTime  @default(now()) @db.Timestamptz(3)
+  atualizado_em    DateTime  @updatedAt @db.Timestamptz(3)
+
+  usuario       Usuario?       @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+  administrador Administrador? @relation(fields: [administrador_id], references: [id], onDelete: Cascade)
+
+  @@index([usuario_id, audiencia])
+  @@index([administrador_id, audiencia])
+  @@index([expira_em])
+  @@index([revogada_em])
+  @@map("sessoes_autenticacao")
+}
+
+model IdentidadeSocialUsuario {
+  id                  Int                 @id @default(autoincrement())
+  usuario_id          Int
+  provedor            ProvedorLoginSocial
+  provedor_usuario_id String              @db.VarChar(255)
+  email_provedor      String?             @db.VarChar(255)
+  criado_em           DateTime            @default(now()) @db.Timestamptz(3)
+  atualizado_em       DateTime            @updatedAt @db.Timestamptz(3)
+
+  usuario Usuario @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+
+  @@unique([provedor, provedor_usuario_id])
+  @@unique([usuario_id, provedor])
+  @@index([usuario_id])
+  @@map("identidades_sociais_usuario")
 }
 
 model EnderecoUsuario {
@@ -759,8 +808,8 @@ model Lojista {
   lojas      Loja[]
   transacoes TransacaoComercial[]
 
-  @@index([cpf])
-  @@index([cnpj])
+  @@unique([cpf])
+  @@unique([cnpj])
   @@index([status])
   @@index([status_kyc])
   @@map("lojistas")
@@ -781,10 +830,10 @@ model CategoriaLoja {
   atualizado_em                 DateTime            @updatedAt @db.Timestamptz(3)
   excluido_em                   DateTime?           @db.Timestamptz(3)
 
-  lojas          Loja[]
-  segmento_venda SegmentoVenda?   @relation("SegmentoCategoriasLojaLegado", fields: [segmento_venda_id], references: [id], onDelete: SetNull)
-  segmentos_venda SegmentoVenda[] @relation("CategoriaSegmentosVenda")
-  taxas          TaxaPlataforma[]
+  lojas           Loja[]
+  segmento_venda  SegmentoVenda?   @relation("SegmentoCategoriasLojaLegado", fields: [segmento_venda_id], references: [id], onDelete: SetNull)
+  segmentos_venda SegmentoVenda[]  @relation("CategoriaSegmentosVenda")
+  taxas           TaxaPlataforma[]
 
   @@index([nome])
   @@index([segmento_venda_id])
@@ -818,25 +867,25 @@ model Loja {
   atualizado_em                            DateTime   @updatedAt @db.Timestamptz(3)
   excluido_em                              DateTime?  @db.Timestamptz(3)
 
-  lojista            Lojista              @relation(fields: [lojista_id], references: [id], onDelete: Restrict)
-  categoria          CategoriaLoja        @relation(fields: [categoria_id], references: [id], onDelete: Restrict)
-  segmento_venda     SegmentoVenda?       @relation(fields: [segmento_venda_id], references: [id], onDelete: Restrict)
-  endereco           EnderecoLoja?
-  usuarios           UsuarioLoja[]
-  produtos           ProdutoLoja[]
-  pagamentos         Pagamento[]
-  pedidos            PedidoLoja[]
-  transacoes         TransacaoComercial[]
-  recebiveis         Recebivel[]
-  campanhas_cashback CampanhaCashback[]
-  documentos_fiscais DocumentoFiscal[]
-  taxas_plataforma   TaxaPlataforma[]
-  cobrancas          Cobranca[]
-  cadastros_origem   Usuario[]            @relation("UsuariosCadastroOrigemLoja")
-  conversas_gerais   ConversaLoja[]
-  conversas_motoboy   ConversaServico[]   @relation("LojaSolicitacoesMotoboy")
+  lojista              Lojista              @relation(fields: [lojista_id], references: [id], onDelete: Restrict)
+  categoria            CategoriaLoja        @relation(fields: [categoria_id], references: [id], onDelete: Restrict)
+  segmento_venda       SegmentoVenda?       @relation(fields: [segmento_venda_id], references: [id], onDelete: Restrict)
+  endereco             EnderecoLoja?
+  usuarios             UsuarioLoja[]
+  produtos             ProdutoLoja[]
+  pagamentos           Pagamento[]
+  pedidos              PedidoLoja[]
+  transacoes           TransacaoComercial[]
+  recebiveis           Recebivel[]
+  campanhas_cashback   CampanhaCashback[]
+  documentos_fiscais   DocumentoFiscal[]
+  taxas_plataforma     TaxaPlataforma[]
+  cobrancas            Cobranca[]
+  cadastros_origem     Usuario[]            @relation("UsuariosCadastroOrigemLoja")
+  conversas_gerais     ConversaLoja[]
+  conversas_motoboy    ConversaServico[]    @relation("LojaSolicitacoesMotoboy")
   solicitacoes_motoboy SolicitacaoMotoboy[] @relation("LojaChamadasMotoboy")
-  motoboys_equipe    MotoboyLoja[]
+  motoboys_equipe      MotoboyLoja[]
 
   @@index([lojista_id])
   @@index([categoria_id])
@@ -848,19 +897,19 @@ model Loja {
 }
 
 model ConversaLoja {
-  id                     Int                @id @default(autoincrement())
-  loja_id                Int
-  cliente_usuario_id     Int
-  status                 StatusConversaLoja @default(ABERTA)
-  nao_lidas_cliente      Int                @default(0)
-  nao_lidas_loja         Int                @default(0)
-  ultima_mensagem_em     DateTime?          @db.Timestamptz(3)
-  arquivado_em           DateTime?          @db.Timestamptz(3)
-  criado_em              DateTime           @default(now()) @db.Timestamptz(3)
-  atualizado_em          DateTime           @updatedAt @db.Timestamptz(3)
+  id                 Int                @id @default(autoincrement())
+  loja_id            Int
+  cliente_usuario_id Int
+  status             StatusConversaLoja @default(ABERTA)
+  nao_lidas_cliente  Int                @default(0)
+  nao_lidas_loja     Int                @default(0)
+  ultima_mensagem_em DateTime?          @db.Timestamptz(3)
+  arquivado_em       DateTime?          @db.Timestamptz(3)
+  criado_em          DateTime           @default(now()) @db.Timestamptz(3)
+  atualizado_em      DateTime           @updatedAt @db.Timestamptz(3)
 
-  loja      Loja                    @relation(fields: [loja_id], references: [id], onDelete: Cascade)
-  cliente   Usuario                 @relation("ConversaLojaCliente", fields: [cliente_usuario_id], references: [id], onDelete: Cascade)
+  loja      Loja                   @relation(fields: [loja_id], references: [id], onDelete: Cascade)
+  cliente   Usuario                @relation("ConversaLojaCliente", fields: [cliente_usuario_id], references: [id], onDelete: Cascade)
   mensagens ConversaLojaMensagem[]
 
   @@unique([loja_id, cliente_usuario_id])
@@ -871,16 +920,16 @@ model ConversaLoja {
 }
 
 model ConversaLojaMensagem {
-  id                   Int                          @id @default(autoincrement())
-  conversa_loja_id     Int
-  autor_usuario_id     Int?
-  origem               OrigemMensagemConversaLoja
-  tipo                 TipoMensagemConversaLoja   @default(TEXTO)
-  mensagem             String
-  conteudo_json        Json?
-  lido_cliente_em      DateTime?                    @db.Timestamptz(3)
-  lido_loja_em         DateTime?                    @db.Timestamptz(3)
-  criado_em            DateTime                     @default(now()) @db.Timestamptz(3)
+  id               Int                        @id @default(autoincrement())
+  conversa_loja_id Int
+  autor_usuario_id Int?
+  origem           OrigemMensagemConversaLoja
+  tipo             TipoMensagemConversaLoja   @default(TEXTO)
+  mensagem         String
+  conteudo_json    Json?
+  lido_cliente_em  DateTime?                  @db.Timestamptz(3)
+  lido_loja_em     DateTime?                  @db.Timestamptz(3)
+  criado_em        DateTime                   @default(now()) @db.Timestamptz(3)
 
   conversa ConversaLoja @relation(fields: [conversa_loja_id], references: [id], onDelete: Cascade)
   autor    Usuario?     @relation("ConversaLojaMensagemAutor", fields: [autor_usuario_id], references: [id], onDelete: SetNull)
@@ -974,25 +1023,26 @@ model UsuarioLoja {
 }
 
 model Vendedor {
-  id                            Int            @id @default(autoincrement())
-  usuario_id                    Int            @unique
-  segmento_venda_id             Int?
-  nome_publico                  String         @db.VarChar(180)
-  descricao                     String?
-  tipo_pessoa                   TipoPessoa?
-  cpf                           String?        @db.VarChar(14)
-  cnpj                          String?        @db.VarChar(18)
-  categoria                     String?        @db.VarChar(120)
-  status                        StatusVendedor @default(PENDENTE)
-  status_kyc                    StatusKyc      @default(PENDENTE)
-  aceita_servicos               Boolean        @default(true)
-  atende_agora                  Boolean        @default(false)
-  disponibilidade_atualizada_em DateTime?      @db.Timestamptz(3)
-  avaliacao_media               Decimal        @default(0) @db.Decimal(3, 2)
-  total_vendas                  Int            @default(0)
-  criado_em                     DateTime       @default(now()) @db.Timestamptz(3)
-  atualizado_em                 DateTime       @updatedAt @db.Timestamptz(3)
-  excluido_em                   DateTime?      @db.Timestamptz(3)
+  id                                 Int            @id @default(autoincrement())
+  usuario_id                         Int            @unique
+  segmento_venda_id                  Int?
+  nome_publico                       String         @db.VarChar(180)
+  descricao                          String?
+  tipo_pessoa                        TipoPessoa?
+  cpf                                String?        @db.VarChar(14)
+  cnpj                               String?        @db.VarChar(18)
+  categoria                          String?        @db.VarChar(120)
+  status                             StatusVendedor @default(PENDENTE)
+  status_kyc                         StatusKyc      @default(PENDENTE)
+  limite_faturamento_mensal_centavos BigInt?        @db.BigInt
+  aceita_servicos                    Boolean        @default(true)
+  atende_agora                       Boolean        @default(false)
+  disponibilidade_atualizada_em      DateTime?      @db.Timestamptz(3)
+  avaliacao_media                    Decimal        @default(0) @db.Decimal(3, 2)
+  total_vendas                       Int            @default(0)
+  criado_em                          DateTime       @default(now()) @db.Timestamptz(3)
+  atualizado_em                      DateTime       @updatedAt @db.Timestamptz(3)
+  excluido_em                        DateTime?      @db.Timestamptz(3)
 
   usuario           Usuario              @relation(fields: [usuario_id], references: [id], onDelete: Restrict)
   segmento_venda    SegmentoVenda?       @relation(fields: [segmento_venda_id], references: [id], onDelete: SetNull)
@@ -1008,8 +1058,8 @@ model Vendedor {
   @@index([status])
   @@index([status_kyc])
   @@index([categoria])
-  @@index([cpf])
-  @@index([cnpj])
+  @@unique([cpf])
+  @@unique([cnpj])
   @@index([segmento_venda_id])
   @@map("vendedores")
 }
@@ -1085,15 +1135,15 @@ model TipoServico {
   descricao         String?
   icone             String?                @db.VarChar(80)
   modo_atendimento  ModoAtendimentoServico @default(NEGOCIACAO_CHAT)
-  tipo_operacao     TipoOperacaoServico     @default(GERAL)
+  tipo_operacao     TipoOperacaoServico    @default(GERAL)
   status            StatusServicoVendedor  @default(ATIVO)
   ordem             Int                    @default(0)
   criado_em         DateTime               @default(now()) @db.Timestamptz(3)
   atualizado_em     DateTime               @updatedAt @db.Timestamptz(3)
   excluido_em       DateTime?              @db.Timestamptz(3)
 
-  segmento_venda    SegmentoVenda?    @relation(fields: [segmento_venda_id], references: [id], onDelete: SetNull)
-  servicos_vendedor ServicoVendedor[]
+  segmento_venda       SegmentoVenda?       @relation(fields: [segmento_venda_id], references: [id], onDelete: SetNull)
+  servicos_vendedor    ServicoVendedor[]
   solicitacoes_motoboy SolicitacaoMotoboy[]
 
   @@index([segmento_venda_id])
@@ -1119,15 +1169,15 @@ model ConversaServico {
   atualizado_em           DateTime              @updatedAt @db.Timestamptz(3)
   encerrado_em            DateTime?             @db.Timestamptz(3)
 
-  segmento_venda   SegmentoVenda             @relation(fields: [segmento_venda_id], references: [id], onDelete: Restrict)
-  cliente          Usuario                   @relation("ConversaServicoCliente", fields: [cliente_usuario_id], references: [id], onDelete: Restrict)
-  vendedor         Vendedor                  @relation(fields: [vendedor_id], references: [id], onDelete: Restrict)
-  servico_vendedor ServicoVendedor?          @relation(fields: [servico_vendedor_id], references: [id], onDelete: SetNull)
-  loja_solicitante Loja?                     @relation("LojaSolicitacoesMotoboy", fields: [loja_solicitante_id], references: [id], onDelete: SetNull)
-  pedido_loja      PedidoLoja?               @relation("PedidoCorridasMotoboy", fields: [pedido_loja_id], references: [id], onDelete: SetNull)
-  mensagens        ConversaServicoMensagem[]
-  propostas        PropostaServico[]
-  solicitacao_motoboy SolicitacaoMotoboy? @relation("SolicitacaoMotoboyConversa")
+  segmento_venda      SegmentoVenda             @relation(fields: [segmento_venda_id], references: [id], onDelete: Restrict)
+  cliente             Usuario                   @relation("ConversaServicoCliente", fields: [cliente_usuario_id], references: [id], onDelete: Restrict)
+  vendedor            Vendedor                  @relation(fields: [vendedor_id], references: [id], onDelete: Restrict)
+  servico_vendedor    ServicoVendedor?          @relation(fields: [servico_vendedor_id], references: [id], onDelete: SetNull)
+  loja_solicitante    Loja?                     @relation("LojaSolicitacoesMotoboy", fields: [loja_solicitante_id], references: [id], onDelete: SetNull)
+  pedido_loja         PedidoLoja?               @relation("PedidoCorridasMotoboy", fields: [pedido_loja_id], references: [id], onDelete: SetNull)
+  mensagens           ConversaServicoMensagem[]
+  propostas           PropostaServico[]
+  solicitacao_motoboy SolicitacaoMotoboy?       @relation("SolicitacaoMotoboyConversa")
 
   @@index([cliente_usuario_id, status])
   @@index([vendedor_id, status])
@@ -1140,25 +1190,26 @@ model ConversaServico {
 }
 
 model Motoboy {
-  id                  Int           @id @default(autoincrement())
-  vendedor_id         Int           @unique
-  nome_exibicao       String        @db.VarChar(180)
-  telefone_contato    String        @db.VarChar(30)
-  cnh                 String        @unique @db.VarChar(20)
-  placa               String        @unique @db.VarChar(10)
-  modelo_moto         String        @db.VarChar(120)
-  cor_moto            String?       @db.VarChar(60)
-  cidade_base         String        @db.VarChar(120)
-  estado_base         String        @db.Char(2)
-  raio_atendimento_km Int           @default(10)
-  status              StatusMotoboy @default(ATIVO)
-  total_entregas      Int           @default(0)
-  avaliacao_media     Decimal       @default(0) @db.Decimal(3, 2)
-  criado_em           DateTime      @default(now()) @db.Timestamptz(3)
-  atualizado_em       DateTime      @updatedAt @db.Timestamptz(3)
+  id                         Int           @id @default(autoincrement())
+  vendedor_id                Int           @unique
+  nome_exibicao              String        @db.VarChar(180)
+  telefone_contato           String        @db.VarChar(30)
+  cnh                        String        @unique @db.VarChar(20)
+  placa                      String        @unique @db.VarChar(10)
+  modelo_moto                String        @db.VarChar(120)
+  cor_moto                   String?       @db.VarChar(60)
+  cidade_base                String        @db.VarChar(120)
+  estado_base                String        @db.Char(2)
+  raio_atendimento_km        Int           @default(10)
+  aceita_chamadas_plataforma Boolean       @default(false)
+  status                     StatusMotoboy @default(ATIVO)
+  total_entregas             Int           @default(0)
+  avaliacao_media            Decimal       @default(0) @db.Decimal(3, 2)
+  criado_em                  DateTime      @default(now()) @db.Timestamptz(3)
+  atualizado_em              DateTime      @updatedAt @db.Timestamptz(3)
 
-  vendedor Vendedor      @relation(fields: [vendedor_id], references: [id], onDelete: Cascade)
-  lojas    MotoboyLoja[]
+  vendedor                  Vendedor             @relation(fields: [vendedor_id], references: [id], onDelete: Cascade)
+  lojas                     MotoboyLoja[]
   solicitacoes_direcionadas SolicitacaoMotoboy[] @relation("SolicitacaoMotoboyDirecionado")
   solicitacoes_aceitas      SolicitacaoMotoboy[] @relation("SolicitacaoMotoboyAceite")
 
@@ -1185,32 +1236,32 @@ model MotoboyLoja {
 }
 
 model SolicitacaoMotoboy {
-  id                       Int                       @id @default(autoincrement())
-  loja_id                  Int
-  solicitante_usuario_id   Int
-  tipo_servico_id          Int
-  pedido_loja_id           Int?
-  motoboy_direcionado_id   Int?
-  motoboy_aceite_id        Int?
-  conversa_servico_id      Int?                      @unique
-  tipo_chamada             TipoChamadaMotoboy
-  status                   StatusSolicitacaoMotoboy  @default(PENDENTE)
-  origem                   String                    @db.VarChar(300)
-  destino                  String                    @db.VarChar(300)
-  descricao                String?
-  expira_em                DateTime                  @db.Timestamptz(3)
-  aceito_em                DateTime?                 @db.Timestamptz(3)
-  cancelado_em             DateTime?                 @db.Timestamptz(3)
-  criado_em                DateTime                  @default(now()) @db.Timestamptz(3)
-  atualizado_em            DateTime                  @updatedAt @db.Timestamptz(3)
+  id                     Int                      @id @default(autoincrement())
+  loja_id                Int?
+  solicitante_usuario_id Int
+  tipo_servico_id        Int
+  pedido_loja_id         Int?
+  motoboy_direcionado_id Int?
+  motoboy_aceite_id      Int?
+  conversa_servico_id    Int?                     @unique
+  tipo_chamada           TipoChamadaMotoboy
+  status                 StatusSolicitacaoMotoboy @default(PENDENTE)
+  origem                 String                   @db.VarChar(300)
+  destino                String                   @db.VarChar(300)
+  descricao              String?
+  expira_em              DateTime                 @db.Timestamptz(3)
+  aceito_em              DateTime?                @db.Timestamptz(3)
+  cancelado_em           DateTime?                @db.Timestamptz(3)
+  criado_em              DateTime                 @default(now()) @db.Timestamptz(3)
+  atualizado_em          DateTime                 @updatedAt @db.Timestamptz(3)
 
-  loja                    Loja              @relation("LojaChamadasMotoboy", fields: [loja_id], references: [id], onDelete: Restrict)
-  solicitante             Usuario           @relation("UsuarioSolicitacoesMotoboy", fields: [solicitante_usuario_id], references: [id], onDelete: Restrict)
-  tipo_servico            TipoServico       @relation(fields: [tipo_servico_id], references: [id], onDelete: Restrict)
-  pedido_loja             PedidoLoja?       @relation("PedidoSolicitacoesMotoboy", fields: [pedido_loja_id], references: [id], onDelete: SetNull)
-  motoboy_direcionado     Motoboy?          @relation("SolicitacaoMotoboyDirecionado", fields: [motoboy_direcionado_id], references: [id], onDelete: SetNull)
-  motoboy_aceite          Motoboy?          @relation("SolicitacaoMotoboyAceite", fields: [motoboy_aceite_id], references: [id], onDelete: SetNull)
-  conversa_servico       ConversaServico? @relation("SolicitacaoMotoboyConversa", fields: [conversa_servico_id], references: [id], onDelete: SetNull)
+  loja                Loja?            @relation("LojaChamadasMotoboy", fields: [loja_id], references: [id], onDelete: Restrict)
+  solicitante         Usuario          @relation("UsuarioSolicitacoesMotoboy", fields: [solicitante_usuario_id], references: [id], onDelete: Restrict)
+  tipo_servico        TipoServico      @relation(fields: [tipo_servico_id], references: [id], onDelete: Restrict)
+  pedido_loja         PedidoLoja?      @relation("PedidoSolicitacoesMotoboy", fields: [pedido_loja_id], references: [id], onDelete: SetNull)
+  motoboy_direcionado Motoboy?         @relation("SolicitacaoMotoboyDirecionado", fields: [motoboy_direcionado_id], references: [id], onDelete: SetNull)
+  motoboy_aceite      Motoboy?         @relation("SolicitacaoMotoboyAceite", fields: [motoboy_aceite_id], references: [id], onDelete: SetNull)
+  conversa_servico    ConversaServico? @relation("SolicitacaoMotoboyConversa", fields: [conversa_servico_id], references: [id], onDelete: SetNull)
 
   @@index([loja_id, status])
   @@index([solicitante_usuario_id, status])
@@ -1388,9 +1439,9 @@ model Pagamento {
   criado_em                     DateTime         @default(now()) @db.Timestamptz(3)
   atualizado_em                 DateTime         @updatedAt @db.Timestamptz(3)
 
-  usuario_pagador     Usuario                @relation("UsuarioPagador", fields: [usuario_pagador_id], references: [id], onDelete: Restrict)
-  loja                Loja?                  @relation(fields: [loja_id], references: [id], onDelete: Restrict)
-  vendedor            Vendedor?              @relation(fields: [vendedor_id], references: [id], onDelete: Restrict)
+  usuario_pagador     Usuario                  @relation("UsuarioPagador", fields: [usuario_pagador_id], references: [id], onDelete: Restrict)
+  loja                Loja?                    @relation(fields: [loja_id], references: [id], onDelete: Restrict)
+  vendedor            Vendedor?                @relation(fields: [vendedor_id], references: [id], onDelete: Restrict)
   itens               PagamentoItem[]
   composicoes         PagamentoComposicao[]
   transacao_comercial TransacaoComercial?
@@ -1398,7 +1449,9 @@ model Pagamento {
   cobranca            Cobranca?
   comprovantes        ComprovantePagamento[]
   eventos_financeiros EventoFinanceiro[]
+  eventos_gateway     EventoGatewayPagamento[]
 
+  @@unique([gateway, gateway_pagamento_id])
   @@index([usuario_pagador_id])
   @@index([loja_id])
   @@index([vendedor_id])
@@ -1407,6 +1460,27 @@ model Pagamento {
   @@index([gateway_pagamento_id])
   @@index([criado_em])
   @@map("pagamentos")
+}
+
+model EventoGatewayPagamento {
+  id                 Int              @id @default(autoincrement())
+  gateway            GatewayPagamento
+  gateway_evento_id  String           @unique @db.VarChar(255)
+  tipo_evento        String           @db.VarChar(120)
+  pagamento_id       Int?
+  payload_json       Json
+  processado_em      DateTime?        @db.Timestamptz(3)
+  erro_processamento String?
+  criado_em          DateTime         @default(now()) @db.Timestamptz(3)
+  atualizado_em      DateTime         @updatedAt @db.Timestamptz(3)
+
+  pagamento Pagamento? @relation(fields: [pagamento_id], references: [id], onDelete: SetNull)
+
+  @@index([gateway])
+  @@index([pagamento_id])
+  @@index([tipo_evento])
+  @@index([criado_em])
+  @@map("eventos_gateway_pagamento")
 }
 
 model Cobranca {
@@ -1493,6 +1567,7 @@ model PedidoLoja {
   usuario_id                     Int
   loja_id                        Int
   pagamento_id                   Int?              @unique
+  chave_idempotencia             String?           @db.VarChar(120)
   endereco_entrega_id            Int?
   tipo_entrega                   TipoEntregaPedido
   status                         StatusPedidoLoja  @default(RECEBIDO)
@@ -1509,19 +1584,22 @@ model PedidoLoja {
   pronto_retirada_em             DateTime?         @db.Timestamptz(3)
   concluido_em                   DateTime?         @db.Timestamptz(3)
   cancelado_em                   DateTime?         @db.Timestamptz(3)
+  estoque_reservado_em           DateTime?         @db.Timestamptz(3)
+  estoque_liberado_em            DateTime?         @db.Timestamptz(3)
   criado_em                      DateTime          @default(now()) @db.Timestamptz(3)
   atualizado_em                  DateTime          @updatedAt @db.Timestamptz(3)
 
-  comprador        Usuario              @relation("UsuarioPedidosLoja", fields: [usuario_id], references: [id], onDelete: Restrict)
-  loja             Loja                 @relation(fields: [loja_id], references: [id], onDelete: Restrict)
-  pagamento        Pagamento?           @relation(fields: [pagamento_id], references: [id], onDelete: Restrict)
-  endereco_entrega EnderecoUsuario?     @relation(fields: [endereco_entrega_id], references: [id], onDelete: SetNull)
-  itens            PedidoLojaItem[]
-  mensagens        PedidoLojaMensagem[]
-  propostas        PropostaPedidoLoja[]
-  corridas_motoboy ConversaServico[] @relation("PedidoCorridasMotoboy")
+  comprador            Usuario              @relation("UsuarioPedidosLoja", fields: [usuario_id], references: [id], onDelete: Restrict)
+  loja                 Loja                 @relation(fields: [loja_id], references: [id], onDelete: Restrict)
+  pagamento            Pagamento?           @relation(fields: [pagamento_id], references: [id], onDelete: Restrict)
+  endereco_entrega     EnderecoUsuario?     @relation(fields: [endereco_entrega_id], references: [id], onDelete: SetNull)
+  itens                PedidoLojaItem[]
+  mensagens            PedidoLojaMensagem[]
+  propostas            PropostaPedidoLoja[]
+  corridas_motoboy     ConversaServico[]    @relation("PedidoCorridasMotoboy")
   solicitacoes_motoboy SolicitacaoMotoboy[] @relation("PedidoSolicitacoesMotoboy")
 
+  @@unique([usuario_id, chave_idempotencia])
   @@index([usuario_id])
   @@index([loja_id])
   @@index([endereco_entrega_id])

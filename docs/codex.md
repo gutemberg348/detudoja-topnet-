@@ -1,10 +1,41 @@
 # Codex Handoff - DeTudoJa
 
-Ultima atualizacao: 2026-08-10
+Ultima atualizacao: 2026-08-27
 
 Este arquivo e o resumo principal para qualquer novo Codex continuar o projeto
 sem precisar reconstruir todo o contexto pela conversa. Sempre que uma regra,
 rota, tela, schema, comando ou fluxo importante mudar, atualize este arquivo.
+
+## Atualizacao 2026-08-27: mapa do banco
+
+- `docs/banco.md` e a referencia detalhada do PostgreSQL: 53 tabelas, IDs,
+  chaves unicas, FKs, indices, comportamento de exclusao, fluxos financeiros e
+  comandos seguros de verificacao.
+- Antes de criar ou alterar tabelas, consulte esse arquivo e mantenha-o
+  sincronizado com `apps/api/prisma/schema.prisma`.
+
+## Atualizacao 2026-08-27: repositories na API
+
+- A arquitetura dos modulos da API agora segue `route/controller -> service ->
+  repository -> Prisma/PostgreSQL`.
+- Controllers tratam HTTP, autenticacao ja resolvida, parametros e resposta.
+  Services concentram validacao de negocio, calculos, orquestracao, eventos e
+  chamadas a integracoes externas. Somente arquivos `*.repository.js` acessam
+  models Prisma, `$transaction` ou SQL.
+- Repositories que participam de operacoes atomicas exportam uma factory
+  `create...Repository(database)`. O service abre a transacao pelo repository
+  raiz e cria outro repository com o cliente transacional recebido. Assim
+  estoque, pagamentos, ganhos, estornos, aceite de corrida e mensagens
+  continuam na mesma transacao.
+- Foram cobertos os dominios `admin`, `auth`, `charges`, `courier`, `earnings`,
+  `kyc`, `marketplace`, `network`, `orders`, `payments/Asaas`, `seller`,
+  `service-chats`, `settings`, `store-chats`, `users` e `wallet`.
+- A auditoria `rg` nao encontra mais `prisma` nem `database.<model>` fora dos
+  repositories em `apps/api/src/modules`.
+- Validacao desta etapa: 63 arquivos de service/repository/config verificados
+  com `node --check` e 29 testes da API aprovados.
+- Esta refatoracao nao muda schema, dados, rotas ou contratos HTTP e nao exige
+  migration Prisma.
 
 ## Atualizacao 2026-07-30: conversas recentes na Home
 
@@ -352,12 +383,29 @@ evita duas copias de React apos o upgrade do Expo SDK 54, que causariam
 O diretorio local `.expo/` fica ignorado pelo Git, pois armazena estado de
 dispositivo e servidor de desenvolvimento que nao pertence ao repositorio.
 
+Se Metro requisitar um asset removido, como `icon-essenza.png`, conferir o
+config efetivo com `npm exec -w apps/mobile -- expo config --json`. O config
+atual usa somente `apps/mobile/assets/detudoja-logo-smile.png` no splash. Se
+ele estiver correto, o erro vem de cache ou manifesto antigo: parar Metro,
+fechar a aba/app antigo e reiniciar por `npm run dev:mobile -- --clear`. Em um
+development build nativo, icone e splash sao embutidos no binario; depois de
+troca-los e necessario gerar um novo build.
+
 ### Mobile fisico e API local
 
 Em um telefone, `localhost` significa o proprio telefone, e nao o computador.
 A API escuta em `0.0.0.0:3333` e o mobile identifica automaticamente o host do
 Expo/Metro para montar sua URL local. Portanto, o desenvolvimento na mesma
 rede Wi-Fi nao exige IP gravado em `apps/mobile/.env`.
+
+Se o browser retornar `404` em todas as rotas da API e tambem em `/socket.io`,
+verificar processos duplicados na porta `3333` antes de investigar CORS. Em
+2026-08-24 havia uma API antiga em IPv6 (`::1`) e a API atual em IPv4
+(`0.0.0.0`): `localhost` escolhia a antiga, enquanto `127.0.0.1` chegava na
+atual. O diagnostico e `Get-NetTCPConnection -LocalPort 3333 -State Listen`;
+encerrar somente a sessao antiga e manter uma unica API na porta. O estado
+correto e `/health` e o handshake `GET /socket.io/?EIO=4&transport=polling`
+retornarem `200`.
 
 Para testar no aparelho, telefone e computador devem estar na mesma rede Wi-Fi:
 
@@ -615,10 +663,32 @@ ADMIN_SEED_PHONE=11999990000
 ADMIN_SEED_PASSWORD=...
 COMPANY_ROOT_NAME=DeTudoJa Empresa
 COMPANY_ROOT_EMAIL=empresa@detudoja.local
+ASAAS_ENABLED=false
+ASAAS_API_URL=https://api-sandbox.asaas.com/v3
+ASAAS_API_KEY=
+ASAAS_WEBHOOK_TOKEN=
 ```
 
 `COMPANY_ROOT_*` define o usuario raiz interno usado quando alguem cadastra sem
 codigo de indicacao.
+
+### Sincronizacao de ambiente (2026-08-19)
+
+`apps/api/.env.example` e `apps/api/.env` foram alinhados nas chaves de
+configuracao: uploads, seed do primeiro administrador, usuario raiz da empresa
+e Asaas. O arquivo real continua com seus segredos JWT e banco locais; nenhuma
+chave secreta foi copiada para documentacao. O gateway inicia deliberadamente
+com `ASAAS_ENABLED=false`, `ASAAS_API_KEY=` e `ASAAS_WEBHOOK_TOKEN=` vazios.
+Para testar Pix externo, preencher as duas chaves no `.env` e alterar somente
+`ASAAS_ENABLED=true`.
+Ao copiar `ASAAS_API_KEY`, manter o caractere inicial `$` da chave do Asaas
+(`$aact_hmlg_...` no Sandbox e `$aact_prod_...` em producao). A configuracao
+tambem normaliza o formato sem esse unico caractere para evitar uma falha de
+copiar/colar no ambiente local, mas a chave deve ser mantida completa no painel.
+
+Regra de manutencao: toda variavel nova adicionada ao `.env.example` deve ser
+adicionada ao `.env` de desenvolvimento com valor seguro, e anotada nesta
+secao no mesmo change.
 
 ## Backend API
 
@@ -2626,7 +2696,7 @@ A loja nao escolhe mais um motoboy aleatorio em uma lista publica. O fluxo
 definitivo possui duas origens:
 
 - `PLATAFORMA`: um unico botao envia a corrida aos motoboys online da cidade
-  que nao pertencem a equipe daquela loja. Nomes e quantidade nao sao
+  que escolheram receber chamadas gerais. Nomes e quantidade nao sao
   expostos. O primeiro aceite vence;
 - `EQUIPE`: `MotoboyLoja` continua identificando os profissionais vinculados.
   A loja pode chamar diretamente um membro online, exibido em uma secao
@@ -2660,6 +2730,47 @@ npm exec -w apps/api -- prisma migrate dev --name chamadas_motoboy_aceite
 ```
 
 O Codex validou o schema, mas nao executou migration e nao iniciou servidor.
+
+### Escopo de chamadas do entregador (2026-08-19)
+
+O perfil `Motoboy` passa a ter `aceita_chamadas_plataforma` (`false` por
+padrao). O switch de disponibilidade de `Motoboy` continua sendo a chave para
+ficar online; o novo escopo decide apenas de onde chegam as corridas:
+
+- `Toda a cidade`: recebe chamadas gerais de qualquer loja da mesma cidade/UF;
+- `Minhas lojas`: recebe somente chamadas diretas das lojas que o credenciaram
+  em `motoboys_loja`.
+
+Um profissional sem vinculo ativo a loja continua apto a chamadas gerais, para
+nao ficar invisivel no primeiro cadastro. A API recusa escolher `Minhas lojas`
+quando nao existe vinculo ativo. A escolha pertence ao motoboy e nao a loja.
+No painel de uma loja, a secao `Equipe credenciada` pode identificar e chamar
+um membro especifico; a secao `Chamada geral` mostra somente `Servico
+disponivel agora` ou `Servico indisponivel agora`, sem nomes e sem contagem.
+
+Rotas novas e ajustadas:
+
+- `PATCH /api/app/courier/profile/dispatch-scope` com
+  `{ acceptsPlatformCalls: boolean }`;
+- `GET /api/app/courier/requests` respeita o escopo do profissional;
+- `POST /api/app/courier/stores/:storeId/requests` notifica somente os
+  profissionais elegiveis pelo Socket.IO.
+
+`ServiceDeskScreen` agora possui a `Central do entregador`: mostra o estado
+online, permite alternar entre os dois escopos e destaca corridas pendentes.
+Ao receber `courier.request.created`, o aplicativo aberto vibra e atualiza a
+lista em tempo real. Notificacao com som quando o app estiver fechado exige a
+proxima etapa de push notification (Expo Push); Socket.IO funciona enquanto o
+app permanece conectado.
+
+Migration pendente, a ser executada manualmente pelo responsavel, com a API
+parada:
+
+```powershell
+npm exec -w apps/api -- prisma migrate dev --name motoboy_escopo_chamadas
+```
+
+O Codex nao executou migration, seed ou servidor nesta etapa.
 
 ## Ciclo da corrida e cobranca sem expiracao (2026-08-07)
 
@@ -2733,6 +2844,580 @@ estado local e comunicacao em tempo real:
   autonoma/loja e cobranca QR da loja. A tela pai continua dona das mutacoes e
   decide abrir ou fechar cada modal.
 
-`SellScreen.jsx` caiu de 3.966 para cerca de 3.146 linhas sem alterar rota,
-contrato, schema ou migration. A proxima divisao continua sendo por dominio:
-painel interno da loja/CRM, catalogo de produtos e formularios de loja.
+`SellScreen.jsx` caiu de 3.966 para 1.136 linhas sem alterar rota, contrato,
+schema ou migration. Alem dos dois modulos acima, `sell/StoreManagerPanel.jsx`
+agora concentra a area interna da loja: disponibilidade, horario, CRM,
+catalogo de produtos e historico financeiro. `sell/SellerFormModals.jsx`
+concentra onboarding, cadastro/edicao de loja, endereco com CEP, identidade
+visual e produto. A tela principal permanece dona do estado, das mutacoes,
+Socket.IO e da navegacao.
+
+Na Central de Vendas, o badge de Servicos conta somente conversas de servico
+ativas (`ABERTA`, `ACORDADA` ou `AGUARDANDO_CONFIRMACAO`) com alerta pendente.
+Conversas canceladas e encerradas nao aparecem como chamados novos.
+O badge global da tab `Vender` usa a mesma regra e tambem ignora solicitacoes
+de motoboy que nao estejam `PENDENTE` ou cujo prazo ja tenha passado.
+
+## Login social Google e Apple (2026-08-24)
+
+O login social reutiliza a sessao atual do DeTudoJa. Google e Apple provam a
+identidade no provedor; a API valida criptograficamente o `id_token` e apenas
+entao cria ou recupera o usuario e devolve os mesmos `accessToken` e
+`refreshToken` usados pelo login por senha. O aplicativo nunca aceita um
+e-mail informado livremente pelo cliente como prova de identidade.
+
+### Fluxo de conta
+
+1. Google abre o navegador de autorizacao; Apple abre a folha nativa do
+   iPhone. O retorno do binario usa o scheme `detudoja://`.
+2. O app envia `provider`, `idToken` e, quando a Apple fornecer na primeira
+   vez, o nome para `POST /api/app/auth/social`.
+3. `social-auth.service.js` verifica assinatura, emissor, validade e audience
+   com as chaves publicas do Google ou Apple. O Google tambem exige
+   `email_verified=true`.
+4. A API consulta `identidades_sociais_usuario`. Havendo vinculo, entra no
+   mesmo usuario. Sem vinculo, mas com e-mail existente e verificado pelo
+   provedor, ela vincula o provedor ao usuario atual.
+5. Para e-mail novo, cria consumidor ativo, KYC pendente, quatro carteiras e
+   posicao na matriz abaixo da empresa. CPF continua para a primeira compra ou
+   venda. Telefone e endereco podem ser completados em `Perfil > Editar`
+   antes do uso do comercio local.
+
+### Banco e API
+
+- `IdentidadeSocialUsuario` / tabela `identidades_sociais_usuario` guarda
+  provedor, identificador estavel do provedor, e-mail retornado e `usuario_id`.
+  Nao guarda `id_token`, access token ou secret externo.
+- `ProvedorLoginSocial`: enum `GOOGLE | APPLE`.
+- Chaves unicas: `[provedor, provedor_usuario_id]` e `[usuario_id, provedor]`.
+- Rota publica com rate limit do login: `POST /api/app/auth/social`, payload
+  `{ provider: "GOOGLE" | "APPLE", idToken, name? }`.
+- `auth.service.js` continua dono de usuario, carteiras, matriz e JWT. Nao
+  existe uma segunda sessao para social login.
+
+### Dependencias e configuracao
+
+- Mobile: `expo-auth-session`, `expo-web-browser` e
+  `expo-apple-authentication`, todos instalados na versao compativel com Expo
+  SDK 54. `app.json` possui scheme `detudoja`, plugin do navegador e
+  `ios.usesAppleSignIn=true`.
+- API: `google-auth-library` e `jose` validam os tokens no servidor.
+- IDs OAuth publicos do app ficam em `apps/mobile/.env`:
+
+```env
+EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=
+EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=
+EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID=
+```
+
+- A API aceita todos os audiences informados, separados por virgula:
+
+```env
+GOOGLE_OAUTH_CLIENT_IDS=id-web.apps.googleusercontent.com,id-ios.apps.googleusercontent.com,id-android.apps.googleusercontent.com
+APPLE_OAUTH_CLIENT_IDS=com.detudoja.mobile
+```
+
+Nunca colocar `client secret`, chave privada Apple ou chave Asaas no mobile.
+Os campos acima constam tambem nos dois `.env.example`.
+No `.env` de desenvolvimento atual, `host.exp.Exponent` tambem foi incluido em
+`APPLE_OAUTH_CLIENT_IDS` apenas para testar o Apple no Expo Go; remover esse
+audience ao publicar o backend de producao.
+
+### Configuracao manual dos provedores
+
+1. No Google Cloud Console, configurar a tela de consentimento, adicionar os
+   usuarios de teste e criar clientes OAuth Web, iOS (`com.detudoja.mobile`) e
+   Android (`com.detudoja.mobile` mais o SHA-1 do certificado). Copiar os IDs
+   para os `.env` correspondentes. O redirect do binario e
+   `detudoja://oauth`; no browser, autorizar a URL que o Expo usar em
+   desenvolvimento e a URL fixa da publicacao.
+2. No Apple Developer, ativar Sign In with Apple para o App ID
+   `com.detudoja.mobile`. Para o login Apple iOS nativo basta esse audience.
+   Apple web/Android exigira Services ID e fluxo web separado futuramente.
+3. A Apple envia nome/e-mail apenas na primeira autorizacao. O vinculo social
+   e salvo neste momento, por isso os logins seguintes funcionam mesmo sem a
+   Apple repetir esses campos.
+
+### Migration e verificacao manual
+
+Nao executei migration nem alterei dados existentes. Depois de preencher os
+IDs, rodar manualmente:
+
+```powershell
+npm exec -w apps/api -- prisma migrate dev --name identidades_sociais_usuario
+npm run prisma:generate
+```
+
+Depois, reiniciar API e Metro para reler os `.env`. Enquanto
+`GOOGLE_OAUTH_CLIENT_IDS` estiver vazio, a API responde configuracao pendente.
+Apple no Expo Go iOS pode usar audience de teste diferente do binario; validar
+o fluxo final em development build ou binario assinado.
+
+## Gateway Asaas - Pix Externo (2026-08-18)
+
+### Planejamento: saques por Pix (ainda nao implementado)
+
+O saque nao deve criar nem exigir uma conta Asaas para cada usuario. A conta
+Asaas da plataforma sera a origem do Pix e o usuario informa somente sua conta
+de destino, que ja possui modelagem em `contas_bancarias`:
+`tipo_chave`, `chave_pix`, titular, documento e status.
+
+`usuarios.asaas_cliente_id` e um identificador de **cliente pagador** usado
+somente quando o Asaas precisa emitir uma cobranca Pix externa. Ele nao e uma
+conta bancaria, nao representa saldo do usuario e nao deve ser usado para
+autorizar saque. Em uma futura limpeza de nomenclatura, o nome preferivel e
+`asaas_customer_id`.
+
+Fluxo recomendado para saque:
+
+1. Usuario cadastra e escolhe uma chave Pix de destino; a API confere formato,
+   titularidade e regras de KYC antes de marcar como elegivel.
+2. A solicitacao cria `saques` como `PENDENTE` e reserva o valor na carteira.
+   O dinheiro nao pode ser debitado definitivamente nem reenviado duas vezes.
+3. Um adaptador de payout cria `POST /v3/transfers` na conta Asaas **da
+   plataforma**, com `pixAddressKey`, tipo da chave, valor e referencia interna
+   unica. A transferencia usa saldo ja disponivel nessa conta Asaas.
+4. A API salva o ID remoto da transferencia, taxas, tentativa e timestamps no
+   saque. Webhooks de transferencia confirmam ou recusam o resultado com
+   idempotencia.
+5. Confirmado: grava debito definitivo no razao da carteira. Falhou/cancelou:
+   desfaz a reserva e devolve o saldo disponivel. O usuario ve comprovante e
+   status, nunca um saldo que desapareceu sem rastreio.
+
+Antes de implementar, definir explicitamente quais carteiras permitem saque
+(`saldo_pix`, `vendas`, `rede`, `cashback`), limites diario/mensal, taxa,
+prazo, KYC obrigatorio e revisao manual para primeira chave ou valores altos.
+Nao ha migration pendente por este planejamento.
+
+O Asaas entrou como adaptador de dinheiro externo. A DeTudoJa continua sendo a
+fonte de verdade para pedido, carteira, cashback, rede, comissao e CRM; o
+gateway apenas cria e confirma a cobranca Pix.
+
+Em 2026-08-22 foi corrigido o carregamento da API: `isAsaasEnabled` pertence a
+`payments/asaas.client.js`, onde a configuracao externa e centralizada.
+`orders.service.js` agora importa a funcao desse modulo, eliminando o erro de
+ESM que impedia o `node src/server.js` de iniciar.
+
+### Arquivos e responsabilidades
+
+- `apps/api/src/modules/payments/asaas.client.js`: unico ponto que faz HTTP
+  para a API v3 do Asaas. Usa o header `access_token`, trata indisponibilidade
+  como erro 502 e nunca expoe chave ao mobile.
+- `apps/api/src/modules/payments/asaas.service.js`: cria/reutiliza o cliente
+  Asaas pelo CPF do usuario, cria Pix, recupera QR/copia-e-cola e processa os
+  eventos financeiros recebidos.
+- `apps/api/src/modules/payments/asaas.controller.js` e
+  `routes/webhooks.routes.js`: recebem `POST /api/webhooks/asaas`, validam o
+  header `asaas-access-token` e respondem somente apos persistir o evento.
+- `GatewayPixPaymentScreen.jsx`: tela mobile do QR Pix real. O cliente volta
+  ao pedido e recebe a mudanca por Socket.IO quando o webhook confirmar.
+
+### Dados persistidos
+
+- `usuarios.asaas_cliente_id`: identificador remoto do pagador, criado uma vez
+  e reutilizado para nao duplicar clientes no Asaas.
+- `pagamentos.gateway = ASAAS`, `gateway_pagamento_id`, `qr_code`,
+  `copia_cola_pix` e `expira_em`: permitem conciliacao sem depender do app.
+- Nova tabela `eventos_gateway_pagamento`: guarda o `id` de cada webhook para
+  idempotencia. O mesmo evento do Asaas pode ser reenviado e sera ignorado sem
+  duplicar pedido, carteira ou ganho.
+
+### Fluxo implementado
+
+1. Sem `ASAAS_ENABLED=true`, o comportamento de desenvolvimento atual continua
+   interno, para nao bloquear testes locais.
+2. Com Asaas habilitado, checkout sem saldo integral cria `Pagamento` com
+   status `AGUARDANDO_PAGAMENTO`, gateway `ASAAS` e pedido tambem aguardando.
+3. A API cadastra/reutiliza o cliente remoto com CPF, cria `POST /payments`
+   com `billingType: PIX`, busca `/payments/{id}/pixQrCode` e devolve QR/copia
+   e cola ao mobile.
+4. `PAYMENT_CONFIRMED` ou `PAYMENT_RECEIVED` muda o pagamento para `PAGO`,
+   confirma a composicao Pix, muda o pedido para `ACEITO`, cria a mensagem de
+   sistema e emite Socket.IO para cliente e loja.
+5. Estorno, vencimento, exclusao ou recusa encerram o pagamento/pedido. A
+   distribuicao de cashback/rede/vendas continua acontecendo somente quando o
+   pedido for concluido, como ja era.
+
+Nesta primeira etapa nao existe pagamento misto de parte em carteiras e parte
+em Pix externo: o cliente escolhe pagar 100% pelas carteiras ou 100% pelo Pix.
+Isso evita reservar saldo de forma incompleta antes de introduzir uma camada de
+reserva/estorno de carteiras. Cartao, boleto, split e saque Asaas ainda nao
+fazem parte do fluxo.
+
+### Configuracao manual necessaria
+
+1. Copiar as variaveis `ASAAS_*` de `apps/api/.env.example` para
+   `apps/api/.env` e iniciar por `ASAAS_ENABLED=true` com a chave do Sandbox.
+2. Aplicar a migration que o Prisma gerar para `asaas_cliente_id`, a tabela de
+   eventos e o indice unico do pagamento externo.
+3. No painel Asaas Sandbox, em Integracoes > Webhooks, criar a URL publica
+   `https://SEU-DOMINIO/api/webhooks/asaas`, configurar o mesmo token longo de
+   `ASAAS_WEBHOOK_TOKEN` e selecionar pelo menos `PAYMENT_RECEIVED`,
+   `PAYMENT_CONFIRMED`, `PAYMENT_OVERDUE`, `PAYMENT_DELETED` e
+   `PAYMENT_REFUNDED`.
+4. Em desenvolvimento local, usar um tunel HTTPS para a porta 3333. O Asaas
+   nao consegue chamar `localhost` nem o IP privado da rede.
+
+### Teste local do webhook Asaas (2026-08-19)
+
+Sem URL publica, e possivel testar o controlador, autenticacao, idempotencia e
+liquidacao interna simulando o POST que o Asaas faria. Isso nao testa a entrega
+remota do Asaas, mas valida toda a logica da API local. A API precisa estar em
+execucao e a migration do gateway deve ter sido aplicada. Primeiro criar uma
+cobranca Pix Sandbox pela aplicacao e copiar o valor de
+`pagamentos.gateway_pagamento_id` correspondente.
+
+Enquanto o webhook nao estiver acessivel no desenvolvimento local, o cliente
+pode usar o botao de atualizar dentro do pedido. A rota autenticada
+`POST /api/app/orders/:orderId/payment/refresh` consulta o Asaas somente quando
+o pedido pertence ao usuario e tanto o pedido quanto seu pagamento Asaas estao
+em `AGUARDANDO_PAGAMENTO`. Ela aceita no maximo 5 consultas por minuto por
+usuario. Status recebido ou terminal passa pela mesma liquidacao idempotente
+do webhook; qualquer outro pedido e recusado antes de chamar o gateway.
+Como a integracao atual e Pix, somente `RECEIVED` libera o pedido. O estado
+`CONFIRMED` permanece aguardando porque o Asaas pode usa-lo temporariamente em
+analise preventiva; `GET /payments/:id/status` e usado apenas sob acao manual.
+
+```powershell
+$webhookToken = (Get-Content apps/api/.env |
+  Where-Object { $_ -match '^ASAAS_WEBHOOK_TOKEN=' } |
+  ForEach-Object { $_ -replace '^ASAAS_WEBHOOK_TOKEN=', '' }).Trim()
+
+$payload = @{
+  id = "evt-local-$([guid]::NewGuid().ToString('N'))"
+  event = "PAYMENT_RECEIVED"
+  payment = @{ id = "ID_DO_GATEWAY_PAGAMENTO" }
+} | ConvertTo-Json -Depth 4
+
+Invoke-RestMethod -Method POST `
+  -Uri "http://localhost:3333/api/webhooks/asaas" `
+  -ContentType "application/json" `
+  -Headers @{ "asaas-access-token" = $webhookToken } `
+  -Body $payload
+```
+
+Para testar o webhook real do Sandbox, a API ainda roda somente no computador,
+mas `localhost.run` pode expor temporariamente a porta local sem instalacao
+extra no Windows:
+
+```powershell
+ssh -o ServerAliveInterval=60 -R 80:localhost:3333 nokey@localhost.run
+```
+
+O comando imprime uma URL HTTPS publica. Copiar essa URL exibida pelo terminal
+e acrescentar `/api/webhooks/asaas` no painel Asaas Sandbox. Enquanto o comando
+SSH estiver aberto, as requisicoes vao para a API local na porta `3333`. O
+mesmo token de `ASAAS_WEBHOOK_TOKEN` deve ser configurado como `authToken` no
+painel. Nao usar `ASAAS_API_KEY` como token de webhook. O dominio gratuito pode
+mudar ao reconectar; atualizar a URL no Asaas quando isso ocorrer.
+
+## Cancelamento e estorno (2026-08-24)
+
+O cancelamento agora respeita a situacao financeira do pedido. Cliente e loja
+podem cancelar diretamente somente antes da confirmacao do pagamento e antes
+do atendimento comecar. Cobranca Pix Asaas ainda pendente e excluida no
+gateway antes de o pedido ser encerrado. Pedido pago, em preparo, em entrega ou
+concluido nao pode ser cancelado pela loja nem pelo cliente: o app encaminha o
+cliente ao suporte com codigo, loja, valor e status preenchidos.
+
+O painel admin possui a pagina `Pagamentos`, alimentada por
+`GET /api/admin/payments`. A busca aceita pedido, cliente, e-mail ou loja. A
+acao `POST /api/admin/payments/:paymentId/refund` e idempotente e segue a origem:
+
+- carteiras internas: devolucao na mesma transacao, na carteira de origem, com
+  lancamento `ESTORNO` no extrato;
+- Pix Asaas: `POST /payments/{id}/refund`, pagamento local em `EM_DISPUTA` e
+  conclusao por webhook `PAYMENT_REFUNDED`;
+- pedido concluido: bloqueado para estorno automatico enquanto cashback, rede,
+  comissoes e recebiveis nao tiverem uma rotina atomica de reversao.
+
+O prazo mostrado ao cliente e uma regra operacional: o suporte inicia o
+estorno Pix em ate 24 horas depois da aprovacao. O prazo para aparecer na conta
+bancaria depende do Asaas e da instituicao pagadora. A chave Asaas precisa da
+permissao `PAYMENT_REFUND:WRITE`, e a conta Asaas deve ter saldo suficiente.
+
+Pedidos novos pagos por carteira agora debitam o saldo de verdade e gravam uma
+`composicoes_pagamento` por carteira com `carteira_id`. Isso permite devolver o
+valor exatamente para cashback, saldo Pix, rede ou vendas. Pagamentos antigos
+sem `carteira_id` ficam bloqueados para devolucao automatica, pois nao ha trilha
+confiavel da origem e creditar por aproximacao criaria saldo indevido.
+
+Arquivos centrais: `admin/admin-payments.service.js`,
+`payments/asaas.service.js`, `orders/orders.service.js`,
+`wallet/wallet.service.js`, `PaymentsPage.jsx` e
+`CustomerOrderDetailsScreen.jsx`. Esta etapa nao altera o schema e nao exige
+migration.
+
+## Despacho exclusivo e central do motoboy (2026-08-24)
+
+O despacho de entrega usa `solicitacoes_motoboy` como fila persistida e
+Socket.IO para avisos. A loja nao escolhe nem enxerga profissionais externos:
+`GET /api/app/courier/stores/:storeId/dispatch` devolve apenas o booleano
+`platformAvailable`. Motoboys vinculados a equipe da propria loja continuam
+visiveis, com estados `Disponivel`, `Em corrida` ou `Offline`.
+
+A regra compartilhada esta em
+`modules/courier/courier-availability.js`. Um motoboy esta ocupado quando seu
+vendedor possui conversa de tipo `ENTREGA_LOCAL` em `ABERTA`, `ACORDADA` ou
+`AGUARDANDO_CONFIRMACAO`. Esse filtro e usado no despacho, nos tipos publicos,
+na busca de prestadores e no aceite de uma chamada. Assim, ligar o
+interruptor significa desejo de trabalhar; a disponibilidade publica ainda
+depende de nao existir corrida ativa.
+
+Ao aceitar, `courier-dispatch.service.js` usa
+`pg_advisory_xact_lock(71427, motoboyId)` dentro da transacao. A API verifica a
+ocupacao novamente sob a trava antes de reservar a solicitacao e criar a
+conversa, impedindo dois aceites concorrentes para o mesmo motoboy. A abertura
+direta de conversa de entrega foi desativada: toda corrida passa pela fila e
+pelo aceite. Nao houve coluna ou tabela nova nesta parte da alteracao.
+
+`GET /api/app/courier/requests` continua retornando `requests` e agora inclui
+`dashboard`: `operationalStatus`, `currentRide`, `recentRides`,
+`completedToday`, `totalDeliveries` e `linkedStoreCount`. Quando o estado e
+`BUSY`, `requests` vem vazio. O mobile usa isso na central compacta de
+`ServiceDeskScreen`; os eventos `courier.request.*`, `service-chat.*` e
+`service.availability.updated` mantem loja, motoboy e busca sincronizados sem
+polling.
+
+Chamadas novas usam validade tecnica de 24 horas apenas para limpeza de
+abandono. Para o usuario, ficam aguardando ate aceite ou cancelamento, sem
+cronometro. Esta alteracao nao exige migration.
+
+### Solicitacao de consumidor sem exposicao de motoboy
+
+O fluxo publico de entrega nao usa mais
+`POST /api/app/service-chats` com um `sellerServiceId` escolhido. A API de
+prestadores devolve `sellers: []` para `ENTREGA_LOCAL` e somente o booleano
+`serviceType.availableNow`. Tentativas de abrir conversa direta de entrega sao
+recusadas; o chat nasce exclusivamente depois do aceite.
+
+Novas rotas autenticadas:
+
+- `GET /api/app/courier/customer-requests`: chamadas pendentes ou aceitas do
+  consumidor; aceita `serviceTypeId` opcional;
+- `POST /api/app/courier/customer-requests`: cria chamada anonima da cidade;
+- `POST /api/app/courier/requests/:requestId/cancel`: continua cancelando uma
+  chamada pendente do proprio solicitante.
+
+`solicitacoes_motoboy.loja_id` passou de `Int` obrigatorio para `Int?`. A
+localizacao da chamada sem loja vem do endereco principal do solicitante, e a
+conversa aceita continua ligada por `solicitante_usuario_id` e
+`conversa_servico_id`. Essa mudanca exige migration manual:
+
+```powershell
+npm exec -w apps/api -- prisma migrate dev --name chamada_motoboy_consumidor
+```
+
+Antes de executar, encerrar API/Prisma Studio que estejam usando o Prisma
+Client no Windows; caso contrario o `prisma generate` pode receber `EPERM` ao
+trocar `query_engine-windows.dll.node`.
+
+## Auditoria de negocio automatizada (2026-08-26)
+
+A auditoria completa esta em `docs/auditoria-negocio.md`. Foi adicionado o
+comando somente leitura `npm run audit:business` e uma suite de simulacao em
+`apps/api/test/business-flows.test.js`. O resultado atual dos testes e 26/26.
+
+Pendencias bloqueadoras para dinheiro real: Pix interno marcado como pago sem
+gateway, estorno sem reversao integral de ganhos, ausencia de RBAC nas rotas
+admin, checkout sem idempotencia, estoque sem reserva/debito, KYC mock
+autoaprovavel e limite mensal de CPF apenas armazenado, sem bloqueio. O banco
+local apresentou 15 pagamentos Pix internos, 8 pedidos concluidos sem
+liquidacao e 16 KYC aprovados sem evidencias.
+
+`txt.txt` foi adicionado ao `.gitignore` porque contem credencial operacional.
+A chave exposta precisa ser revogada no provedor; o `.gitignore` apenas evita
+um commit acidental futuro.
+
+Esta etapa nao altera o schema Prisma e nao exige migration.
+
+## Pix externo obrigatorio para complemento Pix (2026-08-26)
+
+Pedidos e propostas de pedido aceitas no chat agora seguem a mesma regra:
+carteiras internas podem confirmar pagamento imediatamente, mas qualquer valor
+em Pix cria `Pagamento` com gateway `ASAAS`, status
+`AGUARDANDO_PAGAMENTO` e composicao Pix `PENDENTE`. A loja so recebe o pedido
+apos `PAYMENT_RECEIVED` do webhook Asaas ou apos a consulta manual do status
+registrar esse mesmo estado no gateway.
+
+Se o Asaas estiver indisponivel ou desligado, a API recusa o Pix antes de criar
+pedido, debitar carteira ou marcar pagamento. Nao existe mais o fallback
+`INTERNO/PAGO` para um valor Pix. Pagamento misto (parte carteira e parte Pix)
+continua bloqueado ate existir reserva financeira para a parte de carteira.
+
+`POST /api/app/orders/:orderId/payment/refresh` continua sendo o plano B para
+webhook atrasado: somente o dono do pedido pode chamar, somente enquanto pedido
+e pagamento Asaas estao aguardando, e o limite e cinco consultas por minuto
+por usuario. Ao abrir/retornar ao detalhe de um pedido pendente, o mobile faz
+uma consulta automatica no maximo a cada 15 segundos; o botao de atualizar
+mantem a consulta manual. Webhook e consulta usam a mesma liquidacao
+idempotente.
+
+Quando a confirmacao chega, proposta do chat passa de `ACEITA` para `PAGA` no
+mesmo fluxo que muda pagamento para `PAGO`, confirma composicao Pix e muda o
+pedido para `ACEITO`. Esta etapa nao exige migration.
+
+## Estorno financeiro integral e aprovado no painel (2026-08-26)
+
+O painel **Pagamentos e estornos** deixou de executar uma devolucao simples.
+O operador autorizado informa um motivo obrigatorio e o backend executa uma
+reversao simetrica, auditavel e atomica para o pagamento:
+
+- o cliente recebe de volta somente na origem registrada: as mesmas carteiras
+  internas usadas no pagamento ou o Pix de origem via Asaas;
+- se a venda ja distribuiu valores, reverte o credito de vendas do
+  lojista/vendedor, cashback, indicacao direta, bonus de rede, recebivel e a
+  receita retida da plataforma;
+- cada retirada cria `LancamentoCarteira` de debito com origem `ESTORNO`, cada
+  conta da plataforma recebe lancamento `ESTORNO`, recompensas ficam
+  `ESTORNADA`, recebiveis ficam `ESTORNADO` e a `TransacaoComercial` fica
+  `ESTORNADA`;
+- se qualquer beneficiario ja gastou o ganho ou a conta da plataforma nao tem
+  cobertura, a operacao inteira falha com `409`; nada e devolvido parcialmente.
+  Esse caso exige revisao financeira, pois permitir saldo negativo ou uma
+  devolucao parcial quebraria o lastro;
+- para `ASAAS`, o painel apenas solicita o estorno e o pagamento fica
+  `EM_DISPUTA`. A reversao de ganhos e o cancelamento do pedido so acontecem
+  depois de `PAYMENT_REFUNDED` ser confirmado pelo webhook ou pela conciliacao
+  que use o mesmo processador. `PAYMENT_PARTIALLY_REFUNDED` nao liquida este
+  fluxo: fica para revisao financeira proporcional futura;
+- quando o webhook ainda nao esta publico, o painel mostra `Consultar Asaas`
+  somente no estado `EM_DISPUTA`. A acao chama
+  `POST /api/admin/payments/:paymentId/refund/refresh`, e esta limitada a cinco
+  consultas por minuto por administrador; ela nao faz polling;
+- somente administradores de papel `super_admin` ou `financeiro` podem chamar
+  `POST /api/admin/payments/:paymentId/refund`. O body exige
+  `{ "reason": "..." }`.
+
+Arquivos centrais: `earnings/order-earnings.service.js`,
+`admin/admin-payments.service.js`, `payments/asaas.service.js`,
+`admin-payments.routes.js` e `web-admin/src/pages/PaymentsPage.jsx`.
+Nao houve alteracao no schema e **nao ha migration para rodar**. A suite agora
+possui um cenario que paga um QR por carteira, liquida a venda e confirma a
+reversao de pagamento, recebivel, recompensas e creditos de carteira.
+## Integridade comercial e acesso - 2026-08-26
+
+Esta atualizacao protege os fluxos que movimentam saldo, pedidos e administracao.
+
+### Migration obrigatoria
+
+O schema Prisma ganhou:
+
+- `sessoes_autenticacao`: refresh tokens persistidos por `jti`, com expiracao,
+  rotacao e revogacao no logout;
+- `pedidos_loja.chave_idempotencia`: unicidade por comprador, usada no header
+  HTTP `Idempotency-Key` para nao duplicar checkout ou pedido de chat;
+- marcadores de reserva/liberacao de estoque em `pedidos_loja`;
+- teto mensal tambem em `vendedores`, para vendas autonomas de pessoa fisica.
+
+O responsavel pelo banco deve executar, a partir da raiz:
+
+```powershell
+npm exec -w apps/api -- prisma migrate dev --name integridade_checkout_acesso
+npm run prisma:generate
+```
+
+Nao executar `migrate reset`: ha dados locais que devem ser preservados.
+
+### Regras ativas apos a migration
+
+- Login cria uma sessao de refresh no banco. Refresh token e de uso unico:
+  ao renovar, o anterior e revogado. Logout envia o refresh token e o revoga;
+  um token removido nao volta a autenticar.
+- Admin possui RBAC efetivo. `SUPER_ADMIN` e `ADMIN` tem operacao ampla;
+  `OPERACOES` cuida de lojas/catalogo/rede; `FINANCEIRO` consulta pagamentos e
+  controla credito, estorno e ganhos; `COMPLIANCE`/`KYC` cuidam de revisao;
+  `SUPORTE` altera somente canal de suporte. Credito de carteira, estorno e
+  configuracao de ganhos continuam restritos a `SUPER_ADMIN`/`FINANCEIRO`.
+- Checkout e pedido negociado exigem `Idempotency-Key`. O app gera uma chave
+  por tentativa e a repete durante retry; a mesma chave devolve o pedido ja
+  criado, sem novo debito ou novo estoque reservado.
+- Produto com `estoque_controlado=true` e reservado na transacao que cria o
+  pedido. Cancelamento antes de pagamento/atendimento devolve a quantidade uma
+  unica vez. Produto sem controle de estoque nao sofre alteracao.
+- Lojista e vendedor `FISICA` possuem teto mensal de R$ 5.000,00. A verificacao
+  e feita sob trava PostgreSQL na confirmacao de carteira/QR/Pix Asaas, para
+  pedidos, QR de loja e venda autonoma concorrentes nao ultrapassarem o teto.
+- O Pix Asaas e reavaliado no webhook ou refresh; somente o estado confirmado
+  pode movimentar o pedido. Quando a confirmacao chegaria acima do teto CPF,
+  a transacao permanece pendente para tratamento financeiro, sem liberar venda.
+
+### Pedidos legados sem liquidacao
+
+O comando abaixo e somente leitura e separa os pedidos concluidos em
+elegiveis (pagamento PAGO/LIQUIDADO) e revisao manual (sem pagamento valido):
+
+```powershell
+npm run reconcile:completed-orders
+```
+
+Depois de revisar os IDs exibidos, aplicar apenas os elegiveis:
+
+```powershell
+npm run reconcile:completed-orders -- --apply
+```
+
+Ele chama a mesma liquidacao normal (`settleCompletedStoreOrderEarnings`) e e
+idempotente: nao duplica uma `transacao_comercial` ja liquidada.
+
+### Unicidade de documentos comerciais - 2026-08-27
+
+`lojistas` e `vendedores` possuem unicidade individual para `cpf` e `cnpj`.
+Assim, dois cadastros comerciais do mesmo tipo nao podem compartilhar o mesmo
+documento, inclusive quando duas requisicoes chegam ao mesmo tempo. Valores
+`NULL` continuam permitidos enquanto o perfil ainda nao informou o documento.
+
+O backend tambem consulta o documento antes de salvar para responder `409` com
+uma mensagem clara. A restricao do PostgreSQL continua sendo a protecao final
+contra concorrencia.
+
+Migration pendente de execucao pelo usuario:
+
+```powershell
+npm exec -w apps/api -- prisma migrate dev --name documentos_comerciais_unicos
+```
+
+Antes desta alteracao foi feita uma consulta somente leitura: nao existem CPF
+ou CNPJ duplicados hoje em `lojistas` nem em `vendedores`, portanto a migration
+nao deve exigir limpeza previa.
+
+## Cadastro reverso e convite da loja - 2026-08-27
+
+Cada loja ativa possui agora um convite proprio acessivel pelo botao
+`Indicar loja` dentro do painel da loja. O endpoint autenticado
+`GET /api/app/seller/stores/:storeId/signup-qr` devolve:
+
+- QR apontando para a pagina publica de cadastro da loja;
+- link web de cadastro, que funciona mesmo sem o app instalado;
+- deep link `detudoja://cadastro/loja/:slug` para abrir o cadastro no app;
+- codigo curto `LOJA-<id>`, aceito no mesmo campo de codigo de convite;
+- texto pronto para o compartilhamento nativo e link de download configurado.
+
+O modal `app/sell/StoreReferralModal.jsx` permite compartilhar, copiar o link
+ou copiar o codigo. A pagina publica oferece `Abrir no app`, cadastro web e
+download. No cadastro, `LOJA-<id>` nao e tratado como um segundo convite: ele
+resolve a loja de origem, liga o novo consumidor diretamente ao usuario dono
+da loja e grava `loja_origem_cadastro_id`. A loja e somente a origem; o ganho
+de indicacao pertence ao dono representado pelo usuario.
+
+### Estado real do QR presencial e repasse externo
+
+O QR presencial atual e interno (`DTJ:C:<codigo>`). O cliente autenticado le o
+QR, confere valor e recebedor no servidor e paga com as carteiras DeTudoJa. Na
+confirmacao, o sistema distribui taxa, cashback, rede e indicacoes, cria o
+recebivel e credita o liquido na carteira `Vendas` do dono da loja.
+
+Ainda nao existe envio automatico desse liquido para uma chave Pix externa.
+`contas_bancarias` e `saques` existem no schema, mas as rotas de saque ainda
+sao placeholder. Portanto nao exigir chave Pix na geracao da cobranca ate o
+repasse estar implementado: bloquear o QR agora impediria vendas sem efetuar o
+envio prometido.
+
+Para o repasse imediato correto, a proxima etapa deve cadastrar e validar a
+chave, reservar/debitar o saldo de vendas, criar uma transferencia idempotente
+em `POST /v3/transfers` com `externalReference`, persistir o ID remoto antes de
+considerar o recebivel pago e processar `TRANSFER_DONE`, `TRANSFER_FAILED` e
+`TRANSFER_CANCELLED` por webhook. Falha deve devolver o valor reservado a
+carteira uma unica vez. O Asaas usa saldo disponivel da conta da plataforma;
+uma cobranca recebida nao garante que o saldo esteja liberado para transferencia
+na mesma fracao de segundo.

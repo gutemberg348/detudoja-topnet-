@@ -2,6 +2,7 @@
   "expo": {
     "name": "DeTudoJa",
     "slug": "detudoja",
+    "scheme": "detudoja",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -19,6 +20,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.detudoja.mobile",
+      "usesAppleSignIn": true,
       "supportsTablet": true
     },
     "web": {
@@ -38,7 +40,9 @@
           "photosPermission": "O DeTudoJa acessa suas fotos para enviar logo, banner e imagens de produtos."
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-web-browser",
+      "expo-apple-authentication"
     ]
   }
 }

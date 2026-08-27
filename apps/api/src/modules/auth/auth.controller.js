@@ -2,6 +2,8 @@ import {
   completeCpf,
   getSessionUser,
   login,
+  loginWithSocial,
+  logoutSession,
   refreshSession,
   register,
 } from "./auth.service.js";
@@ -18,6 +20,16 @@ export function createLoginController(audience) {
   return async (req, res, next) => {
     try {
       res.json(await login({ audience, ...req.body }));
+    } catch (error) {
+      next(error);
+    }
+  };
+}
+
+export function createSocialLoginController(audience) {
+  return async (req, res, next) => {
+    try {
+      res.json(await loginWithSocial({ audience, ...req.body }));
     } catch (error) {
       next(error);
     }
@@ -46,8 +58,17 @@ export async function meController(req, res, next) {
   }
 }
 
-export function logoutController(_req, res) {
-  res.status(204).send();
+export async function logoutController(req, res, next) {
+  try {
+    await logoutSession({
+      audience: req.auth.audience,
+      refreshToken: req.body.refreshToken,
+      userId: req.auth.user.id,
+    });
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
 }
 
 export function createRegisterController(audience) {

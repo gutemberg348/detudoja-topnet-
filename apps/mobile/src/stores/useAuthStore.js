@@ -14,6 +14,7 @@ import {
   completeAppCpf,
   getAppMe,
   loginApp,
+  loginWithSocialApp,
   logoutApp,
   registerApp,
   refreshAppSession,
@@ -262,6 +263,13 @@ export function AuthStoreProvider({ children }) {
     setSession(nextSession);
   }
 
+  async function socialLogin(data) {
+    const nextSession = await loginWithSocialApp(data);
+    await persistTokens(nextSession);
+    sessionRef.current = nextSession;
+    setSession(nextSession);
+  }
+
   async function register(data) {
     const nextSession = await registerApp(data);
     await persistTokens(nextSession);
@@ -283,8 +291,8 @@ export function AuthStoreProvider({ children }) {
 
   async function logout() {
     try {
-      if (session?.accessToken) {
-        await logoutApp(session.accessToken);
+      if (session?.accessToken && session?.refreshToken) {
+        await logoutApp(session.accessToken, session.refreshToken);
       }
     } catch {
       // A sessão local sempre deve terminar, mesmo com a API indisponível.
@@ -318,6 +326,7 @@ export function AuthStoreProvider({ children }) {
       logout,
       register,
       session,
+      socialLogin,
       updateSessionUser,
     }),
     [isRestoring, session],

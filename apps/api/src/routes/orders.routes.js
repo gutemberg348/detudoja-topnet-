@@ -1,5 +1,8 @@
 import { Router } from "express";
+import { paymentStatusRefreshRateLimit } from "../middlewares/rate-limit.middleware.js";
+import { refreshAsaasOrderPaymentController } from "../modules/payments/asaas.controller.js";
 import {
+  cancelCustomerOrderController,
   acceptCustomerOrderProposalController,
   completeCustomerOrderController,
   createCheckoutOrderController,
@@ -22,11 +25,17 @@ export const ordersRoutes = Router();
 
 ordersRoutes.get("/", listCustomerOrdersController);
 ordersRoutes.post(
+  "/:orderId/payment/refresh",
+  paymentStatusRefreshRateLimit,
+  refreshAsaasOrderPaymentController,
+);
+ordersRoutes.post(
   "/requests",
   validate(createOnlineOrderRequestSchema),
   createOnlineOrderRequestController,
 );
 ordersRoutes.patch("/:orderId/complete", completeCustomerOrderController);
+ordersRoutes.patch("/:orderId/cancel", cancelCustomerOrderController);
 ordersRoutes.patch(
   "/:orderId/proposals/:proposalId/accept",
   acceptCustomerOrderProposalController,

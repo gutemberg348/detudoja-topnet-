@@ -3,10 +3,15 @@ import argon2 from "argon2";
 import jwt from "jsonwebtoken";
 import { env } from "../../config/env.js";
 import { addressData } from "../../utils/location.js";
-import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../utils/errors.js";
-import { findStoreSignupSource } from "./store-signup.service.js";
+import { authRepository } from "./auth.repository.js";
+import {
+  findStoreSignupSource,
+  findStoreSignupSourceByCode,
+  isStoreRegistrationCode,
+} from "./store-signup.service.js";
 import { ensureUserWallets } from "../wallet/wallet.service.js";
+import { verifySocialIdentity } from "./social-auth.service.js";
 
 export const authAudiences = {
   admin: "detudoja-admin",
@@ -14,12 +19,6 @@ export const authAudiences = {
 };
 
 const enabledStatuses = new Set(["ATIVO", "PENDENTE"]);
-const appUserInclude = {
-  kyc: true,
-  lojista: true,
-  vendedor: true,
-};
-
 function toPublicAdmin(admin) {
   return {
     accountType: "ADMIN",
@@ -61,7 +60,7 @@ function toPublicUser(user) {
   };
 }
 
-function signToken({ audience, expiresIn, secret, tokenType, user }) {
+function signToken({ audience, expiresIn, jti, secret, tokenType, user }) {
   return jwt.sign(
     {
       accountType: user.accountType,
@@ -73,6 +72,7 @@ function signToken({ audience, expiresIn, secret, tokenType, user }) {
       capabilities: user.capabilities,
       status: user.status,
       tokenType,
+      ...(jti ? { jti } : {}),
     },
     secret,
     {
@@ -94,23 +94,46 @@ function parseJwtSubject(subject) {
   return id;
 }
 
-function createSession(audience, user) {
-  return {
-    accessToken: signToken({
-      audience,
-      expiresIn: env.jwt.accessExpiresIn,
-      secret: env.jwt.accessSecret,
-      tokenType: "access",
-      user,
-    }),
+function refreshTokenExpiresAt(refreshToken) {
+  const decoded = jwt.decode(refreshToken);
+
+  if (!decoded || typeof decoded === "string" || !decoded.exp) {
+    throw new AppError("Nao foi possivel criar a sessao", 500);
+  }
+
+  return new Date(Number(decoded.exp) * 1000);
+}
+
+async function createSession(audience, user) {
+  const jti = randomUUID();
+  const accessToken = signToken({
+    audience,
     expiresIn: env.jwt.accessExpiresIn,
-    refreshToken: signToken({
-      audience,
-      expiresIn: env.jwt.refreshExpiresIn,
-      secret: env.jwt.refreshSecret,
-      tokenType: "refresh",
-      user,
-    }),
+    secret: env.jwt.accessSecret,
+    tokenType: "access",
+    user,
+  });
+  const refreshToken = signToken({
+    audience,
+    expiresIn: env.jwt.refreshExpiresIn,
+    jti,
+    secret: env.jwt.refreshSecret,
+    tokenType: "refresh",
+    user,
+  });
+
+  await authRepository.createSession({
+    administrador_id: audience === authAudiences.admin ? user.id : null,
+    audiencia: audience,
+    expira_em: refreshTokenExpiresAt(refreshToken),
+    jti,
+    usuario_id: audience === authAudiences.app ? user.id : null,
+  });
+
+  return {
+    accessToken,
+    expiresIn: env.jwt.accessExpiresIn,
+    refreshToken,
     tokenType: "Bearer",
     user,
   };
@@ -150,15 +173,11 @@ function duplicateRegistrationError(existingUser, { email, phone }) {
 }
 
 async function findAppUser(loginValue) {
-  return loginValue.includes("@")
-    ? prisma.usuario.findUnique({ include: appUserInclude, where: { email: loginValue } })
-    : prisma.usuario.findUnique({ include: appUserInclude, where: { telefone: loginValue } });
+  return authRepository.findAppUserByLogin(loginValue);
 }
 
 async function findAdmin(loginValue) {
-  return loginValue.includes("@")
-    ? prisma.administrador.findUnique({ where: { email: loginValue } })
-    : prisma.administrador.findUnique({ where: { telefone: loginValue } });
+  return authRepository.findAdminByLogin(loginValue);
 }
 
 async function verifyPassword(passwordHash, password) {
@@ -169,48 +188,45 @@ async function verifyPassword(passwordHash, password) {
   }
 }
 
-async function ensureCompanyRootUser(database) {
-  const email = env.companyRoot.email.trim().toLowerCase();
-  const existingUser = await database.usuario.findUnique({
-    where: { email },
-  });
-
-  if (existingUser) {
-    return existingUser;
-  }
-
-  const passwordHash = await argon2.hash(randomUUID(), {
+async function createGeneratedPasswordHash() {
+  return argon2.hash(randomUUID(), {
     memoryCost: 19456,
     parallelism: 1,
     timeCost: 2,
     type: argon2.argon2id,
   });
+}
 
-  return database.usuario.create({
-    data: {
-      email,
-      email_verificado: true,
-      kyc: {
-        create: {
-          nome_fantasia: env.companyRoot.name,
-          razao_social: env.companyRoot.name,
-          status: "APROVADO",
-          tipo_pessoa: "JURIDICA",
-        },
+async function ensureCompanyRootUser(repository) {
+  const email = env.companyRoot.email.trim().toLowerCase();
+  const existingUser = await repository.findCompanyRootUserByEmail(email);
+
+  if (existingUser) {
+    return existingUser;
+  }
+
+  const passwordHash = await createGeneratedPasswordHash();
+
+  return repository.createCompanyRootUser({
+    email,
+    email_verificado: true,
+    kyc: {
+      create: {
+        nome_fantasia: env.companyRoot.name,
+        razao_social: env.companyRoot.name,
+        status: "APROVADO",
+        tipo_pessoa: "JURIDICA",
       },
-      nome: env.companyRoot.name,
-      senha_hash: passwordHash,
-      status: "ATIVO",
-      tipo_conta: "ADMIN",
     },
+    nome: env.companyRoot.name,
+    senha_hash: passwordHash,
+    status: "ATIVO",
+    tipo_conta: "ADMIN",
   });
 }
 
-async function findMatrixPlacement(database, sponsorUserId) {
-  const sponsorPlacement = await database.indicacao.findUnique({
-    select: { nivel_matriz: true },
-    where: { indicado_usuario_id: sponsorUserId },
-  });
+async function findMatrixPlacement(repository, sponsorUserId) {
+  const sponsorPlacement = await repository.findMatrixPlacementByUserId(sponsorUserId);
   const queue = [
     {
       depthFromSponsor: 0,
@@ -226,24 +242,7 @@ async function findMatrixPlacement(database, sponsorUserId) {
       continue;
     }
 
-    const children = await database.indicacao.findMany({
-      orderBy: [{ posicao_matriz: "asc" }, { criado_em: "asc" }],
-      select: {
-        indicado_usuario_id: true,
-        nivel_matriz: true,
-        posicao_matriz: true,
-      },
-      where: {
-        status: { in: ["ATIVA", "CONVERTIDA", "PENDENTE"] },
-        OR: [
-          { alocado_sob_usuario_id: node.userId },
-          {
-            alocado_sob_usuario_id: null,
-            indicador_usuario_id: node.userId,
-          },
-        ],
-      },
-    });
+    const children = await repository.findMatrixChildren(node.userId);
     const occupiedPositions = new Set(
       children.map((child, index) => child.posicao_matriz ?? index + 1),
     );
@@ -284,10 +283,7 @@ export async function login({ audience, login: loginValue, password }) {
       throw new AppError("Esta conta administrativa nao esta disponivel", 403);
     }
 
-    const updatedAdmin = await prisma.administrador.update({
-      data: { ultimo_login_em: new Date() },
-      where: { id: admin.id },
-    });
+    const updatedAdmin = await authRepository.updateAdminLastLogin(admin.id);
 
     return createSession(audience, toPublicAdmin(updatedAdmin));
   }
@@ -307,13 +303,107 @@ export async function login({ audience, login: loginValue, password }) {
 
   await ensureUserWallets(user.id);
 
-  const updatedUser = await prisma.usuario.update({
-    data: { ultimo_login_em: new Date() },
-    include: appUserInclude,
-    where: { id: user.id },
-  });
+  const updatedUser = await authRepository.updateUserLastLogin(user.id);
 
   return createSession(audience, toPublicUser(updatedUser));
+}
+
+export async function loginWithSocial({ audience, idToken, name, provider }) {
+  if (audience !== authAudiences.app) {
+    throw new AppError("Login social nao permitido para esta aplicacao", 403);
+  }
+
+  const identity = await verifySocialIdentity({ idToken, provider });
+  const existingIdentity = await authRepository.findSocialIdentity(
+    identity.provider,
+    identity.providerUserId,
+  );
+
+  if (existingIdentity) {
+    if (!enabledStatuses.has(existingIdentity.usuario.status)) {
+      throw new AppError("Esta conta nao esta disponivel para acesso", 403);
+    }
+
+    await ensureUserWallets(existingIdentity.usuario_id);
+    const user = await authRepository.updateUserLastLogin(existingIdentity.usuario_id);
+    return createSession(audience, toPublicUser(user));
+  }
+
+  if (!identity.email) {
+    throw new AppError(
+      "A Apple nao enviou seu e-mail. Entre novamente e permita compartilhar o e-mail.",
+      422,
+    );
+  }
+
+  const passwordHash = await createGeneratedPasswordHash();
+
+  try {
+    const user = await authRepository.transaction(async (repository, database) => {
+      const existingUser = await repository.findUserByEmail(identity.email);
+
+      if (existingUser) {
+        await repository.createSocialIdentity({
+          email_provedor: identity.email,
+          provedor: identity.provider,
+          provedor_usuario_id: identity.providerUserId,
+          usuario_id: existingUser.id,
+        });
+        await ensureUserWallets(existingUser.id, database);
+        return repository.updateUserLastLogin(existingUser.id);
+      }
+
+      const userName = String(name ?? identity.name).trim().slice(0, 160) || identity.name;
+      const createdUser = await repository.createSocialUser({
+        email: identity.email,
+        email_verificado: true,
+        identidades_sociais: {
+          create: {
+            email_provedor: identity.email,
+            provedor: identity.provider,
+            provedor_usuario_id: identity.providerUserId,
+          },
+        },
+        kyc: {
+          create: {
+            nome_completo: userName,
+            status: "PENDENTE",
+            tipo_pessoa: "FISICA",
+          },
+        },
+        nome: userName,
+        senha_hash: passwordHash,
+        status: "ATIVO",
+        tipo_conta: "CONSUMIDOR",
+        ultimo_login_em: new Date(),
+      });
+
+      await ensureUserWallets(createdUser.id, database);
+
+      const sponsorUserId = (await ensureCompanyRootUser(repository)).id;
+      const placement = await findMatrixPlacement(repository, sponsorUserId);
+      await repository.createIndication({
+        alocado_sob_usuario_id: placement.parentUserId,
+        indicado_usuario_id: createdUser.id,
+        indicador_usuario_id: sponsorUserId,
+        nivel_matriz: placement.level,
+        origem: "cadastro_social_empresa",
+        posicao_matriz: placement.position,
+        status: "PENDENTE",
+        tipo_indicacao: "CONSUMIDOR",
+      });
+
+      return repository.findUserWithProfileOrThrow(createdUser.id);
+    });
+
+    return createSession(audience, toPublicUser(user));
+  } catch (error) {
+    if (error?.code === "P2002") {
+      throw new AppError("Esta conta social ja esta vinculada a outro usuario", 409);
+    }
+
+    throw error;
+  }
 }
 
 export async function register({
@@ -334,25 +424,19 @@ export async function register({
     throw new AppError("Este e-mail ja esta cadastrado", 409);
   }
 
-  const existingUser = await prisma.usuario.findFirst({
-    where: { OR: [{ email }, { telefone: phone }] },
-  });
+  const existingUser = await authRepository.findUserConflict(email, phone);
 
   if (existingUser) {
     throw duplicateRegistrationError(existingUser, { email, phone });
   }
 
-  const invitation = inviteCode
-    ? await prisma.codigoConvite.findFirst({
-        where: {
-          ativo: true,
-          codigo: inviteCode,
-          OR: [{ expira_em: null }, { expira_em: { gt: new Date() } }],
-        },
-      })
+  const storeCode = isStoreRegistrationCode(inviteCode) ? inviteCode : null;
+  const effectiveInviteCode = storeCode ? null : inviteCode;
+  const invitation = effectiveInviteCode
+    ? await authRepository.findInvitation(effectiveInviteCode)
     : null;
 
-  if (inviteCode && !invitation) {
+  if (effectiveInviteCode && !invitation) {
     throw new AppError("Codigo de convite invalido ou expirado", 400);
   }
 
@@ -364,10 +448,12 @@ export async function register({
   });
 
   try {
-    const user = await prisma.$transaction(async (database) => {
+    const user = await authRepository.transaction(async (repository, database) => {
       const storeSignupSource = storeSlug
         ? await findStoreSignupSource(database, storeSlug)
-        : null;
+        : storeCode
+          ? await findStoreSignupSourceByCode(database, storeCode)
+          : null;
 
       if (storeSignupSource && invitation) {
         throw new AppError(
@@ -376,30 +462,28 @@ export async function register({
         );
       }
 
-      const createdUser = await database.usuario.create({
-        data: {
-          enderecos: {
-            create: {
-              ...addressData(address),
-              nome_endereco: "Endereco principal",
-              principal: true,
-            },
+      const createdUser = await repository.createRegisteredUser({
+        enderecos: {
+          create: {
+            ...addressData(address),
+            nome_endereco: "Endereco principal",
+            principal: true,
           },
-          email,
-          kyc: {
-            create: {
-              nome_completo: name,
-              status: "PENDENTE",
-              tipo_pessoa: "FISICA",
-            },
-          },
-          nome: name,
-          loja_origem_cadastro_id: storeSignupSource?.id ?? null,
-          senha_hash: passwordHash,
-          status: "ATIVO",
-          telefone: phone,
-          tipo_conta: "CONSUMIDOR",
         },
+        email,
+        kyc: {
+          create: {
+            nome_completo: name,
+            status: "PENDENTE",
+            tipo_pessoa: "FISICA",
+          },
+        },
+        nome: name,
+        loja_origem_cadastro_id: storeSignupSource?.id ?? null,
+        senha_hash: passwordHash,
+        status: "ATIVO",
+        telefone: phone,
+        tipo_conta: "CONSUMIDOR",
       });
 
       await ensureUserWallets(createdUser.id, database);
@@ -408,32 +492,27 @@ export async function register({
         ? storeSignupSource.lojista.usuario_id
         : invitation
           ? invitation.usuario_id
-          : (await ensureCompanyRootUser(database)).id;
-      const placement = await findMatrixPlacement(database, sponsorUserId);
+          : (await ensureCompanyRootUser(repository)).id;
+      const placement = await findMatrixPlacement(repository, sponsorUserId);
 
-      await database.indicacao.create({
-        data: {
-          alocado_sob_usuario_id: placement.parentUserId,
-          codigo_convite_id: invitation?.id ?? null,
-          indicado_usuario_id: createdUser.id,
-          indicador_usuario_id: sponsorUserId,
-          nivel_matriz: placement.level,
-          origem: storeSignupSource
-            ? "cadastro_qr_loja"
-            : invitation
-              ? "cadastro_mobile"
-              : "cadastro_mobile_empresa",
-          posicao_matriz: placement.position,
-          status: "PENDENTE",
-          tipo_indicacao: "CONSUMIDOR",
-        },
+      await repository.createIndication({
+        alocado_sob_usuario_id: placement.parentUserId,
+        codigo_convite_id: invitation?.id ?? null,
+        indicado_usuario_id: createdUser.id,
+        indicador_usuario_id: sponsorUserId,
+        nivel_matriz: placement.level,
+        origem: storeSignupSource
+          ? "cadastro_qr_loja"
+          : invitation
+            ? "cadastro_mobile"
+            : "cadastro_mobile_empresa",
+        posicao_matriz: placement.position,
+        status: "PENDENTE",
+        tipo_indicacao: "CONSUMIDOR",
       });
 
       if (invitation) {
-        await database.codigoConvite.update({
-          data: { usos_totais: { increment: 1 } },
-          where: { id: invitation.id },
-        });
+        await repository.incrementInvitationUses(invitation.id);
       }
 
       return createdUser;
@@ -462,36 +541,32 @@ export async function register({
 }
 
 export async function completeCpf({ cpf, userId }) {
-  const user = await prisma.usuario.findUnique({ where: { id: userId } });
+  const user = await authRepository.findUserById(userId);
 
   if (!user) {
     throw new AppError("Usuario nao encontrado", 404);
   }
 
-  const cpfOwner = await prisma.usuario.findUnique({ where: { cpf } });
+  const cpfOwner = await authRepository.findUserByCpf(cpf);
 
   if (cpfOwner && cpfOwner.id !== userId) {
     throw new AppError("Este CPF ja esta cadastrado", 409);
   }
 
   try {
-    const updatedUser = await prisma.$transaction(async (database) => {
-      const savedUser = await database.usuario.update({
-        data: { cpf },
-        include: appUserInclude,
-        where: { id: userId },
-      });
-      await database.kycUsuario.upsert({
-        create: {
+    const updatedUser = await authRepository.transaction(async (repository) => {
+      const savedUser = await repository.updateUserWithProfile(userId, { cpf });
+      await repository.upsertUserKyc(
+        userId,
+        {
           cpf,
           nome_completo: user.nome,
           status: "PENDENTE",
           tipo_pessoa: "FISICA",
           usuario_id: userId,
         },
-        update: { cpf, nome_completo: user.nome },
-        where: { usuario_id: userId },
-      });
+        { cpf, nome_completo: user.nome },
+      );
       return savedUser;
     });
 
@@ -513,11 +588,26 @@ export async function refreshSession({ audience, refreshToken }) {
     token: refreshToken,
   });
   const userId = parseJwtSubject(payload.sub);
+  const jti = String(payload.jti ?? "").trim();
+
+  if (!jti) {
+    throw new AppError("Sessao invalida", 401);
+  }
+
+  const rotated = await authRepository.rotateSession({
+    audience,
+    ...(audience === authAudiences.admin
+      ? { adminId: userId }
+      : { userId }),
+    jti,
+  });
+
+  if (rotated.count !== 1) {
+    throw new AppError("Esta sessao foi encerrada ou ja foi renovada", 401);
+  }
 
   if (audience === authAudiences.admin) {
-    const admin = await prisma.administrador.findUnique({
-      where: { id: userId },
-    });
+    const admin = await authRepository.findAdminById(userId);
 
     if (!admin || admin.status !== "ATIVO" || admin.excluido_em) {
       throw new AppError("Sessao administrativa nao autorizada", 401);
@@ -526,10 +616,7 @@ export async function refreshSession({ audience, refreshToken }) {
     return createSession(audience, toPublicAdmin(admin));
   }
 
-  const user = await prisma.usuario.findUnique({
-    include: appUserInclude,
-    where: { id: userId },
-  });
+  const user = await authRepository.findAppUserById(userId);
 
   if (!user || !enabledStatuses.has(user.status)) {
     throw new AppError("Sessao nao autorizada", 401);
@@ -540,6 +627,29 @@ export async function refreshSession({ audience, refreshToken }) {
   return createSession(audience, toPublicUser(user));
 }
 
+export async function logoutSession({ audience, refreshToken, userId }) {
+  const payload = verifyToken({
+    audience,
+    expectedType: "refresh",
+    secret: env.jwt.refreshSecret,
+    token: refreshToken,
+  });
+  const tokenUserId = parseJwtSubject(payload.sub);
+  const jti = String(payload.jti ?? "").trim();
+
+  if (!jti || tokenUserId !== Number(userId)) {
+    throw new AppError("Sessao invalida", 401);
+  }
+
+  await authRepository.revokeSession({
+    audience,
+    ...(audience === authAudiences.admin
+      ? { adminId: tokenUserId }
+      : { userId: tokenUserId }),
+    jti,
+  });
+}
+
 export async function getSessionUser({ audience, userId }) {
   const parsedUserId = Number(userId);
 
@@ -548,9 +658,7 @@ export async function getSessionUser({ audience, userId }) {
   }
 
   if (audience === authAudiences.admin) {
-    const admin = await prisma.administrador.findUnique({
-      where: { id: parsedUserId },
-    });
+    const admin = await authRepository.findAdminById(parsedUserId);
 
     if (!admin || admin.status !== "ATIVO" || admin.excluido_em) {
       throw new AppError("Sessao administrativa nao autorizada", 401);
@@ -559,10 +667,7 @@ export async function getSessionUser({ audience, userId }) {
     return toPublicAdmin(admin);
   }
 
-  const user = await prisma.usuario.findUnique({
-    include: appUserInclude,
-    where: { id: parsedUserId },
-  });
+  const user = await authRepository.findAppUserById(parsedUserId);
 
   if (!user || !enabledStatuses.has(user.status)) {
     throw new AppError("Sessao nao autorizada", 401);

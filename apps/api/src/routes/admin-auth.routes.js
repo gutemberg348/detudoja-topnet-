@@ -28,4 +28,9 @@ adminAuthRoutes.post(
   createRefreshController(authAudiences.admin),
 );
 adminAuthRoutes.get("/me", adminAuthMiddleware, meController);
-adminAuthRoutes.post("/logout", adminAuthMiddleware, logoutController);
+adminAuthRoutes.post(
+  "/logout",
+  adminAuthMiddleware,
+  validate(refreshTokenSchema),
+  logoutController,
+);

@@ -322,3 +322,31 @@ O formulario de tipos de servico possui `Uso operacional`:
 O admin continua controlando nome, descricao, segmento financeiro, modo,
 icone, ordem e status. O tipo `Motoboy` deve permanecer em
 `ENTREGA_LOCAL`; a contagem online ignora prestadores sem cadastro ativo.
+
+## Pagamentos e estornos (2026-08-26)
+
+A pagina `PaymentsPage.jsx` usa um modal de aprovacao, nao mais um `confirm`
+do navegador. O operador ve o valor, destino da devolucao e precisa informar
+um motivo antes de aprovar. Pagamentos por carteiras devolvem o valor para as
+mesmas carteiras de origem; Pix Asaas fica como `Estorno solicitado` ate a
+confirmacao do gateway.
+
+Enquanto estiver neste estado, o botao `Consultar Asaas` permite conciliacao
+manual limitada, util no Sandbox quando o webhook local ainda nao esta
+publico. A acao financeira exige papel `super_admin` ou `financeiro`. Nao ha
+migration nesta etapa.
+## Permissoes por cargo - 2026-08-26
+
+O painel recebe o cargo retornado pela sessao e esconde paginas e comandos que
+nao pertencem ao administrador autenticado. A API continua sendo a autoridade:
+ela aplica `roleMiddleware` antes de cada modulo.
+
+- `SUPER_ADMIN`: acesso completo e acoes irreversiveis;
+- `ADMIN`: operacao geral, sem credito manual, estorno ou mudanca de ganhos;
+- `OPERACOES`: participantes, lojas, categorias, segmentos, servicos e rede;
+- `FINANCEIRO`: pagamentos, estorno, credito de carteira e regras de ganhos;
+- `COMPLIANCE`/`KYC`: consulta de participantes e revisao de KYC;
+- `SUPORTE`: somente configuracao do canal de suporte e painel inicial.
+
+Mesmo que alguem force uma URL ou chamada manual do navegador, a API responde
+`403` quando o cargo nao possuir a permissao.

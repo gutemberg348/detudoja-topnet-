@@ -1,17 +1,19 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { AppButton } from "../components/AppButton";
 import { ChatSystemMessage } from "../components/ChatSystemMessage";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { useRealtimeOrders } from "../hooks/useRealtimeOrders";
 import {
   acceptCustomerOrderProposal,
+  cancelCustomerOrder,
   completeCustomerOrder,
   declineCustomerOrderProposal,
   getCustomerOrderMessages,
   getCustomerOrders,
+  refreshCustomerOrderPayment,
   sendCustomerOrderMessage,
 } from "../services/orders.api";
 import { useAuthStore } from "../stores/useAuthStore";
@@ -213,22 +215,55 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
   const [error, setError] = useState("");
   const [chatMessages, setChatMessages] = useState([]);
   const [isCompleting, setIsCompleting] = useState(false);
+  const [isCanceling, setIsCanceling] = useState(false);
   const [proposalAction, setProposalAction] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [order, setOrder] = useState(route.params?.order ?? null);
+  const [paymentCheckMessage, setPaymentCheckMessage] = useState("");
+  const lastAutomaticPaymentCheckAt = useRef(0);
 
-  const loadOrder = useCallback(async ({ silent = false } = {}) => {
+  const loadOrder = useCallback(async ({ automaticPaymentCheck = false, checkPayment = false, silent = false } = {}) => {
     if (!session?.accessToken || !order?.id) {
       return;
     }
 
     setError("");
+    if (checkPayment) {
+      setPaymentCheckMessage("");
+    }
     if (!silent) {
       setIsLoading(true);
     }
 
+    const shouldCheckPayment = checkPayment
+      && order.status === "AGUARDANDO_PAGAMENTO"
+      && order.payment?.status === "AGUARDANDO_PAGAMENTO"
+      && (!automaticPaymentCheck || Date.now() - lastAutomaticPaymentCheckAt.current >= 15000);
+
+    if (shouldCheckPayment && automaticPaymentCheck) {
+      lastAutomaticPaymentCheckAt.current = Date.now();
+    }
+
     try {
+      if (
+        shouldCheckPayment
+      ) {
+        const paymentResponse = await refreshCustomerOrderPayment(
+          session.accessToken,
+          order.id,
+        );
+
+        if (paymentResponse.order) {
+          setOrder(paymentResponse.order);
+        }
+        setPaymentCheckMessage(
+          paymentResponse.paymentConfirmed
+            ? "Pagamento confirmado pelo Asaas."
+            : "O Pix ainda esta aguardando confirmacao.",
+        );
+      }
+
       const messagesResponse = await getCustomerOrderMessages(session.accessToken, order.id);
       const ordersResponse = await getCustomerOrders(session.accessToken);
       const updatedOrder = (ordersResponse.orders ?? []).find((item) => item.id === order.id);
@@ -244,10 +279,10 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
         setIsLoading(false);
       }
     }
-  }, [order?.id, session?.accessToken]);
+  }, [order?.id, order?.payment?.status, order?.status, session?.accessToken]);
 
   useFocusEffect(useCallback(() => {
-    loadOrder();
+    loadOrder({ automaticPaymentCheck: true, checkPayment: true });
   }, [loadOrder]));
 
   const handleRealtimeOrder = useCallback((payload) => {
@@ -288,6 +323,17 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
   }, [messages.length, scrollToLatest]);
   const isFinal = finalStatuses.has(order?.status);
   const canConfirmReceipt = ["SAIU_ENTREGA", "PRONTO_RETIRADA"].includes(order?.status);
+  const paymentConfirmed = ["PAGO", "LIQUIDADO", "EM_DISPUTA", "ESTORNADO"].includes(
+    order?.payment?.status,
+  );
+  const fulfillmentStarted = [
+    "ACEITO",
+    "PREPARANDO",
+    "SAIU_ENTREGA",
+    "PRONTO_RETIRADA",
+    "CONCLUIDO",
+  ].includes(order?.status);
+  const canCancelDirectly = !isFinal && !paymentConfirmed && !fulfillmentStarted;
   const latestProposal = order?.latestProposal ?? order?.proposals?.at(-1) ?? null;
   const pendingProposal =
     latestProposal?.status === "PENDENTE" && order?.status === "NEGOCIANDO"
@@ -376,6 +422,41 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
     }
   }
 
+  function requestCancellation() {
+    if (canCancelDirectly) {
+      Alert.alert(
+        "Cancelar pedido?",
+        "Como o pagamento ainda nao foi confirmado, o pedido sera encerrado agora.",
+        [
+          { style: "cancel", text: "Voltar" },
+          { onPress: cancelBeforePayment, style: "destructive", text: "Cancelar pedido" },
+        ],
+      );
+      return;
+    }
+
+    navigation.navigate("Suporte", { order });
+  }
+
+  async function cancelBeforePayment() {
+    if (!session?.accessToken || !order?.id || isCanceling) {
+      return;
+    }
+
+    setIsCanceling(true);
+    setError("");
+
+    try {
+      const response = await cancelCustomerOrder(session.accessToken, order.id);
+      setOrder(response.order ?? order);
+      await loadOrder({ silent: true });
+    } catch (requestError) {
+      setError(requestError.message ?? "Nao foi possivel cancelar o pedido.");
+    } finally {
+      setIsCanceling(false);
+    }
+  }
+
   async function sendQuestion() {
     const text = draft.trim();
 
@@ -430,8 +511,8 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
             </Text>
           </View>
           <Pressable
-            accessibilityLabel="Atualizar conversa"
-            onPress={loadOrder}
+            accessibilityLabel="Atualizar pedido e verificar pagamento"
+            onPress={() => loadOrder({ checkPayment: true })}
             style={({ pressed }) => [styles.reloadButton, pressed && styles.pressed]}
           >
             {isLoading ? (
@@ -443,6 +524,9 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
         </View>
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {paymentCheckMessage ? (
+          <Text style={styles.localHint}>{paymentCheckMessage}</Text>
+        ) : null}
 
         {latestProposal ? (
           <OrderProposalCard
@@ -475,6 +559,28 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
               style={styles.confirmButton}
               title="Recebi meu pedido"
               variant="primary"
+            />
+          </View>
+        ) : null}
+
+        {order.status !== "CANCELADO" ? (
+          <View style={styles.cancellationCard}>
+            <View style={styles.cancellationCopy}>
+              <Text style={styles.cancellationTitle}>
+                {canCancelDirectly ? "Nao vai continuar?" : "Precisa cancelar?"}
+              </Text>
+              <Text style={styles.cancellationText}>
+                {canCancelDirectly
+                  ? "Antes do pagamento, o cancelamento e imediato."
+                  : "Pedidos pagos ou em atendimento sao analisados pelo suporte."}
+              </Text>
+            </View>
+            <AppButton
+              icon={canCancelDirectly ? "close-circle-outline" : "headset-outline"}
+              loading={isCanceling}
+              onPress={requestCancellation}
+              title={canCancelDirectly ? "Cancelar pedido" : "Solicitar cancelamento"}
+              variant="outline"
             />
           </View>
         ) : null}
@@ -746,6 +852,29 @@ function BubbleDetail({ label, value }) {
 }
 
 const styles = StyleSheet.create({
+  cancellationCard: {
+    backgroundColor: "#FFF9F2",
+    borderColor: "#F4D7B0",
+    borderRadius: 18,
+    borderWidth: 1,
+    gap: spacing.md,
+    padding: spacing.md,
+  },
+  cancellationCopy: {
+    gap: spacing.xs,
+  },
+  cancellationText: {
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    fontSize: typography.caption,
+    lineHeight: 18,
+  },
+  cancellationTitle: {
+    color: colors.textPrimary,
+    fontFamily: fonts.bold,
+    fontSize: typography.small,
+    fontWeight: "700",
+  },
   bubbleDetail: {
     alignItems: "flex-start",
     borderTopColor: colors.border,

@@ -1,9 +1,9 @@
-import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../utils/errors.js";
 import { parsePositiveId } from "../../utils/ids.js";
 import { getPagination } from "../../utils/pagination.js";
 import { serializeAdminUser } from "./admin.serializer.js";
 import { creditUserWallet } from "../wallet/wallet.service.js";
+import { adminUsersRepository } from "./admin-users.repository.js";
 
 const validStatuses = new Set(["ATIVO", "INATIVO", "BLOQUEADO", "PENDENTE"]);
 const validKycStatuses = new Set([
@@ -13,13 +13,6 @@ const validKycStatuses = new Set([
   "REPROVADO",
   "BLOQUEADO",
 ]);
-
-const userInclude = {
-  carteiras: { include: { tipo_carteira: true } },
-  kyc: true,
-  lojista: true,
-  vendedor: true,
-};
 
 function buildUserWhere(query) {
   const search = String(query.search ?? "").trim();
@@ -50,14 +43,8 @@ export async function listAdminUsers(query) {
   const { page, perPage } = getPagination(query);
   const where = buildUserWhere(query);
   const [total, users] = await Promise.all([
-    prisma.usuario.count({ where }),
-    prisma.usuario.findMany({
-      include: userInclude,
-      orderBy: { criado_em: "desc" },
-      skip: (page - 1) * perPage,
-      take: perPage,
-      where,
-    }),
+    adminUsersRepository.count(where),
+    adminUsersRepository.list({ page, perPage, where }),
   ]);
 
   return {
@@ -73,14 +60,7 @@ export async function listAdminUsers(query) {
 
 export async function getAdminUser(userId) {
   const parsedUserId = parsePositiveId(userId, "Participante invalido");
-  const user = await prisma.usuario.findFirst({
-    include: userInclude,
-    where: {
-      excluido_em: null,
-      id: parsedUserId,
-      tipo_conta: { notIn: ["ADMIN", "SUPORTE"] },
-    },
-  });
+  const user = await adminUsersRepository.findParticipant(parsedUserId);
 
   if (!user) {
     throw new AppError("Participante nao encontrado", 404);
@@ -91,47 +71,30 @@ export async function getAdminUser(userId) {
 
 export async function updateAdminUserStatus(userId, status) {
   const parsedUserId = parsePositiveId(userId, "Participante invalido");
-  const exists = await prisma.usuario.findFirst({
-    select: { id: true },
-    where: {
-      excluido_em: null,
-      id: parsedUserId,
-      tipo_conta: { notIn: ["ADMIN", "SUPORTE"] },
-    },
-  });
+  const exists = await adminUsersRepository.findParticipantId(parsedUserId);
 
   if (!exists) {
     throw new AppError("Participante nao encontrado", 404);
   }
 
-  await prisma.usuario.update({ data: { status }, where: { id: parsedUserId } });
+  await adminUsersRepository.update(parsedUserId, { status });
 
   return getAdminUser(parsedUserId);
 }
 
 export async function updateAdminUser(userId, data) {
   const parsedUserId = parsePositiveId(userId, "Participante invalido");
-  const exists = await prisma.usuario.findFirst({
-    select: { id: true },
-    where: {
-      excluido_em: null,
-      id: parsedUserId,
-      tipo_conta: { notIn: ["ADMIN", "SUPORTE"] },
-    },
-  });
+  const exists = await adminUsersRepository.findParticipantId(parsedUserId);
 
   if (!exists) {
     throw new AppError("Participante nao encontrado", 404);
   }
 
-  await prisma.usuario.update({
-    data: {
-      ...(data.cpf !== undefined ? { cpf: data.cpf.replace(/\D/g, "") || null } : {}),
-      ...(data.email !== undefined ? { email: data.email.trim().toLowerCase() } : {}),
-      ...(data.name !== undefined ? { nome: data.name.trim() } : {}),
-      ...(data.phone !== undefined ? { telefone: data.phone.replace(/\D/g, "") || null } : {}),
-    },
-    where: { id: parsedUserId },
+  await adminUsersRepository.update(parsedUserId, {
+    ...(data.cpf !== undefined ? { cpf: data.cpf.replace(/\D/g, "") || null } : {}),
+    ...(data.email !== undefined ? { email: data.email.trim().toLowerCase() } : {}),
+    ...(data.name !== undefined ? { nome: data.name.trim() } : {}),
+    ...(data.phone !== undefined ? { telefone: data.phone.replace(/\D/g, "") || null } : {}),
   });
 
   return getAdminUser(parsedUserId);
@@ -139,20 +102,13 @@ export async function updateAdminUser(userId, data) {
 
 export async function creditAdminUserWallet(adminId, userId, data) {
   const parsedUserId = parsePositiveId(userId, "Participante invalido");
-  const exists = await prisma.usuario.findFirst({
-    select: { id: true },
-    where: {
-      excluido_em: null,
-      id: parsedUserId,
-      tipo_conta: { notIn: ["ADMIN", "SUPORTE"] },
-    },
-  });
+  const exists = await adminUsersRepository.findParticipantId(parsedUserId);
 
   if (!exists) {
     throw new AppError("Participante nao encontrado", 404);
   }
 
-  await prisma.$transaction(async (database) => {
+  await adminUsersRepository.transaction(async (database) => {
     await creditUserWallet({
       database,
       description: data.description,

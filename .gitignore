@@ -2,6 +2,7 @@ node_modules/
 .expo/
 dist/
 dist-web/
+dist-*-check/
 storage/uploads/*
 !storage/uploads/curated/
 !storage/uploads/curated/**
@@ -13,3 +14,4 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 .DS_Store
+txt.txt
