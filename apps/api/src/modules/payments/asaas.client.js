@@ -27,7 +27,9 @@ async function asaasRequest(path, options = {}) {
       },
     });
   } catch {
-    throw new AppError("Nao foi possivel conectar ao gateway Asaas", 502);
+    const error = new AppError("Nao foi possivel conectar ao gateway Asaas", 502);
+    error.providerStateUnknown = true;
+    throw error;
   }
 
   const payload = await response.json().catch(() => null);
@@ -36,7 +38,10 @@ async function asaasRequest(path, options = {}) {
     const message = payload?.errors?.[0]?.description
       ?? payload?.message
       ?? "O Asaas recusou a solicitacao de pagamento";
-    throw new AppError(message, 502);
+    const error = new AppError(message, 502);
+    error.providerRejected = true;
+    error.providerStatusCode = response.status;
+    throw error;
   }
 
   return payload;
@@ -60,12 +65,52 @@ export function createAsaasPixPayment(data) {
   });
 }
 
+export function createAsaasPixTransfer(data) {
+  return asaasRequest("/transfers", {
+    body: JSON.stringify(data),
+    method: "POST",
+  });
+}
+
+export function getAsaasTransfer(transferId) {
+  return asaasRequest(`/transfers/${encodeURIComponent(transferId)}`);
+}
+
+export function getAsaasExternalPixKey({ key, type }) {
+  const query = new URLSearchParams({ key, type });
+  return asaasRequest(`/pix/addressKeys/external?${query.toString()}`);
+}
+
+export function listAsaasTransfers(params = {}) {
+  const query = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== "") {
+      query.set(key, String(value));
+    }
+  }
+
+  return asaasRequest(`/transfers${query.size ? `?${query.toString()}` : ""}`);
+}
+
 export function getAsaasPixQrCode(paymentId) {
   return asaasRequest(`/payments/${encodeURIComponent(paymentId)}/pixQrCode`);
 }
 
 export function getAsaasPaymentStatus(paymentId) {
   return asaasRequest(`/payments/${encodeURIComponent(paymentId)}/status`);
+}
+
+export function listAsaasPayments(params = {}) {
+  const query = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== "") {
+      query.set(key, String(value));
+    }
+  }
+
+  return asaasRequest(`/payments${query.size ? `?${query.toString()}` : ""}`);
 }
 
 export function refundAsaasPayment(paymentId, data = {}) {

@@ -119,7 +119,7 @@ async function seedAdmin() {
 
 async function seedCompanyRootUser() {
   const email = env.companyRoot.email.trim().toLowerCase();
-  const name = env.companyRoot.name.trim() || "DeTudoJa Empresa";
+  const name = env.companyRoot.name.trim() || "Brasil Cashback Empresa";
   const existingUser = await prisma.usuario.findUnique({
     where: { email },
   });

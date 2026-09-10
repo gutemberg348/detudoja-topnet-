@@ -31,6 +31,11 @@ import {
   serializeOrderMessage,
 } from "./orders.serializer.js";
 import { defaultDeliveryFeeCents } from "./orders.config.js";
+import { assertStoreCanReceiveOrders } from "./store-opening-hours.js";
+import {
+  getPaymentPolicy,
+  resolvePaymentPolicy,
+} from "../earnings/order-earnings.config.js";
 
 
 const orderInclude = {
@@ -197,10 +202,24 @@ async function resolveStoreAndItems(storeId, requestedItems) {
   const store = await ordersRepository.findStore({
     include: {
       categoria: {
-        select: { negocia_pedido_por_chat: true },
+        select: {
+          negocia_pedido_por_chat: true,
+          segmento_venda: {
+            select: {
+              limite_cashback_prioritario_centavos: true,
+              taxa_processamento_local_centavos: true,
+              taxa_servico_online_centavos: true,
+            },
+          },
+        },
       },
       segmento_venda: {
-        select: { negocia_pedido_por_chat: true },
+        select: {
+          limite_cashback_prioritario_centavos: true,
+          negocia_pedido_por_chat: true,
+          taxa_processamento_local_centavos: true,
+          taxa_servico_online_centavos: true,
+        },
       },
       produtos: {
         where: {
@@ -209,10 +228,22 @@ async function resolveStoreAndItems(storeId, requestedItems) {
           status: "ATIVO",
         },
       },
+      lojista: { select: { usuario_id: true } },
+      usuarios: {
+        select: { usuario_id: true },
+        where: { status: "ATIVO" },
+      },
     },
     where: {
       excluido_em: null,
       id: storeId,
+      lojista: {
+        is: {
+          status: "ATIVO",
+          status_kyc: "APROVADO",
+          usuario: { is: { excluido_em: null, status: "ATIVO" } },
+        },
+      },
       status: "ATIVA",
     },
   });
@@ -221,8 +252,10 @@ async function resolveStoreAndItems(storeId, requestedItems) {
     throw new AppError("Loja nao encontrada ou indisponivel", 404);
   }
 
-  if (!store.aberta_para_pedidos) {
-    throw new AppError("Esta loja esta fechada para novos pedidos", 409);
+  try {
+    assertStoreCanReceiveOrders(store);
+  } catch (error) {
+    throw new AppError(error.message, 409);
   }
 
   if (store.produtos.length !== productIds.length) {
@@ -236,6 +269,8 @@ async function resolveStoreAndItems(storeId, requestedItems) {
     const quantity = Number(item.quantity);
 
     return {
+      acceptsDelivery: product.aceita_entrega,
+      acceptsPickup: product.aceita_retirada,
       description: product.descricao,
       name: product.nome,
       notes: item.notes || null,
@@ -249,9 +284,34 @@ async function resolveStoreAndItems(storeId, requestedItems) {
   return { items, store };
 }
 
+function assertItemsSupportDeliveryMode(items, deliveryMode) {
+  const incompatible = items.find((item) => (
+    deliveryMode === "delivery" ? !item.acceptsDelivery : !item.acceptsPickup
+  ));
+
+  if (incompatible) {
+    const mode = deliveryMode === "delivery" ? "entrega" : "retirada";
+    throw new AppError(`${incompatible.name} nao aceita ${mode}`, 409);
+  }
+}
+
+function assertUserCanBuyFromStore(userId, store) {
+  const belongsToStore = store.lojista?.usuario_id === userId
+    || store.usuarios?.some((member) => member.usuario_id === userId);
+
+  if (belongsToStore) {
+    throw new AppError(
+      "Esta loja esta vinculada a sua conta. Use a cobranca presencial ou venda autonoma para registrar uma venda propria.",
+      403,
+    );
+  }
+}
+
 export async function createOnlineOrderRequest(userId, data, { idempotencyKey = null } = {}) {
   await ordersRepository.requireUserCpf(userId);
   const { items, store } = await resolveStoreAndItems(data.storeId, data.items);
+  assertUserCanBuyFromStore(userId, store);
+  assertItemsSupportDeliveryMode(items, data.deliveryMode);
 
   const negotiatesByChat = store.segmento_venda?.negocia_pedido_por_chat
     ?? store.categoria?.negocia_pedido_por_chat
@@ -262,8 +322,15 @@ export async function createOnlineOrderRequest(userId, data, { idempotencyKey = 
   }
 
   const subtotalCents = items.reduce((total, item) => total + item.totalCents, 0);
-  const deliveryCents = data.deliveryMode === "delivery" ? defaultDeliveryFeeCents : 0;
-  const totalCents = subtotalCents + deliveryCents;
+  const deliveryCents = data.deliveryMode === "delivery"
+    ? cents(store.taxa_entrega_centavos ?? defaultDeliveryFeeCents)
+    : 0;
+  const paymentPolicy = resolvePaymentPolicy({
+    globalPolicy: await getPaymentPolicy(),
+    store,
+  });
+  const serviceFeeCents = paymentPolicy.onlineServiceFeeCents;
+  const totalCents = subtotalCents + deliveryCents + serviceFeeCents;
 
   let result;
   try {
@@ -315,6 +382,7 @@ export async function createOnlineOrderRequest(userId, data, { idempotencyKey = 
         estoque_reservado_em: new Date(),
         subtotal_centavos: BigInt(subtotalCents),
         taxa_entrega_centavos: BigInt(deliveryCents),
+        taxa_servico_centavos: BigInt(serviceFeeCents),
         tipo_entrega: data.deliveryMode === "delivery" ? "ENTREGA" : "RETIRADA",
         total_centavos: BigInt(totalCents),
         usuario_id: userId,
@@ -347,10 +415,24 @@ export async function createCheckoutOrder(userId, data, { idempotencyKey = null 
   const store = await ordersRepository.findStore({
     include: {
       categoria: {
-        select: { negocia_pedido_por_chat: true },
+        select: {
+          negocia_pedido_por_chat: true,
+          segmento_venda: {
+            select: {
+              limite_cashback_prioritario_centavos: true,
+              taxa_processamento_local_centavos: true,
+              taxa_servico_online_centavos: true,
+            },
+          },
+        },
       },
       segmento_venda: {
-        select: { negocia_pedido_por_chat: true },
+        select: {
+          limite_cashback_prioritario_centavos: true,
+          negocia_pedido_por_chat: true,
+          taxa_processamento_local_centavos: true,
+          taxa_servico_online_centavos: true,
+        },
       },
       produtos: {
         where: {
@@ -359,10 +441,22 @@ export async function createCheckoutOrder(userId, data, { idempotencyKey = null 
           status: "ATIVO",
         },
       },
+      lojista: { select: { usuario_id: true } },
+      usuarios: {
+        select: { usuario_id: true },
+        where: { status: "ATIVO" },
+      },
     },
     where: {
       excluido_em: null,
       id: data.storeId,
+      lojista: {
+        is: {
+          status: "ATIVO",
+          status_kyc: "APROVADO",
+          usuario: { is: { excluido_em: null, status: "ATIVO" } },
+        },
+      },
       status: "ATIVA",
     },
   });
@@ -371,9 +465,13 @@ export async function createCheckoutOrder(userId, data, { idempotencyKey = null 
     throw new AppError("Loja nao encontrada ou indisponivel", 404);
   }
 
-  if (!store.aberta_para_pedidos) {
-    throw new AppError("Esta loja esta fechada para novos pedidos", 409);
+  try {
+    assertStoreCanReceiveOrders(store);
+  } catch (error) {
+    throw new AppError(error.message, 409);
   }
+
+  assertUserCanBuyFromStore(userId, store);
 
   const negotiatesByChat = store.segmento_venda?.negocia_pedido_por_chat
     ?? store.categoria?.negocia_pedido_por_chat
@@ -394,6 +492,8 @@ export async function createCheckoutOrder(userId, data, { idempotencyKey = null 
     const quantity = Number(item.quantity);
 
     return {
+      acceptsDelivery: product.aceita_entrega,
+      acceptsPickup: product.aceita_retirada,
       description: product.descricao,
       name: product.nome,
       notes: item.notes || null,
@@ -403,9 +503,17 @@ export async function createCheckoutOrder(userId, data, { idempotencyKey = null 
       totalCents: priceCents * quantity,
     };
   });
+  assertItemsSupportDeliveryMode(items, data.deliveryMode);
   const subtotalCents = items.reduce((total, item) => total + item.totalCents, 0);
-  const deliveryCents = data.deliveryMode === "delivery" ? defaultDeliveryFeeCents : 0;
-  const totalCents = subtotalCents + deliveryCents;
+  const deliveryCents = data.deliveryMode === "delivery"
+    ? cents(store.taxa_entrega_centavos ?? defaultDeliveryFeeCents)
+    : 0;
+  const paymentPolicy = resolvePaymentPolicy({
+    globalPolicy: await getPaymentPolicy(),
+    store,
+  });
+  const serviceFeeCents = paymentPolicy.onlineServiceFeeCents;
+  const totalCents = subtotalCents + deliveryCents + serviceFeeCents;
   const requestedBalanceCents = data.payment?.useBalance
     ? Number(data.payment?.balanceUsedCents ?? 0)
     : 0;
@@ -450,9 +558,7 @@ export async function createCheckoutOrder(userId, data, { idempotencyKey = null 
     const deliveryAddress = await resolveDeliveryAddress(database, userId, data);
     const snapshot = addressSnapshot(deliveryAddress, data.address?.referencia ?? "");
     await reserveOrderStock(database, items);
-    if (!useAsaasPix) {
-      await assertStoreMonthlyCpfLimit(database, store.id, totalCents);
-    }
+    await assertStoreMonthlyCpfLimit(database, store.id, totalCents);
     const walletAllocations = await allocateUserWalletsForPayment({
       database,
       userId,
@@ -479,6 +585,17 @@ export async function createCheckoutOrder(userId, data, { idempotencyKey = null 
                     tipo_item: "TAXA",
                     valor_total_centavos: BigInt(deliveryCents),
                     valor_unitario_centavos: BigInt(deliveryCents),
+                  },
+                ]
+              : []),
+            ...(serviceFeeCents > 0
+              ? [
+                  {
+                    nome_item: "Taxa de servico",
+                    quantidade: 1,
+                    tipo_item: "TAXA",
+                    valor_total_centavos: BigInt(serviceFeeCents),
+                    valor_unitario_centavos: BigInt(serviceFeeCents),
                   },
                 ]
               : []),
@@ -563,6 +680,7 @@ export async function createCheckoutOrder(userId, data, { idempotencyKey = null 
         estoque_reservado_em: new Date(),
         subtotal_centavos: BigInt(subtotalCents),
         taxa_entrega_centavos: BigInt(deliveryCents),
+        taxa_servico_centavos: BigInt(serviceFeeCents),
         tipo_entrega: data.deliveryMode === "delivery" ? "ENTREGA" : "RETIRADA",
         total_centavos: BigInt(totalCents),
         usuario_id: userId,
@@ -844,15 +962,19 @@ export async function acceptCustomerOrderProposal(userId, orderId, proposalId) {
       where: { id: parsedProposalId },
     });
     const currentOrder = await createOrdersRepository(database).findUniqueOrder({
-      select: { taxa_entrega_centavos: true },
+      select: { taxa_entrega_centavos: true, taxa_servico_centavos: true },
       where: { id: order.id },
     });
     const totalCents = Number(proposal.valor_centavos);
     const deliveryCents = Math.min(Number(currentOrder.taxa_entrega_centavos), totalCents);
+    const serviceFeeCents = Math.min(
+      Number(currentOrder.taxa_servico_centavos),
+      Math.max(totalCents - deliveryCents, 0),
+    );
     const updatedOrder = await createOrdersRepository(database).updateOrder({
       data: {
         status: "AGUARDANDO_PAGAMENTO",
-        subtotal_centavos: BigInt(Math.max(totalCents - deliveryCents, 0)),
+        subtotal_centavos: BigInt(Math.max(totalCents - deliveryCents - serviceFeeCents, 0)),
         total_centavos: proposal.valor_centavos,
       },
       include: orderInclude,
@@ -982,7 +1104,8 @@ export async function payCustomerOrderProposal(userId, orderId, proposalId, data
     throw new AppError("A proposta nao esta pronta para pagamento", 409);
   }
 
-  const totalCents = Number(proposal.valor_centavos);
+  const totalCents = Number(currentOrder.total_centavos);
+  const serviceFeeCents = Number(currentOrder.taxa_servico_centavos ?? 0);
   const requestedBalanceCents = data.useBalance
     ? Number(data.balanceUsedCents ?? 0)
     : 0;
@@ -1031,9 +1154,7 @@ export async function payCustomerOrderProposal(userId, orderId, proposalId, data
       throw new AppError("Esta proposta ja foi processada", 409);
     }
 
-    if (!useAsaasPix) {
-      await assertStoreMonthlyCpfLimit(database, currentOrder.loja_id, totalCents);
-    }
+    await assertStoreMonthlyCpfLimit(database, currentOrder.loja_id, totalCents);
 
     if (!useAsaasPix) {
       await repository.updateProposal({
@@ -1050,15 +1171,26 @@ export async function payCustomerOrderProposal(userId, orderId, proposalId, data
     const payment = await repository.createPayment({
       data: {
         itens: {
-          create: [{
-            descricao: proposal.descricao || "Valor confirmado pela loja no chat",
-            nome_item: `Pedido ${currentOrder.codigo}`,
-            quantidade: 1,
-            referencia_id: String(currentOrder.id),
-            tipo_item: "PRODUTO",
-            valor_total_centavos: BigInt(totalCents),
-            valor_unitario_centavos: BigInt(totalCents),
-          }],
+          create: [
+            {
+              descricao: proposal.descricao || "Valor confirmado pela loja no chat",
+              nome_item: `Pedido ${currentOrder.codigo}`,
+              quantidade: 1,
+              referencia_id: String(currentOrder.id),
+              tipo_item: "PRODUTO",
+              valor_total_centavos: BigInt(totalCents - serviceFeeCents),
+              valor_unitario_centavos: BigInt(totalCents - serviceFeeCents),
+            },
+            ...(serviceFeeCents > 0
+              ? [{
+                  nome_item: "Taxa de servico",
+                  quantidade: 1,
+                  tipo_item: "TAXA",
+                  valor_total_centavos: BigInt(serviceFeeCents),
+                  valor_unitario_centavos: BigInt(serviceFeeCents),
+                }]
+              : []),
+          ],
         },
         gateway: useAsaasPix ? "ASAAS" : "INTERNO",
         loja_id: currentOrder.loja_id,
@@ -1102,9 +1234,8 @@ export async function payCustomerOrderProposal(userId, orderId, proposalId, data
     }
     const updatedOrder = await repository.updateOrder({
       data: {
-        aceito_em: paymentConfirmedAt,
         pagamento_id: payment.id,
-        status: useAsaasPix ? "AGUARDANDO_PAGAMENTO" : "ACEITO",
+        status: useAsaasPix ? "AGUARDANDO_PAGAMENTO" : "RECEBIDO",
         total_centavos: BigInt(totalCents),
         valor_pago_pix_centavos: BigInt(pixComplementCents),
         valor_pago_saldo_centavos: BigInt(balanceUsedCents),
@@ -1118,11 +1249,11 @@ export async function payCustomerOrderProposal(userId, orderId, proposalId, data
         lido_cliente_em: new Date(),
         mensagem: useAsaasPix
           ? `Proposta aceita. Aguardando a confirmacao do Pix de ${formatMoney(totalCents)}.`
-          : `Pagamento de ${formatMoney(totalCents)} confirmado. A loja ja confirmou o pedido e pode iniciar o preparo.`,
+          : `Pagamento de ${formatMoney(totalCents)} confirmado. Aguarde a loja aceitar o pedido para iniciar o atendimento.`,
         metadata_json: {
           kind: useAsaasPix ? "payment-pending" : "payment",
           proposalId: proposal.id,
-          status: useAsaasPix ? "AGUARDANDO_PAGAMENTO" : "ACEITO",
+          status: useAsaasPix ? "AGUARDANDO_PAGAMENTO" : "RECEBIDO",
         },
         origem: "CLIENTE",
         pedido_id: currentOrder.id,

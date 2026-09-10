@@ -5,6 +5,7 @@ import { colors, fonts, radius, spacing, typography } from "../utils/theme";
 
 export function MovementItem({ item, onPress }) {
   const isDebit = item.tipo === "DEBITO";
+  const statusLabel = item.status === "PENDENTE" ? "Libera em ate 24h" : item.status;
 
   return (
     <Pressable
@@ -34,7 +35,7 @@ export function MovementItem({ item, onPress }) {
           {formatarDinheiro(Math.abs(item.valor_centavos))}
         </Text>
         <View style={styles.detailHint}>
-          <Text style={styles.status}>{item.status}</Text>
+          <Text style={styles.status}>{statusLabel}</Text>
           <Ionicons color={colors.textMuted} name="chevron-forward" size={13} />
         </View>
       </View>

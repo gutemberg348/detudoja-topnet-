@@ -2,7 +2,7 @@ import { AppError } from "../../utils/errors.js";
 import { parsePositiveId } from "../../utils/ids.js";
 import { getPagination } from "../../utils/pagination.js";
 import { serializeAdminUser } from "./admin.serializer.js";
-import { creditUserWallet } from "../wallet/wallet.service.js";
+import { adjustUserWallet } from "../wallet/wallet.service.js";
 import { adminUsersRepository } from "./admin-users.repository.js";
 
 const validStatuses = new Set(["ATIVO", "INATIVO", "BLOQUEADO", "PENDENTE"]);
@@ -13,6 +13,43 @@ const validKycStatuses = new Set([
   "REPROVADO",
   "BLOQUEADO",
 ]);
+
+const participantWhere = {
+  excluido_em: null,
+  tipo_conta: { notIn: ["ADMIN", "SUPORTE"] },
+};
+
+const providerInclude = {
+  kyc: { select: { status: true } },
+  vendedor: { include: { motoboy: true } },
+};
+
+async function findProviderParticipant(database, userId) {
+  const user = await database.usuario.findFirst({
+    include: providerInclude,
+    where: { ...participantWhere, id: userId },
+  });
+  if (!user) throw new AppError("Participante nao encontrado", 404);
+  return user;
+}
+
+function assertProviderEligible(user) {
+  if (user.status !== "ATIVO") {
+    throw new AppError("Ative a conta do participante antes de liberar operacao comercial", 409);
+  }
+  if (user.kyc?.status !== "APROVADO") {
+    throw new AppError("O participante precisa ter KYC aprovado", 428);
+  }
+}
+
+function assertActiveSeller(seller) {
+  if (!seller || seller.excluido_em) {
+    throw new AppError("Este participante ainda nao possui perfil de prestador", 409);
+  }
+  if (seller.status !== "ATIVO" || seller.status_kyc !== "APROVADO") {
+    throw new AppError("Ative o prestador e regularize o KYC antes de liberar servicos", 409);
+  }
+}
 
 function buildUserWhere(query) {
   const search = String(query.search ?? "").trim();
@@ -69,15 +106,32 @@ export async function getAdminUser(userId) {
   return { user: serializeAdminUser(user, { includeSensitive: true }) };
 }
 
-export async function updateAdminUserStatus(userId, status) {
+export async function updateAdminUserStatus(adminId, userId, status) {
   const parsedUserId = parsePositiveId(userId, "Participante invalido");
-  const exists = await adminUsersRepository.findParticipantId(parsedUserId);
+  await adminUsersRepository.transaction(async (database) => {
+    const user = await findProviderParticipant(database, parsedUserId);
+    await database.usuario.update({ data: { status }, where: { id: user.id } });
 
-  if (!exists) {
-    throw new AppError("Participante nao encontrado", 404);
-  }
-
-  await adminUsersRepository.update(parsedUserId, { status });
+    if (status !== "ATIVO" && user.vendedor && !user.vendedor.excluido_em) {
+      await Promise.all([
+        database.vendedor.update({ data: { status: "PAUSADO" }, where: { id: user.vendedor.id } }),
+        database.servicoVendedor.updateMany({
+          data: { disponivel_agora: false },
+          where: { vendedor_id: user.vendedor.id },
+        }),
+        database.motoboy.updateMany({
+          data: { aceita_chamadas_plataforma: false, status: "PAUSADO" },
+          where: { vendedor_id: user.vendedor.id, status: { not: "BLOQUEADO" } },
+        }),
+      ]);
+    }
+    await adminUsersRepository.createAudit(database, {
+      acao: "CONTA_PARTICIPANTE_ATUALIZADA",
+      administrador_id: adminId,
+      dados_json: { status },
+      usuario_alvo_id: user.id,
+    });
+  });
 
   return getAdminUser(parsedUserId);
 }
@@ -101,6 +155,10 @@ export async function updateAdminUser(userId, data) {
 }
 
 export async function creditAdminUserWallet(adminId, userId, data) {
+  return adjustAdminUserWallet(adminId, userId, { ...data, operation: "CREDIT" });
+}
+
+export async function adjustAdminUserWallet(adminId, userId, data) {
   const parsedUserId = parsePositiveId(userId, "Participante invalido");
   const exists = await adminUsersRepository.findParticipantId(parsedUserId);
 
@@ -109,16 +167,174 @@ export async function creditAdminUserWallet(adminId, userId, data) {
   }
 
   await adminUsersRepository.transaction(async (database) => {
-    await creditUserWallet({
+    await adjustUserWallet({
+      adminId,
       database,
       description: data.description,
-      origin: "AJUSTE_ADMIN",
-      originId: adminId,
+      operation: data.operation,
       userId: parsedUserId,
       valueCents: data.valueCents,
       walletCode: data.walletCode,
     });
   });
 
+  return getAdminUser(parsedUserId);
+}
+
+export async function updateAdminSellerProfile(adminId, userId, data) {
+  const parsedUserId = parsePositiveId(userId, "Participante invalido");
+  await adminUsersRepository.transaction(async (database) => {
+    const user = await findProviderParticipant(database, parsedUserId);
+    const seller = user.vendedor;
+    if (!seller || seller.excluido_em) {
+      throw new AppError("Este participante ainda nao possui perfil de prestador", 409);
+    }
+    if (data.status === "ATIVO") assertProviderEligible(user);
+
+    await database.vendedor.update({ data: { status: data.status }, where: { id: seller.id } });
+    if (data.status !== "ATIVO") {
+      await database.servicoVendedor.updateMany({
+        data: { disponivel_agora: false },
+        where: { vendedor_id: seller.id },
+      });
+    }
+    await adminUsersRepository.createAudit(database, {
+      acao: "PERFIL_PRESTADOR_ATUALIZADO",
+      administrador_id: adminId,
+      dados_json: { status: data.status, vendedorId: seller.id },
+      usuario_alvo_id: user.id,
+    });
+  });
+  return getAdminUser(parsedUserId);
+}
+
+export async function updateAdminCourierProfile(adminId, userId, data) {
+  const parsedUserId = parsePositiveId(userId, "Participante invalido");
+  await adminUsersRepository.transaction(async (database) => {
+    const user = await findProviderParticipant(database, parsedUserId);
+    const seller = user.vendedor;
+    if (!seller || seller.excluido_em) {
+      throw new AppError("Este participante ainda nao possui perfil de prestador", 409);
+    }
+    const courier = seller.motoboy;
+    if (!courier) throw new AppError("Este prestador nao possui cadastro de motoboy", 409);
+
+    const nextStatus = data.status ?? courier.status;
+    const nextAcceptsPlatformCalls = data.acceptsPlatformCalls ?? courier.aceita_chamadas_plataforma;
+    if (nextStatus === "ATIVO" || nextAcceptsPlatformCalls) {
+      assertActiveSeller(seller);
+      assertProviderEligible(user);
+    }
+
+    await database.motoboy.update({
+      data: {
+        aceita_chamadas_plataforma: nextStatus === "ATIVO" ? nextAcceptsPlatformCalls : false,
+        status: nextStatus,
+      },
+      where: { id: courier.id },
+    });
+    if (nextStatus !== "ATIVO") {
+      await database.servicoVendedor.updateMany({
+        data: { disponivel_agora: false },
+        where: { tipo_servico: { tipo_operacao: "ENTREGA_LOCAL" }, vendedor_id: seller.id },
+      });
+    }
+    await adminUsersRepository.createAudit(database, {
+      acao: "PERFIL_MOTOBOY_ATUALIZADO",
+      administrador_id: adminId,
+      dados_json: { acceptsPlatformCalls: nextAcceptsPlatformCalls, motoboyId: courier.id, status: nextStatus },
+      usuario_alvo_id: user.id,
+    });
+  });
+  return getAdminUser(parsedUserId);
+}
+
+export async function addAdminUserService(adminId, userId, data) {
+  const parsedUserId = parsePositiveId(userId, "Participante invalido");
+  const serviceTypeId = parsePositiveId(data.serviceTypeId, "Servico invalido");
+  await adminUsersRepository.transaction(async (database) => {
+    const user = await findProviderParticipant(database, parsedUserId);
+    assertProviderEligible(user);
+    const type = await database.tipoServico.findFirst({
+      where: { excluido_em: null, id: serviceTypeId, status: "ATIVO" },
+    });
+    if (!type) throw new AppError("Servico nao encontrado ou inativo", 404);
+    if (!type.segmento_venda_id) throw new AppError("Este servico nao possui segmento comercial", 409);
+
+    let seller = user.vendedor;
+    if (!seller || seller.excluido_em) {
+      if (!user.cpf) throw new AppError("Informe o CPF antes de criar um perfil de prestador", 428);
+      seller = await database.vendedor.create({
+        data: {
+          cpf: user.cpf,
+          nome_publico: user.nome,
+          segmento_venda_id: type.segmento_venda_id,
+          status: "ATIVO",
+          status_kyc: "APROVADO",
+          tipo_pessoa: "FISICA",
+          usuario_id: user.id,
+        },
+        include: { motoboy: true },
+      });
+    }
+    assertActiveSeller(seller);
+    if (type.tipo_operacao === "ENTREGA_LOCAL" && seller.motoboy?.status !== "ATIVO") {
+      throw new AppError("Cadastre e aprove o perfil de motoboy antes de liberar entrega local", 409);
+    }
+
+    await database.servicoVendedor.upsert({
+      create: {
+        categoria: type.nome,
+        disponivel_agora: false,
+        nome: type.nome,
+        status: "ATIVO",
+        tipo_servico_id: type.id,
+        vendedor_id: seller.id,
+      },
+      update: { disponivel_agora: false, excluido_em: null, status: "ATIVO" },
+      where: { vendedor_id_tipo_servico_id: { tipo_servico_id: type.id, vendedor_id: seller.id } },
+    });
+    await adminUsersRepository.createAudit(database, {
+      acao: "SERVICO_PRESTADOR_LIBERADO",
+      administrador_id: adminId,
+      dados_json: { tipoServicoId: type.id, vendedorId: seller.id },
+      usuario_alvo_id: user.id,
+    });
+  });
+  return getAdminUser(parsedUserId);
+}
+
+export async function updateAdminUserService(adminId, userId, sellerServiceId, data) {
+  const parsedUserId = parsePositiveId(userId, "Participante invalido");
+  const parsedServiceId = parsePositiveId(sellerServiceId, "Servico do prestador invalido");
+  await adminUsersRepository.transaction(async (database) => {
+    const user = await findProviderParticipant(database, parsedUserId);
+    const seller = user.vendedor;
+    if (!seller || seller.excluido_em) throw new AppError("Perfil de prestador nao encontrado", 404);
+    if (data.status === "ATIVO") assertProviderEligible(user);
+
+    const service = await database.servicoVendedor.findFirst({
+      include: { tipo_servico: true },
+      where: { excluido_em: null, id: parsedServiceId, vendedor_id: seller.id },
+    });
+    if (!service) throw new AppError("Servico nao encontrado para este participante", 404);
+    if (data.status === "ATIVO") {
+      assertActiveSeller(seller);
+      if (service.tipo_servico?.tipo_operacao === "ENTREGA_LOCAL" && seller.motoboy?.status !== "ATIVO") {
+        throw new AppError("Ative o perfil de motoboy antes de liberar este servico", 409);
+      }
+    }
+
+    await database.servicoVendedor.update({
+      data: { disponivel_agora: data.status === "ATIVO" ? service.disponivel_agora : false, status: data.status },
+      where: { id: service.id },
+    });
+    await adminUsersRepository.createAudit(database, {
+      acao: "SERVICO_PRESTADOR_ATUALIZADO",
+      administrador_id: adminId,
+      dados_json: { servicoVendedorId: service.id, status: data.status },
+      usuario_alvo_id: user.id,
+    });
+  });
   return getAdminUser(parsedUserId);
 }

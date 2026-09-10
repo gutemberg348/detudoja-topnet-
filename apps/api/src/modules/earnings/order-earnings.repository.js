@@ -1,4 +1,6 @@
-export function createOrderEarningsRepository(database) {
+import { prisma } from "../../config/prisma.js";
+
+export function createOrderEarningsRepository(database = prisma) {
   return {
     createFinancialEvent(args) { return database.eventoFinanceiro.create(args); },
     createPlatformEntry(args) { return database.lancamentoPlataforma.create(args); },
@@ -19,9 +21,11 @@ export function createOrderEarningsRepository(database) {
     updateIndications(args) { return database.indicacao.updateMany(args); },
     updatePlatformAccount(args) { return database.contaPlataforma.update(args); },
     updatePlatformAccounts(args) { return database.contaPlataforma.updateMany(args); },
+    updatePlatformEntries(args) { return database.lancamentoPlataforma.updateMany(args); },
     updateReceivables(args) { return database.recebivel.updateMany(args); },
     updateRewards(args) { return database.recompensa.updateMany(args); },
     updateWallets(args) { return database.carteira.updateMany(args); },
+    updateWalletEntry(args) { return database.lancamentoCarteira.update(args); },
     upsertCommercialTransaction(args) { return database.transacaoComercial.upsert(args); },
     upsertPlatformAccount(args) { return database.contaPlataforma.upsert(args); },
     upsertSystemConfiguration(args) { return database.configuracaoSistema.upsert(args); },

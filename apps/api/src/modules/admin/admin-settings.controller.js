@@ -6,6 +6,7 @@ import {
   getAdminEarningsSettings,
   updateAdminCategoryFee,
   updateAdminOrderEarningsDistribution,
+  updateAdminPaymentPolicy,
   updateAdminSegmentFee,
 } from "./admin-earnings.service.js";
 
@@ -44,6 +45,14 @@ export async function updateAdminCategoryFeeController(req, res, next) {
 export async function updateAdminOrderEarningsDistributionController(req, res, next) {
   try {
     res.json(await updateAdminOrderEarningsDistribution(req.auth.user.id, req.body));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateAdminPaymentPolicyController(req, res, next) {
+  try {
+    res.json(await updateAdminPaymentPolicy(req.auth.user.id, req.body));
   } catch (error) {
     next(error);
   }

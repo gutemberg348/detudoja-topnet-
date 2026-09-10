@@ -3,18 +3,24 @@ import {
   emitOrderStatusUpdated,
   emitWalletUpdated,
 } from "../../realtime/socket.server.js";
+import { env } from "../../config/env.js";
 import { AppError } from "../../utils/errors.js";
+import { processAsaasTransferWebhook } from "../payouts/payout.service.js";
+import { processAsaasWithdrawalWebhook } from "../withdrawals/withdrawal.service.js";
 import { asaasRepository, createAsaasRepository } from "./asaas.repository.js";
 import { reverseCommercialSettlement } from "../earnings/order-earnings.service.js";
 import { assertPaymentMonthlyCpfLimit } from "../earnings/commercial-limit.service.js";
 import { releaseReservedOrderStock } from "../orders/order-stock.service.js";
 import { serializeOrder, serializeOrderMessage } from "../orders/orders.serializer.js";
+import { ensureAsaasCustomer } from "./asaas-customer.service.js";
+import { emitWalletDepositUpdate, settleWalletDepositPayment } from "../wallet-deposits/wallet-deposit.service.js";
 import {
-  createAsaasCustomer,
   createAsaasPixPayment,
   deleteAsaasPayment,
   getAsaasPaymentStatus,
   getAsaasPixQrCode,
+  isAsaasEnabled,
+  listAsaasPayments,
   refundAsaasPayment,
 } from "./asaas.client.js";
 
@@ -40,10 +46,6 @@ const orderMessageInclude = {
   autor: { select: { id: true, nome: true } },
 };
 
-function onlyDigits(value = "") {
-  return String(value).replace(/\D/g, "");
-}
-
 function asaasValue(cents) {
   return Number((Number(cents) / 100).toFixed(2));
 }
@@ -66,51 +68,59 @@ function pixQrDataUrl(encodedImage) {
   return encodedImage ? `data:image/png;base64,${encodedImage}` : null;
 }
 
-async function ensureAsaasCustomer(userId) {
-  const user = await asaasRepository.findUser({
-    include: {
-      enderecos: {
-        orderBy: [{ principal: "desc" }, { atualizado_em: "desc" }],
-        take: 1,
-        where: { excluido_em: null },
-      },
+function asaasPaymentReference(paymentId) {
+  return `DTJ:PAYMENT:${paymentId}`;
+}
+
+function asaasWalletDepositReference(depositId) {
+  return `DTJ:WALLET_DEPOSIT:${depositId}`;
+}
+
+function asaasReferenceForPayment(payment) {
+  return payment.deposito_carteira
+    ? asaasWalletDepositReference(payment.deposito_carteira.id)
+    : asaasPaymentReference(payment.id);
+}
+
+function asaasReferenceTarget(reference) {
+  const match = /^DTJ:(PAYMENT|WALLET_DEPOSIT):(\d+)$/.exec(String(reference ?? "").trim());
+  const id = Number(match?.[2]);
+  if (!Number.isSafeInteger(id) || id <= 0) return null;
+  return { id, type: match[1] };
+}
+
+function serializePendingAsaasPayment(payment) {
+  return {
+    expiresAt: payment.expira_em?.toISOString() ?? null,
+    gateway: "ASAAS",
+    id: payment.id,
+    pixCopyPaste: payment.copia_cola_pix,
+    qrImageDataUrl: payment.qr_code,
+    status: payment.status,
+  };
+}
+
+function remotePaymentFromList(response, reference) {
+  const matches = (response?.data ?? []).filter(
+    (payment) => payment?.externalReference === reference,
+  );
+
+  if (matches.length > 1) {
+    throw new AppError("Foram encontradas cobrancas externas duplicadas; o suporte financeiro foi avisado", 409);
+  }
+
+  return matches[0] ?? null;
+}
+
+export async function markPendingAsaasPaymentForReconciliation(paymentId) {
+  await asaasRepository.updatePayments({
+    data: { status: "EM_RECONCILIACAO" },
+    where: {
+      gateway: "ASAAS",
+      id: Number(paymentId),
+      status: { in: ["AGUARDANDO_PAGAMENTO", "EM_RECONCILIACAO"] },
     },
-    where: { id: userId },
   });
-
-  if (!user?.cpf) {
-    throw new AppError("Informe e valide seu CPF antes de usar o Pix", 409);
-  }
-
-  if (user.asaas_cliente_id) {
-    return user.asaas_cliente_id;
-  }
-
-  const address = user.enderecos[0];
-  const customer = await createAsaasCustomer({
-    ...(address
-      ? {
-          address: address.rua,
-          addressNumber: address.numero,
-          complement: address.complemento || undefined,
-          postalCode: onlyDigits(address.cep),
-          province: address.bairro,
-        }
-      : {}),
-    cpfCnpj: onlyDigits(user.cpf),
-    email: user.email,
-    externalReference: `DTJ:USER:${user.id}`,
-    mobilePhone: onlyDigits(user.telefone),
-    name: user.nome,
-    notificationDisabled: true,
-  });
-
-  await asaasRepository.updateUser({
-    data: { asaas_cliente_id: customer.id },
-    where: { id: user.id },
-  });
-
-  return customer.id;
 }
 
 export function shouldUseAsaasPix({ pixComplementCents, walletUsedCents }) {
@@ -133,39 +143,61 @@ export async function createPendingAsaasPix({ description, paymentId, userId }) 
     throw new AppError("Pagamento externo nao encontrado", 404);
   }
 
+  if (payment.status === "EM_RECONCILIACAO") {
+    return serializePendingAsaasPayment(payment);
+  }
+
   if (payment.status !== "AGUARDANDO_PAGAMENTO") {
     throw new AppError("Este pagamento nao esta aguardando Pix", 409);
   }
 
-  const customerId = await ensureAsaasCustomer(userId);
-  const remotePayment = await createAsaasPixPayment({
-    billingType: "PIX",
-    customer: customerId,
-    description,
-    dueDate: dueDate(),
-    externalReference: `DTJ:PAYMENT:${payment.id}`,
-    value: asaasValue(payment.valor_pago_pix_centavos),
-  });
-  const pix = await getAsaasPixQrCode(remotePayment.id);
+  let remotePayment = null;
 
-  const updated = await asaasRepository.updatePayment({
-    data: {
-      copia_cola_pix: pix.payload ?? null,
-      expira_em: pix.expirationDate ? new Date(pix.expirationDate) : null,
-      gateway_pagamento_id: remotePayment.id,
-      qr_code: pixQrDataUrl(pix.encodedImage),
-    },
-    where: { id: payment.id },
-  });
+  try {
+    const customerId = await ensureAsaasCustomer(userId);
+    remotePayment = await createAsaasPixPayment({
+      billingType: "PIX",
+      customer: customerId,
+      description,
+      dueDate: dueDate(),
+      externalReference: asaasPaymentReference(payment.id),
+      value: asaasValue(payment.valor_pago_pix_centavos),
+    });
 
-  return {
-    expiresAt: updated.expira_em?.toISOString() ?? null,
-    gateway: "ASAAS",
-    id: updated.id,
-    pixCopyPaste: updated.copia_cola_pix,
-    qrImageDataUrl: updated.qr_code,
-    status: updated.status,
-  };
+    await asaasRepository.updatePayment({
+      data: { gateway_pagamento_id: remotePayment.id },
+      where: { id: payment.id },
+    });
+
+    const pix = await getAsaasPixQrCode(remotePayment.id);
+    const updated = await asaasRepository.updatePayment({
+      data: {
+        copia_cola_pix: pix.payload ?? null,
+        expira_em: pix.expirationDate ? new Date(pix.expirationDate) : null,
+        qr_code: pixQrDataUrl(pix.encodedImage),
+      },
+      where: { id: payment.id },
+    });
+
+    return serializePendingAsaasPayment(updated);
+  } catch (error) {
+    // A requisicao pode ter chegado ao Asaas mesmo sem resposta. Nunca cancele
+    // localmente antes de procurar a referencia externa criada por este pagamento.
+    if (remotePayment?.id) {
+      await asaasRepository.updatePayment({
+        data: { gateway_pagamento_id: remotePayment.id },
+        where: { id: payment.id },
+      });
+    }
+    await markPendingAsaasPaymentForReconciliation(payment.id);
+
+    if (error.providerStateUnknown || remotePayment?.id) {
+      const pending = await asaasRepository.findPayment({ where: { id: payment.id } });
+      return serializePendingAsaasPayment(pending);
+    }
+
+    throw error;
+  }
 }
 
 export async function failPendingAsaasPayment(paymentId) {
@@ -182,7 +214,11 @@ export async function failPendingAsaasPayment(paymentId) {
 
     await repository.updatePayments({
       data: { status: "FALHOU" },
-      where: { id: payment.id, status: "AGUARDANDO_PAGAMENTO" },
+      where: { id: payment.id, status: { in: ["AGUARDANDO_PAGAMENTO", "EM_RECONCILIACAO"] } },
+    });
+    await repository.updateWalletDeposits({
+      data: { status: "FALHOU" },
+      where: { pagamento_id: payment.id, status: "PENDENTE" },
     });
     const order = await repository.findFirstOrder({
       select: { id: true },
@@ -204,7 +240,7 @@ export async function failPendingAsaasPayment(paymentId) {
 }
 
 function isPaymentConfirmed(event) {
-  return event === "PAYMENT_RECEIVED";
+  return ["PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"].includes(event);
 }
 
 function mapPaymentStatus(event) {
@@ -239,10 +275,113 @@ function eventForAsaasPaymentStatus(status) {
     OVERDUE: "PAYMENT_OVERDUE",
     RECEIVED: "PAYMENT_RECEIVED",
     RECEIVED_IN_CASH: "PAYMENT_RECEIVED",
+    CONFIRMED: "PAYMENT_CONFIRMED",
     REFUNDED: "PAYMENT_REFUNDED",
   };
 
   return events[String(status ?? "").trim().toUpperCase()] ?? null;
+}
+
+export async function reconcilePendingAsaasPayment(paymentId) {
+  const payment = await asaasRepository.findPayment({
+    select: {
+      criado_em: true,
+      deposito_carteira: { select: { id: true } },
+      gateway: true,
+      gateway_pagamento_id: true,
+      id: true,
+      status: true,
+    },
+    where: { id: Number(paymentId) },
+  });
+
+  if (
+    !payment
+    || payment.gateway !== "ASAAS"
+    || payment.status !== "EM_RECONCILIACAO"
+  ) {
+    return { reconciled: false, state: "NOT_PENDING" };
+  }
+
+  let remotePayment;
+  if (payment.gateway_pagamento_id) {
+    remotePayment = await getAsaasPaymentStatus(payment.gateway_pagamento_id);
+    remotePayment = { ...remotePayment, id: payment.gateway_pagamento_id };
+  } else {
+    const reference = asaasReferenceForPayment(payment);
+    const response = await listAsaasPayments({
+      externalReference: reference,
+      limit: 2,
+    });
+    remotePayment = remotePaymentFromList(
+      response,
+      reference,
+    );
+  }
+
+  if (!remotePayment?.id) {
+    const expiresAt = payment.criado_em.getTime()
+      + (env.asaas.reconciliationGraceSeconds * 1_000);
+    if (Date.now() >= expiresAt) {
+      await failPendingAsaasPayment(payment.id);
+      return { reconciled: true, state: "NOT_FOUND_AFTER_GRACE" };
+    }
+    return { reconciled: false, state: "WAITING_FOR_GATEWAY" };
+  }
+
+  await asaasRepository.updatePayment({
+    data: {
+      gateway_pagamento_id: remotePayment.id,
+      status: "AGUARDANDO_PAGAMENTO",
+    },
+    where: { id: payment.id },
+  });
+
+  const gatewayStatus = String(remotePayment.status ?? "PENDING").toUpperCase();
+  const event = eventForAsaasPaymentStatus(gatewayStatus);
+  if (event) {
+    await processAsaasWebhook({
+      event,
+      id: `payment-reconciliation:${remotePayment.id}:${gatewayStatus}`,
+      payment: { id: remotePayment.id, status: gatewayStatus },
+    });
+  }
+
+  return {
+    gatewayPaymentId: remotePayment.id,
+    gatewayStatus,
+    reconciled: true,
+    state: "LINKED",
+  };
+}
+
+export async function reconcilePendingAsaasPayments({ batchSize = 25 } = {}) {
+  if (!isAsaasEnabled()) return { failed: [], reconciled: 0, scanned: 0, waiting: 0 };
+
+  const payments = await asaasRepository.findPayments({
+    orderBy: { atualizado_em: "asc" },
+    select: { id: true },
+    take: batchSize,
+    where: {
+      gateway: "ASAAS",
+      status: "EM_RECONCILIACAO",
+    },
+  });
+  const failed = [];
+  let reconciled = 0;
+  let waiting = 0;
+
+  for (const payment of payments) {
+    try {
+      const result = await reconcilePendingAsaasPayment(payment.id);
+      if (result.reconciled) reconciled += 1;
+      else waiting += 1;
+    } catch (error) {
+      failed.push({ error, paymentId: payment.id });
+    }
+  }
+
+  return { failed, reconciled, scanned: payments.length, waiting };
 }
 
 async function settleAsaasPayment(database, paymentId, event) {
@@ -259,7 +398,7 @@ async function settleAsaasPayment(database, paymentId, event) {
 
   const allowedCurrentStatuses = nextStatus === "ESTORNADO"
     ? ["PAGO", "LIQUIDADO", "EM_DISPUTA"]
-    : ["PENDENTE", "AGUARDANDO_PAGAMENTO"];
+    : ["PENDENTE", "AGUARDANDO_PAGAMENTO", "EM_RECONCILIACAO"];
   const claimed = await repository.updatePayments({
     data: {
       cancelado_em: ["CANCELADO", "FALHOU"].includes(nextStatus) ? new Date() : null,
@@ -304,23 +443,37 @@ async function settleAsaasPayment(database, paymentId, event) {
   }
 
   if (nextStatus === "PAGO") {
-    const acceptedAt = new Date();
+    const paidAt = new Date();
     await repository.updateProposals({
-      data: { pago_em: acceptedAt, status: "PAGA" },
+      data: { pago_em: paidAt, status: "PAGA" },
       where: {
         pedido_id: order.id,
         status: "ACEITA",
       },
     });
-    const updatedOrder = await repository.updateOrder({
-      data: { aceito_em: acceptedAt, status: "ACEITO" },
+    const movedOrder = await repository.updateOrders({
+      data: { status: "RECEBIDO" },
+      where: {
+        id: order.id,
+        status: "AGUARDANDO_PAGAMENTO",
+      },
+    });
+
+    if (movedOrder.count !== 1) {
+      throw new AppError(
+        "O pedido mudou antes da confirmacao do Pix; atualize a tela e contate o suporte se necessario",
+        409,
+      );
+    }
+
+    const updatedOrder = await repository.findUniqueOrder({
       include: orderInclude,
       where: { id: order.id },
     });
     const message = await repository.createOrderMessage({
       data: {
-        mensagem: "Pix confirmado. A loja ja pode iniciar o preparo do pedido.",
-        metadata_json: { gateway: "ASAAS", kind: "payment", status: "ACEITO" },
+        mensagem: "Pix confirmado. Aguarde a loja aceitar o pedido para iniciar o atendimento.",
+        metadata_json: { gateway: "ASAAS", kind: "payment", status: "RECEBIDO" },
         origem: "SISTEMA",
         pedido_id: order.id,
         titulo: "Pagamento confirmado",
@@ -366,6 +519,7 @@ async function settleAsaasPayment(database, paymentId, event) {
 export async function requestAsaasPaymentRefund(paymentId, { reason }) {
   const payment = await asaasRepository.findPayment({
     select: {
+      deposito_carteira: { select: { id: true } },
       gateway: true,
       gateway_pagamento_id: true,
       id: true,
@@ -376,6 +530,10 @@ export async function requestAsaasPaymentRefund(paymentId, { reason }) {
 
   if (!payment || payment.gateway !== "ASAAS" || !payment.gateway_pagamento_id) {
     throw new AppError("Pagamento Asaas nao encontrado", 404);
+  }
+
+  if (payment.deposito_carteira) {
+    throw new AppError("Depositos de carteira nao podem ser estornados automaticamente", 409);
   }
 
   if (!["PAGO", "LIQUIDADO"].includes(payment.status)) {
@@ -393,7 +551,7 @@ export async function requestAsaasPaymentRefund(paymentId, { reason }) {
 
   try {
     return await refundAsaasPayment(payment.gateway_pagamento_id, {
-      description: `Estorno DeTudoJa do pagamento ${payment.id}: ${reason}`,
+      description: `Estorno Brasil Cashback do pagamento ${payment.id}: ${reason}`,
     });
   } catch (error) {
     await asaasRepository.updatePayments({
@@ -471,6 +629,15 @@ export async function processAsaasWebhook(payload) {
   const eventId = String(payload?.id ?? "").trim();
   const event = String(payload?.event ?? "").trim();
   const remotePaymentId = String(payload?.payment?.id ?? "").trim();
+  const externalReference = String(payload?.payment?.externalReference ?? "").trim();
+  const referenceTarget = asaasReferenceTarget(externalReference);
+
+  if (event.startsWith("TRANSFER_")) {
+    const withdrawalResult = await processAsaasWithdrawalWebhook(payload);
+    return withdrawalResult.handled
+      ? withdrawalResult
+      : processAsaasTransferWebhook(payload);
+  }
 
   if (!eventId || !event) {
     throw new AppError("Evento do Asaas invalido", 400);
@@ -478,12 +645,31 @@ export async function processAsaasWebhook(payload) {
 
   const result = await asaasRepository.transaction(async (database) => {
     const repository = createAsaasRepository(database);
-    const payment = remotePaymentId
+    const paymentByGatewayId = remotePaymentId
       ? await repository.findFirstPayment({
-          select: { id: true },
+          select: { gateway_pagamento_id: true, id: true },
           where: { gateway: "ASAAS", gateway_pagamento_id: remotePaymentId },
         })
       : null;
+    const paymentByReference = referenceTarget?.type === "PAYMENT"
+      ? await repository.findFirstPayment({
+          select: { gateway_pagamento_id: true, id: true },
+          where: { gateway: "ASAAS", id: referenceTarget.id },
+        })
+      : referenceTarget?.type === "WALLET_DEPOSIT"
+        ? (await repository.findFirstWalletDeposit({
+            select: { pagamento: { select: { gateway_pagamento_id: true, id: true } } },
+            where: { id: referenceTarget.id },
+          }))?.pagamento ?? null
+        : null;
+    const payment = paymentByGatewayId ?? paymentByReference;
+
+    if (payment && remotePaymentId && !payment.gateway_pagamento_id) {
+      await repository.updatePayment({
+        data: { gateway_pagamento_id: remotePaymentId },
+        where: { id: payment.id },
+      });
+    }
 
     try {
       await repository.createGatewayEvent({
@@ -503,7 +689,12 @@ export async function processAsaasWebhook(payload) {
       throw error;
     }
 
-    const settled = payment ? await settleAsaasPayment(database, payment.id, event) : null;
+    const walletDepositSettlement = payment
+      ? await settleWalletDepositPayment(database, payment.id, event)
+      : null;
+    const settled = walletDepositSettlement ?? (payment
+      ? await settleAsaasPayment(database, payment.id, event)
+      : null);
 
     await repository.updateGatewayEvent({
       data: { processado_em: new Date() },
@@ -534,7 +725,62 @@ export async function processAsaasWebhook(payload) {
     });
   }
 
+  if (result.settled?.walletUserIds?.length) {
+    emitWalletDepositUpdate(result.settled.walletUserIds);
+  }
+
   return { duplicate: Boolean(result.duplicate), processed: true };
+}
+
+export async function refreshPendingAsaasWalletDeposit(userId, depositId) {
+  const parsedDepositId = Number(depositId);
+  if (!Number.isSafeInteger(parsedDepositId) || parsedDepositId <= 0) {
+    throw new AppError("Deposito invalido", 400);
+  }
+
+  const deposit = await asaasRepository.findFirstWalletDeposit({
+    include: { pagamento: true },
+    where: { id: parsedDepositId, usuario_id: userId },
+  });
+  if (!deposit) throw new AppError("Deposito nao encontrado", 404);
+  if (
+    deposit.status !== "PENDENTE"
+    || !["AGUARDANDO_PAGAMENTO", "EM_RECONCILIACAO"].includes(deposit.pagamento.status)
+  ) {
+    throw new AppError("Este deposito nao esta aguardando pagamento", 409);
+  }
+  if (deposit.pagamento.gateway !== "ASAAS") {
+    throw new AppError("Pagamento Asaas nao disponivel para consulta", 409);
+  }
+
+  if (deposit.pagamento.status === "EM_RECONCILIACAO") {
+    await reconcilePendingAsaasPayment(deposit.pagamento.id);
+  }
+
+  const refreshedDeposit = await asaasRepository.findFirstWalletDeposit({
+    include: { pagamento: true },
+    where: { id: parsedDepositId, usuario_id: userId },
+  });
+  if (!refreshedDeposit?.pagamento?.gateway_pagamento_id) {
+    return {
+      checkedAt: new Date().toISOString(),
+      gatewayStatus: "RECONCILING",
+      reconciliation: "WAITING_FOR_GATEWAY",
+    };
+  }
+
+  const remotePayment = await getAsaasPaymentStatus(refreshedDeposit.pagamento.gateway_pagamento_id);
+  const gatewayStatus = String(remotePayment?.status ?? "UNKNOWN").toUpperCase();
+  const event = eventForAsaasPaymentStatus(gatewayStatus);
+  if (event) {
+    await processAsaasWebhook({
+      event,
+      id: `wallet-deposit-manual:${refreshedDeposit.pagamento.gateway_pagamento_id}:${gatewayStatus}`,
+      payment: { id: refreshedDeposit.pagamento.gateway_pagamento_id, status: gatewayStatus },
+    });
+  }
+
+  return { checkedAt: new Date().toISOString(), gatewayStatus };
 }
 
 export async function refreshPendingAsaasOrderPayment(userId, orderId) {
@@ -566,20 +812,37 @@ export async function refreshPendingAsaasOrderPayment(userId, orderId) {
 
   if (
     currentOrder.status !== "AGUARDANDO_PAGAMENTO"
-    || currentOrder.pagamento?.status !== "AGUARDANDO_PAGAMENTO"
+    || !["AGUARDANDO_PAGAMENTO", "EM_RECONCILIACAO"].includes(currentOrder.pagamento?.status)
   ) {
     throw new AppError("Este pedido nao esta aguardando pagamento", 409);
   }
 
   if (
     currentOrder.pagamento.gateway !== "ASAAS"
-    || !currentOrder.pagamento.gateway_pagamento_id
   ) {
     throw new AppError("Pagamento Asaas nao disponivel para consulta", 409);
   }
 
+  if (currentOrder.pagamento.status === "EM_RECONCILIACAO") {
+    await reconcilePendingAsaasPayment(currentOrder.pagamento.id);
+  }
+
+  const orderAfterReconciliation = await asaasRepository.findUniqueOrder({
+    include: orderInclude,
+    where: { id: currentOrder.id },
+  });
+  const paymentAfterReconciliation = orderAfterReconciliation.pagamento;
+  if (!paymentAfterReconciliation?.gateway_pagamento_id) {
+    return {
+      checkedAt: new Date().toISOString(),
+      gatewayStatus: "RECONCILING",
+      order: serializeOrder(orderAfterReconciliation),
+      paymentConfirmed: false,
+    };
+  }
+
   const remotePayment = await getAsaasPaymentStatus(
-    currentOrder.pagamento.gateway_pagamento_id,
+    paymentAfterReconciliation.gateway_pagamento_id,
   );
   const gatewayStatus = String(remotePayment?.status ?? "UNKNOWN").toUpperCase();
   const event = eventForAsaasPaymentStatus(gatewayStatus);
@@ -587,9 +850,9 @@ export async function refreshPendingAsaasOrderPayment(userId, orderId) {
   if (event) {
     await processAsaasWebhook({
       event,
-      id: `manual:${currentOrder.pagamento.gateway_pagamento_id}:${gatewayStatus}`,
+      id: `manual:${paymentAfterReconciliation.gateway_pagamento_id}:${gatewayStatus}`,
       payment: {
-        id: currentOrder.pagamento.gateway_pagamento_id,
+        id: paymentAfterReconciliation.gateway_pagamento_id,
         status: gatewayStatus,
       },
     });

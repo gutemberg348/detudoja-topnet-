@@ -34,7 +34,7 @@ export function RecentConversations({
     <View style={styles.section}>
       <View style={styles.heading}>
         <View style={styles.headingCopy}>
-          <Text style={styles.title}>Conversas</Text>
+          <Text style={styles.title}>Ultimas conversas</Text>
         </View>
         <Pressable
           accessibilityLabel={actionLabel}
@@ -65,6 +65,8 @@ export function RecentConversations({
                 name={
                   conversation.kind === "service"
                     ? "briefcase-outline"
+                    : conversation.kind === "person"
+                      ? "person-outline"
                     : conversation.kind === "store"
                       ? "chatbubbles-outline"
                       : "receipt-outline"

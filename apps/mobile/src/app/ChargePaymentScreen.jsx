@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Image, StyleSheet, Text, View } from "react-native";
 import { AppButton } from "../components/AppButton";
 import { CpfRequirementModal } from "../components/CpfRequirementModal";
+import { LocalRewardNotice } from "../components/LocalRewardNotice";
 import { PaymentFeedbackOverlay } from "../components/PaymentFeedbackOverlay";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { getCharge, payChargeWithWallet } from "../services/charges.api";
@@ -133,18 +134,10 @@ export function ChargePaymentScreen({ navigation, route }) {
         {charge.description ? <Text style={styles.amountDescription}>{charge.description}</Text> : null}
         <Text style={styles.amount}>{formatarDinheiro(charge.amountCents)}</Text>
         <View style={styles.divider} />
-        <Text style={styles.amountMeta}>{paid ? "Pago com a carteira DeTudoJa" : `Saldo disponivel: ${formatarDinheiro(availableCents)}`}</Text>
+        <Text style={styles.amountMeta}>{paid ? "Pago com a carteira Brasil Cashback" : `Saldo disponivel: ${formatarDinheiro(availableCents)}`}</Text>
       </View>
 
-      {!paid ? (
-        <View style={styles.walletCard}>
-          <View style={styles.walletIcon}><Ionicons color={colors.primaryDark} name="wallet-outline" size={22} /></View>
-          <View style={styles.walletCopy}>
-            <Text style={styles.walletTitle}>Pagar com carteiras</Text>
-            <Text style={styles.walletText}>Usamos primeiro cashback e depois seus demais saldos disponiveis.</Text>
-          </View>
-        </View>
-      ) : null}
+      <LocalRewardNotice policy={charge.localRewardPolicy} />
 
       {error ? <Text style={styles.errorInline}>{error}</Text> : null}
 
@@ -156,7 +149,14 @@ export function ChargePaymentScreen({ navigation, route }) {
         />
       ) : (
         <>
-          <AppButton disabled={!canPay || isPaying} icon="lock-closed-outline" loading={isPaying} onPress={() => confirmPayment()} title="Confirmar pagamento" />
+          <AppButton
+            disabled={!canPay || isPaying}
+            icon="lock-closed-outline"
+            loading={isPaying}
+            onPress={() => confirmPayment()}
+            style={styles.payButton}
+            title={`Pagar ${formatarDinheiro(charge.amountCents)}`}
+          />
           {!canPay ? <Text style={styles.balanceHint}>Saldo insuficiente. A opcao de complementar por Pix entra quando o gateway for conectado.</Text> : null}
         </>
       )}
@@ -212,10 +212,6 @@ const styles = StyleSheet.create({
   merchantLabel: { color: colors.textMuted, fontFamily: fonts.medium, fontSize: typography.caption },
   merchantMeta: { color: colors.textSecondary, fontFamily: fonts.medium, fontSize: typography.caption },
   merchantName: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.h3, fontWeight: "700" },
+  payButton: { minHeight: 58, width: "100%" },
   title: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.h2, fontWeight: "800" },
-  walletCard: { alignItems: "flex-start", backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.md, padding: spacing.lg },
-  walletCopy: { flex: 1, gap: spacing.xs },
-  walletIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.lg, height: 42, justifyContent: "center", width: 42 },
-  walletText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.small, lineHeight: 19 },
-  walletTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.label, fontWeight: "700" },
 });

@@ -34,6 +34,12 @@ export const uploadStoreProductImage = createUpload({ files: 1 }).single("image"
 
 export const uploadServiceChatImage = createUpload({ files: 1 }).single("image");
 
+export const uploadKycImages = createUpload({ files: 3 }).fields([
+  { maxCount: 1, name: "documentFront" },
+  { maxCount: 1, name: "documentBack" },
+  { maxCount: 1, name: "selfie" },
+]);
+
 export function handleUpload(upload) {
   return (req, _res, next) => {
     upload(req, _res, (error) => {

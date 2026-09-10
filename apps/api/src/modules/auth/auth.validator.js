@@ -73,3 +73,19 @@ export const completeCpfSchema = z.object({
 export const refreshTokenSchema = z.object({
   refreshToken: z.string().min(1, "Refresh token is required"),
 });
+
+const passwordSchema = z
+  .string()
+  .min(8, "A senha deve ter pelo menos 8 caracteres")
+  .max(72, "Senha muito longa")
+  .regex(/[a-z]/i, "A senha deve conter uma letra")
+  .regex(/\d/, "A senha deve conter um numero");
+
+export const passwordResetRequestSchema = z.object({
+  email: z.string().trim().toLowerCase().email("E-mail invalido").max(255),
+});
+
+export const passwordResetConfirmSchema = z.object({
+  password: passwordSchema,
+  token: z.string().trim().min(32, "Link de recuperacao invalido").max(512),
+});

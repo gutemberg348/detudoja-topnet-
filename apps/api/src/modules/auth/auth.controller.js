@@ -4,8 +4,10 @@ import {
   login,
   loginWithSocial,
   logoutSession,
+  requestPasswordReset,
   refreshSession,
   register,
+  resetPassword,
 } from "./auth.service.js";
 
 export async function completeCpfController(req, res, next) {
@@ -79,4 +81,20 @@ export function createRegisterController(audience) {
       next(error);
     }
   };
+}
+
+export async function requestPasswordResetController(req, res, next) {
+  try {
+    res.status(202).json(await requestPasswordReset(req.body));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function resetPasswordController(req, res, next) {
+  try {
+    res.json(await resetPassword(req.body));
+  } catch (error) {
+    next(error);
+  }
 }

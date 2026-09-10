@@ -42,7 +42,7 @@ async function verifyGoogleIdToken(idToken) {
 
     return {
       email: cleanEmail(payload.email),
-      name: cleanName(payload.name, "Usuario DeTudoJa"),
+      name: cleanName(payload.name, "Usuario Brasil Cashback"),
       provider: "GOOGLE",
       providerUserId: payload.sub,
     };
@@ -67,7 +67,7 @@ async function verifyAppleIdToken(idToken) {
 
     return {
       email: cleanEmail(payload.email),
-      name: "Usuario DeTudoJa",
+      name: "Usuario Brasil Cashback",
       provider: "APPLE",
       providerUserId: payload.sub,
     };

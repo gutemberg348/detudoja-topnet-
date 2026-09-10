@@ -5,7 +5,7 @@ import { resolveMediaUrl } from "../utils/media";
 import { formatarDinheiro } from "../utils/money";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
 
-export function MarketplaceProductCard({ item, onPress }) {
+export function MarketplaceProductCard({ item, onPress, style, variant = "list" }) {
   const [imageFailed, setImageFailed] = useState(false);
   const product = item?.product ?? {};
   const store = item?.store ?? {};
@@ -13,6 +13,7 @@ export function MarketplaceProductCard({ item, onPress }) {
   const currentPrice = product.promotionalPriceCents ?? product.priceCents;
   const soldOut = product.stockControlled && Number(product.stockQuantity ?? 0) <= 0;
   const cashbackPercent = Number(store.cashbackPercent ?? 0);
+  const isGrid = variant === "grid";
 
   return (
     <Pressable
@@ -22,11 +23,13 @@ export function MarketplaceProductCard({ item, onPress }) {
       onPress={() => onPress?.(item)}
       style={({ pressed }) => [
         styles.card,
+        isGrid && styles.cardGrid,
+        style,
         soldOut && styles.cardDisabled,
         pressed && styles.pressed,
       ]}
     >
-      <View style={styles.media}>
+      <View style={[styles.media, isGrid && styles.mediaGrid]}>
         {imageUrl && !imageFailed ? (
           <Image
             onError={() => setImageFailed(true)}
@@ -46,14 +49,14 @@ export function MarketplaceProductCard({ item, onPress }) {
         ) : null}
       </View>
 
-      <View style={styles.copy}>
+      <View style={[styles.copy, isGrid && styles.copyGrid]}>
         <Text numberOfLines={1} style={styles.storeName}>{store.name ?? "Loja"}</Text>
-        <Text numberOfLines={1} style={styles.productName}>{product.name ?? "Produto"}</Text>
+        <Text numberOfLines={isGrid ? 2 : 1} style={styles.productName}>{product.name ?? "Produto"}</Text>
         <Text numberOfLines={2} style={styles.description}>
           {product.shortDescription || product.description || "Disponivel para comprar pelo app."}
         </Text>
 
-        <View style={styles.footer}>
+        <View style={[styles.footer, isGrid && styles.footerGrid]}>
           <View style={styles.priceBlock}>
             {product.promotionalPriceCents ? (
               <Text style={styles.oldPrice}>{formatarDinheiro(product.priceCents)}</Text>
@@ -69,7 +72,7 @@ export function MarketplaceProductCard({ item, onPress }) {
         </View>
       </View>
 
-      <View style={styles.arrow}>
+      <View style={[styles.arrow, isGrid && styles.arrowGrid]}>
         <Ionicons color={colors.primaryDark} name="chevron-forward" size={18} />
       </View>
     </Pressable>
@@ -112,8 +115,25 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     ...shadowSoft,
   },
+  cardGrid: {
+    alignItems: "stretch",
+    flexDirection: "column",
+    flexGrow: 1,
+    gap: 0,
+    minHeight: 270,
+    minWidth: 0,
+    overflow: "hidden",
+    padding: 0,
+    position: "relative",
+  },
   cardDisabled: { opacity: 0.55 },
   copy: { flex: 1, gap: 3, minWidth: 0 },
+  copyGrid: {
+    flex: 1,
+    gap: 4,
+    padding: spacing.md,
+    paddingBottom: 14,
+  },
   description: {
     color: colors.textSecondary,
     fontFamily: fonts.regular,
@@ -139,6 +159,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginTop: 4,
   },
+  footerGrid: { paddingRight: 32 },
   image: { height: "100%", width: "100%" },
   imageFallback: {
     alignItems: "center",
@@ -154,6 +175,12 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     position: "relative",
     width: 90,
+  },
+  mediaGrid: {
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    height: 118,
+    width: "100%",
   },
   oldPrice: {
     color: colors.textMuted,
@@ -174,6 +201,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.extraBold,
     fontSize: typography.body,
     fontWeight: "800",
+    lineHeight: 19,
   },
   storeName: {
     color: colors.textSecondary,
@@ -181,5 +209,12 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "600",
     textTransform: "uppercase",
+  },
+  arrowGrid: {
+    bottom: spacing.md,
+    height: 28,
+    position: "absolute",
+    right: spacing.md,
+    width: 28,
   },
 });

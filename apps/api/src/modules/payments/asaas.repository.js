@@ -6,6 +6,8 @@ export function createAsaasRepository(database = prisma) {
     createOrderMessage(args) { return database.pedidoLojaMensagem.create(args); },
     findFirstOrder(args) { return database.pedidoLoja.findFirst(args); },
     findFirstPayment(args) { return database.pagamento.findFirst(args); },
+    findFirstWalletDeposit(args) { return database.depositoCarteira.findFirst(args); },
+    findPayments(args) { return database.pagamento.findMany(args); },
     findPayment(args) { return database.pagamento.findUnique(args); },
     findUniqueOrder(args) { return database.pedidoLoja.findUnique(args); },
     findUser(args) { return database.usuario.findUnique(args); },
@@ -16,6 +18,7 @@ export function createAsaasRepository(database = prisma) {
     updatePayment(args) { return database.pagamento.update(args); },
     updatePayments(args) { return database.pagamento.updateMany(args); },
     updatePaymentCompositions(args) { return database.pagamentoComposicao.updateMany(args); },
+    updateWalletDeposits(args) { return database.depositoCarteira.updateMany(args); },
     updateProposals(args) { return database.propostaPedidoLoja.updateMany(args); },
     updateUser(args) { return database.usuario.update(args); },
   };

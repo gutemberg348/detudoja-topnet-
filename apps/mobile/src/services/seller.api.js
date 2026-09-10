@@ -54,6 +54,18 @@ export function getSellerProfile(accessToken) {
   return apiRequest("/api/app/seller/profile", { token: accessToken });
 }
 
+export function getPayoutAccount(accessToken) {
+  return apiRequest("/api/app/seller/payout-account", { token: accessToken });
+}
+
+export function savePayoutAccount(accessToken, data) {
+  return apiRequest("/api/app/seller/payout-account", {
+    body: data,
+    method: "PUT",
+    token: accessToken,
+  });
+}
+
 export function getGeneratedCharges(accessToken) {
   return apiRequest("/api/app/seller/charges", { token: accessToken });
 }

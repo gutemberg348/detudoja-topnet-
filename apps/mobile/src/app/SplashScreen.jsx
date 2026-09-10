@@ -6,7 +6,7 @@ export function SplashScreen() {
   return (
     <View style={styles.screen}>
       <BrandLogo centered size="large" />
-      <Text style={styles.slogan}>Tudo o que você precisa, em um só lugar.</Text>
+      <Text style={styles.slogan}>Compre, venda e ganhe cashback.</Text>
       <ActivityIndicator color={colors.primary} style={styles.loader} />
     </View>
   );

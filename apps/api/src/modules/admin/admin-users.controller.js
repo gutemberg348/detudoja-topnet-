@@ -1,10 +1,23 @@
 import {
+  adjustAdminUserWallet,
+  addAdminUserService,
   getAdminUser,
   listAdminUsers,
   creditAdminUserWallet,
   updateAdminUser,
+  updateAdminCourierProfile,
+  updateAdminSellerProfile,
+  updateAdminUserService,
   updateAdminUserStatus,
 } from "./admin-users.service.js";
+
+export async function adjustAdminUserWalletController(req, res, next) {
+  try {
+    res.json(await adjustAdminUserWallet(req.auth.user.id, req.params.userId, req.body));
+  } catch (error) {
+    next(error);
+  }
+}
 
 export async function listAdminUsersController(req, res, next) {
   try {
@@ -24,7 +37,7 @@ export async function getAdminUserController(req, res, next) {
 
 export async function updateAdminUserStatusController(req, res, next) {
   try {
-    res.json(await updateAdminUserStatus(req.params.userId, req.body.status));
+    res.json(await updateAdminUserStatus(req.auth.user.id, req.params.userId, req.body.status));
   } catch (error) {
     next(error);
   }
@@ -41,6 +54,38 @@ export async function updateAdminUserController(req, res, next) {
 export async function creditAdminUserWalletController(req, res, next) {
   try {
     res.json(await creditAdminUserWallet(req.auth.user.id, req.params.userId, req.body));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateAdminSellerProfileController(req, res, next) {
+  try {
+    res.json(await updateAdminSellerProfile(req.auth.user.id, req.params.userId, req.body));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateAdminCourierProfileController(req, res, next) {
+  try {
+    res.json(await updateAdminCourierProfile(req.auth.user.id, req.params.userId, req.body));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function addAdminUserServiceController(req, res, next) {
+  try {
+    res.json(await addAdminUserService(req.auth.user.id, req.params.userId, req.body));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateAdminUserServiceController(req, res, next) {
+  try {
+    res.json(await updateAdminUserService(req.auth.user.id, req.params.userId, req.params.sellerServiceId, req.body));
   } catch (error) {
     next(error);
   }

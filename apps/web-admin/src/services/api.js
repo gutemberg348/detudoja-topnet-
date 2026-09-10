@@ -50,3 +50,16 @@ export async function apiRequest(
 export function apiGet(path, token) {
   return apiRequest(path, { token });
 }
+
+export async function apiBlob(path, token) {
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new ApiError(data?.message ?? "Nao foi possivel abrir o arquivo", response.status, data);
+  }
+
+  return response.blob();
+}

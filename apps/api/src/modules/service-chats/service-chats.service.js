@@ -3,6 +3,7 @@ import {
   emitServiceChatCreated,
   emitServiceChatMessageCreated,
   emitServiceChatUpdated,
+  emitWalletUpdated,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
 import { parsePositiveId } from "../../utils/ids.js";
@@ -20,13 +21,100 @@ import {
   getBusyCourierSellerIds,
   isCourierSellerBusy,
 } from "../courier/courier-availability.js";
+import { settlePaidAutonomousChargeEarnings } from "../earnings/order-earnings.service.js";
+import {
+  availableServiceWhere,
+  isServiceAvailable,
+} from "./service-availability.js";
 import {
   createServiceChatsRepository,
   serviceChatsRepository,
 } from "./service-chats.repository.js";
 
-const publicSellerStatuses = ["ATIVO", "PENDENTE"];
+const publicSellerStatuses = ["ATIVO"];
 const legacyServiceTypeSlugs = ["entregador"];
+const serviceFamilies = [
+  {
+    key: "limpeza-externa",
+    pattern: /\b(capin\w*|roca\w*|mato|terreno|lote|quintal|grama|jardin\w*)\b/,
+  },
+  {
+    key: "eletrica",
+    pattern: /\b(eletric\w*|tomada|fiacao|fiao|disjuntor|luminaria)\b/,
+  },
+  {
+    key: "encanamento",
+    pattern: /\b(encan\w*|hidraulic\w*|vazamento|torneira|cano)\b/,
+  },
+  {
+    key: "beleza",
+    pattern: /\b(cabelo|escova|barbeir\w*|manicure|unha|maquiagem)\b/,
+  },
+];
+
+function normalizeServiceText(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function serviceFamily(value) {
+  const normalized = normalizeServiceText(value);
+  return serviceFamilies.find((family) => family.pattern.test(normalized))?.key ?? null;
+}
+
+function serviceWords(value) {
+  return new Set(
+    normalizeServiceText(value)
+      .split(" ")
+      .filter((word) => word.length >= 3 && !["com", "para", "servico", "servicos"].includes(word)),
+  );
+}
+
+function findEquivalentServiceType(types, serviceName) {
+  const normalizedName = normalizeServiceText(serviceName);
+  const requestedFamily = serviceFamily(serviceName);
+  const requestedWords = serviceWords(serviceName);
+
+  for (const type of types) {
+    if (normalizeServiceText(type.nome) === normalizedName) {
+      return { reason: "exact", type };
+    }
+  }
+
+  if (requestedFamily) {
+    const sameFamily = types.find((type) => serviceFamily(type.nome) === requestedFamily);
+    if (sameFamily) return { reason: "family", type: sameFamily };
+  }
+
+  for (const type of types) {
+    const candidateWords = serviceWords(type.nome);
+    const sharedWords = [...requestedWords].filter((word) => candidateWords.has(word)).length;
+    const smallestSet = Math.min(requestedWords.size, candidateWords.size);
+    if (sharedWords >= 2 && smallestSet > 0 && sharedWords / smallestSet >= 0.65) {
+      return { reason: "keywords", type };
+    }
+  }
+
+  return null;
+}
+
+function serviceSlug(name, sellerId) {
+  const base = normalizeServiceText(name).replace(/\s+/g, "-").slice(0, 120) || "servico";
+  return `${base}-${sellerId}`.slice(0, 140);
+}
+
+function inferServiceIcon(name) {
+  const family = serviceFamily(name);
+  if (family === "limpeza-externa") return "leaf";
+  if (family === "eletrica") return "flash";
+  if (family === "encanamento") return "water";
+  if (family === "beleza") return "cut";
+  return "briefcase";
+}
 
 function matchesStoreCity(courier, address) {
   return sameCity(
@@ -61,6 +149,7 @@ async function findStoreForCourierRequest(userId, storeId) {
 }
 
 const conversationInclude = {
+  avaliacao: true,
   cliente: { select: { foto_url: true, id: true, nome: true } },
   loja_solicitante: { select: { id: true, logo_url: true, nome: true } },
   pedido_loja: { select: { codigo: true, id: true } },
@@ -124,15 +213,29 @@ function serializeSeller(seller, { isOnline = false } = {}) {
   };
 }
 
+const sharedLocationPrefix = "__DTJ_SHARED_LOCATION__";
+
+function parseSharedLocation(text) {
+  if (!text?.startsWith(sharedLocationPrefix)) return null;
+
+  try {
+    return JSON.parse(text.slice(sharedLocationPrefix.length));
+  } catch {
+    return null;
+  }
+}
+
 function serializeMessage(message, viewerId) {
   const kind = message.origem === "CLIENTE" ? "customer" : message.origem === "VENDEDOR" ? "seller" : "system";
+  const location = parseSharedLocation(message.mensagem);
   return {
     author: kind,
     createdAt: message.criado_em.toISOString(),
     id: message.id,
     imageUrl: message.imagem_url,
     isMine: message.autor_usuario_id === viewerId,
-    text: message.mensagem,
+    location,
+    text: location ? null : message.mensagem,
   };
 }
 
@@ -171,8 +274,22 @@ function serializeProposal(proposal) {
   };
 }
 
+function serializeReview(review) {
+  if (!review) return null;
+
+  return {
+    comment: review.comentario,
+    createdAt: review.criado_em.toISOString(),
+    rating: review.nota,
+  };
+}
+
 function serializeConversation(conversation, viewerId, { includeMessages = false } = {}) {
   const isSeller = conversation.vendedor.usuario_id === viewerId;
+  const routeIsSharedInChat = Boolean(
+    conversation.servico_vendedor?.tipo_servico?.tipo_operacao === "ENTREGA_LOCAL"
+    && !conversation.loja_solicitante_id,
+  );
   const unreadCount = (conversation.mensagens ?? []).filter((message) => (
     isSeller
       ? ["CLIENTE", "SISTEMA"].includes(message.origem) && !message.lido_vendedor_em
@@ -197,16 +314,16 @@ function serializeConversation(conversation, viewerId, { includeMessages = false
       slug: conversation.segmento_venda.slug,
     },
     seller: serializeSeller(conversation.vendedor, {
-      isOnline: conversation.servico_vendedor?.disponivel_agora ?? false,
+      isOnline: isServiceAvailable(conversation.servico_vendedor),
     }),
     proposals: (conversation.propostas ?? []).map(serializeProposal),
     request: {
       description: conversation.descricao_inicial,
-      destination: conversation.destino,
+      destination: routeIsSharedInChat ? "A combinar no chat" : conversation.destino,
       order: conversation.pedido_loja
         ? { code: conversation.pedido_loja.codigo, id: conversation.pedido_loja.id }
         : null,
-      origin: conversation.origem,
+      origin: routeIsSharedInChat ? "A combinar no chat" : conversation.origem,
       store: conversation.loja_solicitante
         ? {
             id: conversation.loja_solicitante.id,
@@ -226,6 +343,9 @@ function serializeConversation(conversation, viewerId, { includeMessages = false
         }
       : null,
     status: conversation.status,
+    canDispute: !isSeller && conversation.status === "AGUARDANDO_CONFIRMACAO",
+    canReview: !isSeller && conversation.status === "ENCERRADA" && !conversation.avaliacao,
+    review: serializeReview(conversation.avaliacao),
     unreadCount,
     updatedAt: conversation.atualizado_em.toISOString(),
     ...(includeMessages ? { messages: conversation.mensagens.map((item) => serializeMessage(item, viewerId)) } : {}),
@@ -244,6 +364,26 @@ async function findAccessibleConversation(userId, conversationId) {
 
   if (!conversation) throw new AppError("Conversa nao encontrada", 404);
   return conversation;
+}
+
+async function assertSellerCanOperateConversation(repository, conversation, userId) {
+  const seller = await repository.findSeller({
+    select: { id: true },
+    where: {
+      excluido_em: null,
+      id: conversation.vendedor_id,
+      status: "ATIVO",
+      status_kyc: "APROVADO",
+      usuario_id: userId,
+    },
+  });
+
+  if (!seller) {
+    throw new AppError(
+      "Seu perfil de prestador esta inativo ou sem KYC aprovado. Regularize a conta para continuar atendendo.",
+      403,
+    );
+  }
 }
 
 function notifyConversation(conversation, reason) {
@@ -294,6 +434,7 @@ export async function listServiceTypes(userId, query = {}) {
   const availableSellerWhere = {
     excluido_em: null,
     status: { in: publicSellerStatuses },
+    status_kyc: "APROVADO",
     usuario: {
       enderecos: {
         some: cityAddressWhere(requesterAddress, { userAddress: true }),
@@ -318,7 +459,7 @@ export async function listServiceTypes(userId, query = {}) {
           },
         },
         where: {
-          disponivel_agora: true,
+          ...availableServiceWhere(),
           excluido_em: null,
           status: "ATIVO",
           vendedor: availableSellerWhere,
@@ -373,7 +514,7 @@ export async function listSellerServices(userId) {
     hasSellerProfile: Boolean(seller),
     services: types.map((type) => ({
       ...serializeServiceType(type),
-      available: Boolean(byType.get(type.id)?.disponivel_agora),
+      available: isServiceAvailable(byType.get(type.id)),
       enabled: Boolean(byType.get(type.id)),
       sellerServiceId: byType.get(type.id)?.id ?? null,
     })),
@@ -412,7 +553,7 @@ export async function listOnlineServiceProviders(userId, serviceTypeId, { storeI
     },
     orderBy: { atualizado_em: "desc" },
     where: {
-      disponivel_agora: true,
+      ...availableServiceWhere(),
       excluido_em: null,
       status: "ATIVO",
       tipo_servico_id: typeId,
@@ -420,6 +561,7 @@ export async function listOnlineServiceProviders(userId, serviceTypeId, { storeI
         excluido_em: null,
         ...(type.tipo_operacao === "ENTREGA_LOCAL" ? { motoboy: { is: { status: "ATIVO" } } } : {}),
         status: { in: publicSellerStatuses },
+        status_kyc: "APROVADO",
         usuario_id: { not: userId },
         usuario: {
           enderecos: {
@@ -447,7 +589,7 @@ export async function listOnlineServiceProviders(userId, serviceTypeId, { storeI
     },
     sellers: type.tipo_operacao === "ENTREGA_LOCAL" ? [] : availableServices
       .map((service) => ({
-      ...serializeSeller(service.vendedor, { isOnline: service.disponivel_agora }),
+      ...serializeSeller(service.vendedor, { isOnline: isServiceAvailable(service) }),
       sellerServiceId: service.id,
       })),
   };
@@ -456,8 +598,8 @@ export async function listOnlineServiceProviders(userId, serviceTypeId, { storeI
 export async function updateSellerService(userId, data) {
   const seller = await serviceChatsRepository.findSeller({ include: { motoboy: true }, where: { excluido_em: null, usuario_id: userId } });
   if (!seller) throw new AppError("Crie seu perfil de vendedor antes de ativar servicos", 428);
-  if (["BLOQUEADO", "REPROVADO"].includes(seller.status)) {
-    throw new AppError("Seu cadastro comercial nao pode atender servicos", 403);
+  if (seller.status !== "ATIVO" || seller.status_kyc !== "APROVADO") {
+    throw new AppError("Conclua a verificacao comercial antes de atender servicos", 428);
   }
   const type = await serviceChatsRepository.findServiceType({
     where: {
@@ -472,16 +614,10 @@ export async function updateSellerService(userId, data) {
     throw new AppError("Conclua seu cadastro de motoboy antes de ficar online", 428);
   }
 
-  if (seller.status === "PENDENTE") {
-    await serviceChatsRepository.updateSeller({
-      data: { status: "ATIVO" },
-      where: { id: seller.id },
-    });
-  }
-
+  const availabilityUpdatedAt = data.available ? new Date() : null;
   const service = await serviceChatsRepository.upsertSellerService({
-    create: { categoria: type.nome, descricao: type.descricao, disponivel_agora: data.available, nome: type.nome, preco_centavos: null, status: "ATIVO", tipo_servico_id: type.id, vendedor_id: seller.id },
-    update: { disponivel_agora: data.available, status: "ATIVO" },
+    create: { categoria: type.nome, descricao: type.descricao, disponibilidade_atualizada_em: availabilityUpdatedAt, disponivel_agora: data.available, nome: type.nome, preco_centavos: null, status: "ATIVO", tipo_servico_id: type.id, vendedor_id: seller.id },
+    update: { disponibilidade_atualizada_em: availabilityUpdatedAt, disponivel_agora: data.available, status: "ATIVO" },
     where: { vendedor_id_tipo_servico_id: { tipo_servico_id: type.id, vendedor_id: seller.id } },
   });
 
@@ -495,6 +631,134 @@ export async function updateSellerService(userId, data) {
   return { service: { available: service.disponivel_agora, id: service.id, serviceTypeId: type.id } };
 }
 
+export async function heartbeatSellerServices(userId) {
+  const seller = await serviceChatsRepository.findSeller({
+    select: { id: true },
+    where: { excluido_em: null, status: "ATIVO", status_kyc: "APROVADO", usuario_id: userId },
+  });
+  if (!seller) return { activeServices: 0 };
+
+  const updated = await serviceChatsRepository.updateSellerServices({
+    data: { disponibilidade_atualizada_em: new Date() },
+    where: {
+      disponivel_agora: true,
+      excluido_em: null,
+      status: "ATIVO",
+      vendedor_id: seller.id,
+    },
+  });
+  return { activeServices: updated.count };
+}
+
+export async function registerSellerService(userId, data) {
+  const seller = await serviceChatsRepository.findSeller({
+    include: { segmento_venda: true },
+    where: { excluido_em: null, usuario_id: userId },
+  });
+  if (!seller) throw new AppError("Crie seu perfil de vendedor antes de cadastrar servicos", 428);
+  if (seller.status !== "ATIVO" || seller.status_kyc !== "APROVADO") {
+    throw new AppError("Conclua a verificacao comercial antes de cadastrar servicos", 428);
+  }
+  if (!seller.segmento_venda || seller.segmento_venda.excluido_em || seller.segmento_venda.status !== "ATIVO") {
+    throw new AppError("Defina um segmento comercial ativo antes de cadastrar servicos", 409);
+  }
+
+  const serviceName = String(data.name).trim();
+  const availabilityUpdatedAt = data.available ? new Date() : null;
+  const result = await serviceChatsRepository.transaction(async (database) => {
+    const repository = createServiceChatsRepository(database);
+    const types = await repository.findServiceTypes({
+      orderBy: [{ ordem: "asc" }, { nome: "asc" }],
+      where: {
+        excluido_em: null,
+        modo_atendimento: "NEGOCIACAO_CHAT",
+        slug: { notIn: legacyServiceTypeSlugs },
+        status: "ATIVO",
+        tipo_operacao: "GERAL",
+        OR: [
+          { segmento_venda_id: seller.segmento_venda_id },
+          { segmento_venda_id: null },
+        ],
+      },
+    });
+    let match = findEquivalentServiceType(types, serviceName);
+    let type = match?.type ?? null;
+
+    if (!type) {
+      try {
+        type = await repository.createServiceType({
+          data: {
+            descricao: data.description || null,
+            icone: inferServiceIcon(serviceName),
+            modo_atendimento: "NEGOCIACAO_CHAT",
+            nome: serviceName,
+            ordem: 9999,
+            segmento_venda_id: seller.segmento_venda_id,
+            slug: serviceSlug(serviceName, seller.id),
+            status: "ATIVO",
+            tipo_operacao: "GERAL",
+          },
+        });
+        match = { reason: "created", type };
+      } catch (error) {
+        if (error?.code !== "P2002") throw error;
+        type = await repository.findServiceType({
+          where: {
+            excluido_em: null,
+            modo_atendimento: "NEGOCIACAO_CHAT",
+            nome: serviceName,
+            status: "ATIVO",
+            tipo_operacao: "GERAL",
+          },
+        });
+        if (!type) throw new AppError("Nao foi possivel cadastrar este servico agora", 409);
+        match = { reason: "exact", type };
+      }
+    }
+
+    const service = await repository.upsertSellerService({
+      create: {
+        categoria: seller.segmento_venda.nome,
+        descricao: data.description || type.descricao || null,
+        disponibilidade_atualizada_em: availabilityUpdatedAt,
+        disponivel_agora: data.available,
+        nome: type.nome,
+        preco_centavos: null,
+        status: "ATIVO",
+        tipo_servico_id: type.id,
+        vendedor_id: seller.id,
+      },
+      update: {
+        ...(data.description ? { descricao: data.description } : {}),
+        disponibilidade_atualizada_em: availabilityUpdatedAt,
+        disponivel_agora: data.available,
+        status: "ATIVO",
+      },
+      where: { vendedor_id_tipo_servico_id: { tipo_servico_id: type.id, vendedor_id: seller.id } },
+    });
+
+    return { match, service, type };
+  });
+
+  emitServiceAvailabilityUpdated({
+    available: result.service.disponivel_agora,
+    sellerId: seller.id,
+    sellerUserId: seller.usuario_id,
+    serviceTypeId: result.type.id,
+  });
+
+  return {
+    createdType: result.match.reason === "created",
+    matchedBy: result.match.reason,
+    service: {
+      available: result.service.disponivel_agora,
+      id: result.service.id,
+      name: result.type.nome,
+      serviceTypeId: result.type.id,
+    },
+  };
+}
+
 export async function createServiceConversation(userId, data) {
   const requesterAddress = await serviceChatsRepository.getUserBaseAddress(userId);
   const sellerServiceId = parsePositiveId(data.sellerServiceId, "Servico do prestador invalido");
@@ -504,12 +768,12 @@ export async function createServiceConversation(userId, data) {
       vendedor: { include: { motoboy: true, segmento_venda: true, usuario: { include: { enderecos: { where: { excluido_em: null }, orderBy: [{ principal: "desc" }, { criado_em: "asc" }], take: 1 } } } } },
     },
     where: {
-      disponivel_agora: true,
+      ...availableServiceWhere(),
       excluido_em: null,
       id: sellerServiceId,
       status: "ATIVO",
       tipo_servico: { excluido_em: null, modo_atendimento: "NEGOCIACAO_CHAT", status: "ATIVO" },
-      vendedor: { excluido_em: null, status: { in: publicSellerStatuses } },
+      vendedor: { excluido_em: null, status: { in: publicSellerStatuses }, status_kyc: "APROVADO" },
     },
   });
 
@@ -537,37 +801,106 @@ export async function createServiceConversation(userId, data) {
   const destination = String(data.destination ?? "").trim() || null;
   const initialDescription = String(data.description ?? "").trim() || null;
 
-  const existing = await serviceChatsRepository.findConversation({
-    include: conversationInclude,
-    orderBy: { atualizado_em: "desc" },
-    where: {
-      cliente_usuario_id: userId,
-      loja_solicitante_id: null,
-      pedido_loja_id: null,
-      servico_vendedor_id: sellerService.id,
-      status: { in: ["ABERTA", "ACORDADA", "AGUARDANDO_CONFIRMACAO"] },
-    },
-  });
-  if (existing) return { conversation: serializeConversation(existing, userId, { includeMessages: true }) };
-  const createConversation = (repository) => repository.createConversation({
-    include: conversationInclude,
-    data: {
-      cliente_usuario_id: userId,
-      descricao_inicial: initialDescription,
-      destino: destination,
-      loja_solicitante_id: null,
-      pedido_loja_id: null,
-      origem: origin,
-      segmento_venda_id: segment.id,
-      servico_vendedor_id: sellerService.id,
-      vendedor_id: sellerService.vendedor_id,
-    },
-  });
-  const conversation = await createConversation(serviceChatsRepository);
-  const serialized = serializeConversation(conversation, userId, { includeMessages: true });
-  emitServiceChatCreated(serialized);
-  notifyCourierAvailability(conversation, false);
-  return { conversation: serialized };
+  const activeConversationWhere = {
+    cliente_usuario_id: userId,
+    loja_solicitante_id: null,
+    pedido_loja_id: null,
+    servico_vendedor_id: sellerService.id,
+    status: { in: ["ABERTA", "ACORDADA", "AGUARDANDO_CONFIRMACAO"] },
+  };
+  let result;
+  try {
+    result = await serviceChatsRepository.transaction(async (database) => {
+      const repository = createServiceChatsRepository(database);
+      await repository.lockServiceConversation(userId, sellerService.id);
+      const existing = await repository.findConversation({
+        include: conversationInclude,
+        orderBy: { atualizado_em: "desc" },
+        where: activeConversationWhere,
+      });
+      if (existing) return { created: false, conversation: existing };
+
+      const conversation = await repository.createConversation({
+        include: conversationInclude,
+        data: {
+          cliente_usuario_id: userId,
+          descricao_inicial: initialDescription,
+          destino: destination,
+          loja_solicitante_id: null,
+          pedido_loja_id: null,
+          origem: origin,
+          segmento_venda_id: segment.id,
+          servico_vendedor_id: sellerService.id,
+          vendedor_id: sellerService.vendedor_id,
+        },
+      });
+      return { created: true, conversation };
+    });
+  } catch (error) {
+    if (error?.code !== "P2002") throw error;
+    const existing = await serviceChatsRepository.findConversation({
+      include: conversationInclude,
+      orderBy: { atualizado_em: "desc" },
+      where: activeConversationWhere,
+    });
+    if (!existing) throw error;
+    result = { created: false, conversation: existing };
+  }
+  const serialized = serializeConversation(result.conversation, userId, { includeMessages: true });
+  if (result.created) {
+    emitServiceChatCreated(serialized);
+    notifyCourierAvailability(result.conversation, false);
+  }
+  return { conversation: serialized, reused: !result.created };
+}
+
+export async function createServiceReview(userId, conversationId, data) {
+  const conversation = await findAccessibleConversation(userId, conversationId);
+  if (conversation.vendedor.usuario_id === userId) {
+    throw new AppError("Somente o cliente pode avaliar este atendimento", 403);
+  }
+  if (conversation.status !== "ENCERRADA") {
+    throw new AppError("A avaliacao fica disponivel apos a conclusao confirmada", 409);
+  }
+
+  try {
+    await serviceChatsRepository.transaction(async (database) => {
+      const repository = createServiceChatsRepository(database);
+      await repository.createReview({
+        data: {
+          avaliador_usuario_id: userId,
+          comentario: data.comment || null,
+          conversa_servico_id: conversation.id,
+          nota: data.rating,
+          vendedor_id: conversation.vendedor_id,
+        },
+      });
+      const summary = await repository.aggregateReviews({
+        _avg: { nota: true },
+        where: { vendedor_id: conversation.vendedor_id },
+      });
+      const average = summary._avg.nota ?? 0;
+      await Promise.all([
+        repository.updateSeller({
+          data: { avaliacao_media: average },
+          where: { id: conversation.vendedor_id },
+        }),
+        repository.updateMotoboys({
+          data: { avaliacao_media: average },
+          where: { vendedor_id: conversation.vendedor_id },
+        }),
+      ]);
+    });
+  } catch (error) {
+    if (error?.code === "P2002") {
+      throw new AppError("Este atendimento ja foi avaliado", 409);
+    }
+    throw error;
+  }
+
+  const updatedConversation = await findAccessibleConversation(userId, conversation.id);
+  notifyConversation(updatedConversation, "service-reviewed");
+  return { conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
 }
 
 export async function listServiceConversations(userId) {
@@ -579,6 +912,12 @@ export async function getServiceConversation(userId, conversationId) {
   const conversation = await findAccessibleConversation(userId, conversationId);
   const isSeller = conversation.vendedor.usuario_id === userId;
   const now = new Date();
+  const hasUnreadMessages = (conversation.mensagens ?? []).some((message) => (
+    isSeller
+      ? ["CLIENTE", "SISTEMA"].includes(message.origem) && !message.lido_vendedor_em
+      : ["VENDEDOR", "SISTEMA"].includes(message.origem) && !message.lido_cliente_em
+  ));
+  const needsSellerView = isSeller && !conversation.visualizado_vendedor_em;
 
   await serviceChatsRepository.updateCharges({
     data: { expira_em: null, status: "ATIVA" },
@@ -589,28 +928,67 @@ export async function getServiceConversation(userId, conversationId) {
     },
   });
 
-  await serviceChatsRepository.transaction([
-    serviceChatsRepository.updateMessages({
-      data: isSeller ? { lido_vendedor_em: now } : { lido_cliente_em: now },
-      where: {
-        conversa_servico_id: conversation.id,
-        ...(isSeller
-          ? { origem: { in: ["CLIENTE", "SISTEMA"] }, lido_vendedor_em: null }
-          : { origem: { in: ["VENDEDOR", "SISTEMA"] }, lido_cliente_em: null }),
-      },
-    }),
-    ...(isSeller
-      ? [
-          serviceChatsRepository.updateConversation({
+  if (hasUnreadMessages || needsSellerView) {
+    await serviceChatsRepository.transaction([
+      ...(hasUnreadMessages
+        ? [serviceChatsRepository.updateMessages({
+            data: isSeller ? { lido_vendedor_em: now } : { lido_cliente_em: now },
+            where: {
+              conversa_servico_id: conversation.id,
+              ...(isSeller
+                ? { origem: { in: ["CLIENTE", "SISTEMA"] }, lido_vendedor_em: null }
+                : { origem: { in: ["VENDEDOR", "SISTEMA"] }, lido_cliente_em: null }),
+            },
+          })]
+        : []),
+      ...(needsSellerView
+        ? [serviceChatsRepository.updateConversation({
             data: { visualizado_vendedor_em: now },
             where: { id: conversation.id },
-          }),
-        ]
-      : []),
-  ]);
+          })]
+        : []),
+    ]);
+  }
 
   const updatedConversation = await findAccessibleConversation(userId, conversation.id);
-  notifyConversation(updatedConversation, "read");
+  if (hasUnreadMessages || needsSellerView) {
+    notifyConversation(updatedConversation, "read");
+  }
+  return { conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
+}
+
+export async function acceptServiceConversation(userId, conversationId) {
+  const conversation = await findAccessibleConversation(userId, conversationId);
+  const isSeller = conversation.vendedor.usuario_id === userId;
+  const isCourierRide = conversation.servico_vendedor?.tipo_servico?.tipo_operacao === "ENTREGA_LOCAL";
+
+  if (!isSeller) throw new AppError("Somente o prestador pode aceitar este chamado", 403);
+  if (isCourierRide) throw new AppError("A corrida ja e aceita pela central de entregas", 409);
+
+  const now = new Date();
+  await serviceChatsRepository.transaction(async (database) => {
+    const repository = createServiceChatsRepository(database);
+    await assertSellerCanOperateConversation(repository, conversation, userId);
+    const claimed = await repository.updateConversations({
+      data: { status: "ACORDADA", visualizado_vendedor_em: now },
+      where: { id: conversation.id, status: "ABERTA" },
+    });
+    if (claimed.count !== 1) {
+      throw new AppError("Este chamado nao esta mais aguardando aceite", 409);
+    }
+    await repository.createMessage({
+      data: {
+        autor_usuario_id: userId,
+        conversa_servico_id: conversation.id,
+        lido_vendedor_em: now,
+        mensagem: "Chamado aceito. O chat foi liberado para a negociacao.",
+        origem: "SISTEMA",
+      },
+    });
+  });
+
+  const updatedConversation = await findAccessibleConversation(userId, conversation.id);
+  notifyConversation(updatedConversation, "service-request-accepted");
   return { conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
 }
 
@@ -620,7 +998,7 @@ export async function createServiceProposal(userId, conversationId, data) {
   const latestProposal = conversation.propostas?.at(-1) ?? null;
 
   if (!isSeller) throw new AppError("Somente o prestador pode enviar uma proposta", 403);
-  if (!["ABERTA", "ACORDADA"].includes(conversation.status)) {
+  if (conversation.status !== "ACORDADA") {
     throw new AppError("Esta conversa nao aceita novas propostas", 409);
   }
   if (
@@ -639,6 +1017,7 @@ export async function createServiceProposal(userId, conversationId, data) {
 
   const result = await serviceChatsRepository.transaction(async (database) => {
     const repository = createServiceChatsRepository(database);
+    await assertSellerCanOperateConversation(repository, conversation, userId);
     await repository.updateProposals({
       data: { status: "CANCELADA" },
       where: {
@@ -675,7 +1054,7 @@ export async function createServiceProposal(userId, conversationId, data) {
   };
 }
 
-export async function acceptServiceProposal(userId, conversationId, proposalId) {
+export async function acceptServiceProposal(userId, conversationId, proposalId, data = {}) {
   const conversation = await findAccessibleConversation(userId, conversationId);
   const parsedProposalId = parsePositiveId(proposalId, "Proposta invalida");
   const isSeller = conversation.vendedor.usuario_id === userId;
@@ -685,7 +1064,11 @@ export async function acceptServiceProposal(userId, conversationId, proposalId) 
   const result = await serviceChatsRepository.transaction(async (database) => {
     const repository = createServiceChatsRepository(database);
     const claim = await repository.updateProposals({
-      data: { respondido_em: new Date(), status: "ACEITA" },
+      data: {
+        ...(data.paymentMode ? { forma_pagamento: data.paymentMode } : {}),
+        respondido_em: new Date(),
+        status: "ACEITA",
+      },
       where: {
         conversa_servico_id: conversation.id,
         id: parsedProposalId,
@@ -771,11 +1154,8 @@ export async function cancelServiceConversation(userId, conversationId) {
     conversation.loja_solicitante_id
     || conversation.servico_vendedor?.tipo_servico?.tipo_operacao === "ENTREGA_LOCAL",
   );
-  if (!isCourierRide) {
-    throw new AppError("Este atendimento nao e uma corrida de loja", 409);
-  }
   if (!["ABERTA", "ACORDADA"].includes(conversation.status)) {
-    throw new AppError("Esta corrida nao pode mais ser cancelada", 409);
+    throw new AppError("Este atendimento nao pode mais ser cancelado", 409);
   }
 
   const paymentLocked = (conversation.propostas ?? []).some((proposal) => (
@@ -817,7 +1197,9 @@ export async function cancelServiceConversation(userId, conversationId) {
         autor_usuario_id: userId,
         conversa_servico_id: conversation.id,
         ...(isSeller ? { lido_vendedor_em: now } : { lido_cliente_em: now }),
-        mensagem: `Corrida cancelada ${isSeller ? "pelo motoboy" : "pela loja"}.`,
+        mensagem: isCourierRide
+          ? `Corrida cancelada ${isSeller ? "pelo motoboy" : "pelo solicitante"}.`
+          : `Chamado cancelado ${isSeller ? "pelo prestador" : "pelo cliente"}.`,
         origem: "SISTEMA",
       },
     }),
@@ -827,7 +1209,7 @@ export async function cancelServiceConversation(userId, conversationId) {
   notifyConversation(updatedConversation, "service-cancelled");
   notifyCourierAvailability(
     updatedConversation,
-    Boolean(updatedConversation.servico_vendedor?.disponivel_agora)
+    isServiceAvailable(updatedConversation.servico_vendedor)
       && !(await isCourierSellerBusy(serviceChatsRepository, updatedConversation.vendedor_id)),
   );
   return { conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
@@ -848,12 +1230,17 @@ export async function markServiceDelivered(userId, conversationId) {
     .find((proposal) => proposal.status === "PAGA");
   if (!paidProposal) throw new AppError("O pagamento precisa estar confirmado primeiro", 409);
 
-  await serviceChatsRepository.transaction([
-    serviceChatsRepository.updateConversation({
+  await serviceChatsRepository.transaction(async (database) => {
+    const repository = createServiceChatsRepository(database);
+    await assertSellerCanOperateConversation(repository, conversation, userId);
+    const marked = await repository.updateConversations({
       data: { status: "AGUARDANDO_CONFIRMACAO" },
-      where: { id: conversation.id },
-    }),
-    serviceChatsRepository.createMessage({
+      where: { id: conversation.id, status: "ACORDADA" },
+    });
+    if (marked.count !== 1) {
+      throw new AppError("O atendimento mudou antes da confirmacao de execucao", 409);
+    }
+    await repository.createMessage({
       data: {
         autor_usuario_id: userId,
         conversa_servico_id: conversation.id,
@@ -861,8 +1248,8 @@ export async function markServiceDelivered(userId, conversationId) {
         mensagem: "O prestador marcou o servico como realizado. Confirme o recebimento para concluir.",
         origem: "SISTEMA",
       },
-    }),
-  ]);
+    });
+  });
   const updatedConversation = await findAccessibleConversation(userId, conversation.id);
   notifyConversation(updatedConversation, "service-delivered");
   return { conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
@@ -878,37 +1265,106 @@ export async function confirmServiceCompletion(userId, conversationId) {
     throw new AppError("O servico ainda nao aguarda confirmacao", 409);
   }
 
+  const paidProposal = [...(conversation.propostas ?? [])]
+    .reverse()
+    .find((proposal) => proposal.status === "PAGA" && proposal.cobranca?.id);
+  if (!paidProposal?.cobranca?.id) {
+    throw new AppError("Nenhum pagamento confirmado foi encontrado para este servico", 409);
+  }
+
   const now = new Date();
-  await serviceChatsRepository.transaction([
-    serviceChatsRepository.updateConversation({
+  const result = await serviceChatsRepository.transaction(async (database) => {
+    const repository = createServiceChatsRepository(database);
+    const closed = await repository.updateConversations({
       data: { encerrado_em: now, status: "ENCERRADA" },
-      where: { id: conversation.id },
-    }),
-    serviceChatsRepository.updateProposals({
+      where: { id: conversation.id, status: "AGUARDANDO_CONFIRMACAO" },
+    });
+    if (closed.count !== 1) {
+      throw new AppError("O servico mudou antes da confirmacao", 409);
+    }
+
+    const completed = await repository.updateProposals({
       data: { concluido_em: now, status: "CONCLUIDA" },
-      where: { conversa_servico_id: conversation.id, status: "PAGA" },
-    }),
-    serviceChatsRepository.updateCourierRequests({
-      data: { status: "CONCLUIDA" },
-      where: { conversa_servico_id: conversation.id, status: "ACEITA" },
-    }),
-    serviceChatsRepository.createMessage({
+      where: { conversa_servico_id: conversation.id, id: paidProposal.id, status: "PAGA" },
+    });
+    if (completed.count !== 1) {
+      throw new AppError("A proposta mudou antes da confirmacao", 409);
+    }
+
+    await Promise.all([
+      repository.updateCourierRequests({
+        data: { status: "CONCLUIDA" },
+        where: { conversa_servico_id: conversation.id, status: "ACEITA" },
+      }),
+      // Cobre pagamentos iniciados antes desta regra: a janela de seguranca
+      // sempre passa a contar da confirmacao do cliente.
+      repository.updateCommercialTransactions({
+        data: { validada_em: now },
+        where: {
+          status: "VALIDADA",
+          pagamento: { cobranca: { proposta_servico_id: paidProposal.id } },
+        },
+      }),
+      repository.createMessage({
+        data: {
+          autor_usuario_id: userId,
+          conversa_servico_id: conversation.id,
+          lido_cliente_em: now,
+          mensagem: "Servico confirmado pelo cliente e atendimento concluido. Os valores entram em retencao de seguranca por 24 horas.",
+          origem: "SISTEMA",
+        },
+      }),
+    ]);
+
+    const earnings = await settlePaidAutonomousChargeEarnings(database, paidProposal.cobranca.id);
+    return { earnings };
+  });
+  const updatedConversation = await findAccessibleConversation(userId, conversation.id);
+  emitWalletUpdated({
+    transactionId: result.earnings.transactionId,
+    userIds: result.earnings.walletUserIds,
+  });
+  notifyConversation(updatedConversation, "service-completed");
+  notifyCourierAvailability(
+    updatedConversation,
+    isServiceAvailable(updatedConversation.servico_vendedor)
+      && !(await isCourierSellerBusy(serviceChatsRepository, updatedConversation.vendedor_id)),
+  );
+  return { conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
+}
+
+export async function disputeServiceCompletion(userId, conversationId) {
+  const conversation = await findAccessibleConversation(userId, conversationId);
+  if (conversation.vendedor.usuario_id === userId) {
+    throw new AppError("Somente o cliente pode contestar a conclusao do servico", 403);
+  }
+  if (conversation.status !== "AGUARDANDO_CONFIRMACAO") {
+    throw new AppError("Este atendimento nao esta aguardando confirmacao do cliente", 409);
+  }
+
+  const now = new Date();
+  const result = await serviceChatsRepository.transaction(async (database) => {
+    const repository = createServiceChatsRepository(database);
+    const disputed = await repository.updateConversations({
+      data: { status: "EM_DISPUTA" },
+      where: { id: conversation.id, status: "AGUARDANDO_CONFIRMACAO" },
+    });
+    if (disputed.count !== 1) {
+      throw new AppError("O atendimento mudou antes da contestacao", 409);
+    }
+    await repository.createMessage({
       data: {
         autor_usuario_id: userId,
         conversa_servico_id: conversation.id,
         lido_cliente_em: now,
-        mensagem: "Servico confirmado pelo cliente e atendimento concluido.",
+        mensagem: "Cliente contestou a conclusao. O valor continua sob custodia enquanto o suporte analisa o caso.",
         origem: "SISTEMA",
       },
-    }),
-  ]);
+    });
+  });
+
   const updatedConversation = await findAccessibleConversation(userId, conversation.id);
-  notifyConversation(updatedConversation, "service-completed");
-  notifyCourierAvailability(
-    updatedConversation,
-    Boolean(updatedConversation.servico_vendedor?.disponivel_agora)
-      && !(await isCourierSellerBusy(serviceChatsRepository, updatedConversation.vendedor_id)),
-  );
+  notifyConversation(updatedConversation, "service-disputed");
   return { conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
 }
 
@@ -916,8 +1372,12 @@ export async function createServiceConversationMessage(userId, conversationId, d
   const conversation = await findAccessibleConversation(userId, conversationId);
   const text = String(data.message ?? "").trim();
   if (!text && !imageFile) throw new AppError("Escreva uma mensagem ou envie uma foto", 400);
-  if (!["ABERTA", "ACORDADA", "AGUARDANDO_CONFIRMACAO"].includes(conversation.status)) throw new AppError("Esta conversa esta encerrada", 409);
+  if (conversation.status === "ABERTA") throw new AppError("Aguarde o prestador aceitar o chamado", 409);
+  if (!["ACORDADA", "AGUARDANDO_CONFIRMACAO"].includes(conversation.status)) throw new AppError("Esta conversa esta encerrada", 409);
   const isSeller = conversation.vendedor.usuario_id === userId;
+  if (isSeller) {
+    await assertSellerCanOperateConversation(serviceChatsRepository, conversation, userId);
+  }
   let upload = null;
   try {
     if (imageFile) upload = await saveUploadedImage(imageFile, { folder: ["conversas-servico", String(conversation.id)], profile: "serviceChat" });
@@ -931,4 +1391,49 @@ export async function createServiceConversationMessage(userId, conversationId, d
     if (upload) await deleteUploadedImage(upload.url);
     throw error;
   }
+}
+
+export async function createServiceConversationLocation(userId, conversationId, data) {
+  const conversation = await findAccessibleConversation(userId, conversationId);
+  if (conversation.status === "ABERTA") {
+    throw new AppError("Aguarde o prestador aceitar o chamado", 409);
+  }
+  if (!["ACORDADA", "AGUARDANDO_CONFIRMACAO"].includes(conversation.status)) {
+    throw new AppError("Esta conversa esta encerrada", 409);
+  }
+
+  const isSeller = conversation.vendedor.usuario_id === userId;
+  if (isSeller) {
+    await assertSellerCanOperateConversation(serviceChatsRepository, conversation, userId);
+  }
+  const location = {
+    city: data.city,
+    complement: data.complement || null,
+    district: data.district,
+    label: data.label,
+    number: data.number,
+    reference: data.reference || null,
+    state: data.state,
+    street: data.street,
+    zipCode: data.zipCode,
+  };
+  const message = await serviceChatsRepository.createMessage({
+    data: {
+      autor_usuario_id: userId,
+      conversa_servico_id: conversation.id,
+      lido_cliente_em: isSeller ? null : new Date(),
+      lido_vendedor_em: isSeller ? new Date() : null,
+      mensagem: `${sharedLocationPrefix}${JSON.stringify(location)}`,
+      origem: isSeller ? "VENDEDOR" : "CLIENTE",
+    },
+  });
+  const savedConversation = await serviceChatsRepository.updateConversation({
+    include: conversationInclude,
+    data: {},
+    where: { id: conversation.id },
+  });
+  const serializedConversation = serializeConversation(savedConversation, userId, { includeMessages: true });
+  const serializedMessage = serializeMessage(message, userId);
+  emitServiceChatMessageCreated({ conversation: serializedConversation, message: serializedMessage });
+  return { message: serializedMessage };
 }

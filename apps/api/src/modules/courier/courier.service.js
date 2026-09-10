@@ -5,6 +5,7 @@ import { parsePositiveId } from "../../utils/ids.js";
 import { sameCity } from "../../utils/location.js";
 import { getBusyCourierSellerIds } from "./courier-availability.js";
 import { courierRepository } from "./courier.repository.js";
+import { isServiceAvailable } from "../service-chats/service-availability.js";
 
 function serializeCourierProfile(profile) {
   if (!profile) return null;
@@ -89,12 +90,12 @@ const teamMemberInclude = {
 function serializeTeamMember(member, busySellerIds = new Set()) {
   const courier = member.motoboy;
   const services = courier.vendedor.servicos ?? [];
-  const preferredService = services.find((service) => service.tipo_servico.slug === "motoboy" && service.disponivel_agora)
-    ?? services.find((service) => service.disponivel_agora)
+  const preferredService = services.find((service) => service.tipo_servico.slug === "motoboy" && isServiceAvailable(service))
+    ?? services.find((service) => isServiceAvailable(service))
     ?? services.find((service) => service.tipo_servico.slug === "motoboy")
     ?? services[0]
     ?? null;
-  const isOnline = courier.status === "ATIVO" && Boolean(preferredService?.disponivel_agora);
+  const isOnline = courier.status === "ATIVO" && isServiceAvailable(preferredService);
   const isBusy = busySellerIds.has(courier.vendedor_id);
 
   return {
@@ -148,9 +149,11 @@ export async function getCourierProfile(userId) {
 export async function updateCourierDispatchScope(userId, { acceptsPlatformCalls }) {
   const profile = await courierRepository.findCourier({
     include: { lojas: { where: { ativo: true } } },
-    where: { vendedor: { excluido_em: null, usuario_id: userId } },
+    where: {
+      vendedor: { excluido_em: null, status: "ATIVO", status_kyc: "APROVADO", usuario_id: userId },
+    },
   });
-  if (!profile) throw new AppError("Cadastre seu perfil de motoboy antes de definir a disponibilidade", 428);
+  if (!profile) throw new AppError("Conclua o KYC e cadastre seu perfil de motoboy antes de definir a disponibilidade", 428);
   if (!acceptsPlatformCalls && !profile.lojas.length) {
     throw new AppError("Vincule-se a uma loja antes de receber somente chamadas credenciadas", 409);
   }
@@ -179,8 +182,8 @@ export async function saveCourierProfile(userId, data) {
     throw new AppError("Crie seu cadastro comercial antes do perfil de motoboy", 428);
   }
 
-  if (["BLOQUEADO", "REPROVADO"].includes(seller.status)) {
-    throw new AppError("Seu cadastro comercial nao pode operar entregas", 403);
+  if (seller.status !== "ATIVO" || seller.status_kyc !== "APROVADO") {
+    throw new AppError("Conclua a verificacao comercial antes de cadastrar ou operar como motoboy", 428);
   }
 
   const cpf = normalizeCpf(seller.cpf || seller.usuario.cpf || "");
@@ -266,9 +269,9 @@ export async function addStoreCourier(userId, storeId, data) {
   const courier = await courierRepository.findCourier({
     include: { vendedor: { select: { usuario_id: true } } },
     where: {
-      status: { not: "BLOQUEADO" },
+      status: "ATIVO",
       telefone_contato: data.contactPhone,
-      vendedor: { excluido_em: null, status: { in: ["ATIVO", "PENDENTE"] } },
+      vendedor: { excluido_em: null, status: "ATIVO", status_kyc: "APROVADO" },
     },
   });
   if (!courier) {

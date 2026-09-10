@@ -66,6 +66,7 @@ export function serializeOrder(order, { audience = "customer" } = {}) {
         }
       : null,
     deliveryFeeCents: cents(order.taxa_entrega_centavos),
+    serviceFeeCents: cents(order.taxa_servico_centavos),
     deliveryMode: order.tipo_entrega,
     id: order.id,
     items: (order.itens ?? []).map(serializeOrderItem),

@@ -372,7 +372,7 @@ export async function getNetworkOverview(userId) {
     invite: {
       code: invite.codigo,
       message:
-        "Entre para a minha rede DeTudoJa. A qualificacao depende de conta ativa e KYC aprovado.",
+        "Entre para a minha rede Brasil Cashback. A qualificacao depende de conta ativa e KYC aprovado.",
       totalUses: invite.usos_totais,
     },
     matrix: {

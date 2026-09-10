@@ -13,8 +13,18 @@ const chargeStatusCopy = {
   PROCESSANDO: "Processando",
 };
 
+const payoutStatusCopy = {
+  CANCELADO: "Valor na carteira",
+  EM_RECONCILIACAO: "Confirmando Pix",
+  FALHOU: "Valor na carteira",
+  PAGO: "Pix enviado",
+  PENDENTE: "Pix em envio",
+  PROCESSANDO: "Pix em envio",
+};
+
 export function SellerDashboard({
   charges,
+  payoutAccount,
   profile,
   onCreateSale,
   onOpenServiceDesk,
@@ -23,6 +33,7 @@ export function SellerDashboard({
   onOpenCharge,
   onOpenChargeHistory,
   onOpenGuide,
+  onOpenPayout,
   onOpenStoreChats,
   onOpenStore,
   sales,
@@ -34,6 +45,7 @@ export function SellerDashboard({
   totalNewOrders,
 }) {
   const [chargesOpen, setChargesOpen] = useState(false);
+  const payoutReady = payoutAccount?.status === "ATIVA";
   const activeCharges = charges.filter((charge) => ["ATIVA", "PROCESSANDO"].includes(charge.status)).length;
   const paidRecentCents = charges
     .filter((charge) => charge.status === "PAGA")
@@ -98,6 +110,48 @@ export function SellerDashboard({
         </View>
       </View>
 
+      <Pressable
+        accessibilityHint="Configura a chave Pix que recebe vendas presenciais"
+        accessibilityLabel="Recebimento de vendas presenciais"
+        onPress={onOpenPayout}
+        style={({ pressed }) => [
+          styles.payoutCard,
+          !payoutReady && styles.payoutCardPending,
+          pressed && styles.pressed,
+        ]}
+      >
+        <View style={[styles.payoutIcon, !payoutReady && styles.payoutIconPending]}>
+          <Ionicons
+            color={payoutReady ? colors.card : "#92400E"}
+            name={payoutReady ? "flash" : "key-outline"}
+            size={19}
+          />
+        </View>
+        <View style={styles.rowCopy}>
+          <Text style={styles.payoutTitle}>
+            {payoutReady
+              ? "Repasse presencial configurado"
+              : payoutAccount
+                ? "Chave Pix em validacao"
+                : "Cadastre sua chave Pix"}
+          </Text>
+          <Text numberOfLines={1} style={styles.payoutText}>
+            {payoutReady
+              ? `${payoutAccount.keyType} ${payoutAccount.keyMasked} · QR pago envia o valor liquido`
+              : payoutAccount
+                ? "Envie novamente para validar no Asaas"
+              : "Obrigatoria para receber imediatamente nas vendas por QR"}
+          </Text>
+        </View>
+        <View style={[styles.payoutStatus, !payoutReady && styles.payoutStatusPending]}>
+          <View style={[styles.payoutDot, !payoutReady && styles.payoutDotPending]} />
+          <Text style={[styles.payoutStatusText, !payoutReady && styles.payoutStatusTextPending]}>
+            {payoutReady ? "Pronto" : payoutAccount ? "Validar" : "Configurar"}
+          </Text>
+        </View>
+        <Ionicons color={payoutReady ? colors.primaryDark : "#92400E"} name="chevron-forward" size={18} />
+      </Pressable>
+
       <View style={styles.commandGrid}>
         <CommandCard
           hint={profile ? "Ative seus servicos e acompanhe chamados" : "Crie seu perfil de prestador"}
@@ -107,10 +161,9 @@ export function SellerDashboard({
         />
         <CommandCard
           accent
-          caption="(Autonoma)"
-          hint="Gere uma cobranca autonoma por QR"
+          hint={stores.length ? "Cobranca rapida da sua loja" : "Venda presencial sem loja"}
           icon="qr-code-outline"
-          label="Venda QR"
+          label="Cobrar agora"
           onPress={onCreateSale}
         />
         <CommandCard
@@ -403,6 +456,9 @@ function ChargeRow({ charge, onPress }) {
   const active = charge.status === "ATIVA";
   const paid = charge.status === "PAGA";
   const source = charge.origin === "AVULSA" ? "Autonoma" : charge.merchant?.name ?? "Venda local";
+  const financialStatus = paid && charge.payout
+    ? payoutStatusCopy[charge.payout.status]
+    : null;
 
   return (
     <Pressable disabled={!active} onPress={() => onPress(charge)} style={({ pressed }) => [styles.row, active && styles.rowActive, pressed && active && styles.pressed]}>
@@ -415,7 +471,9 @@ function ChargeRow({ charge, onPress }) {
       </View>
       <View style={styles.rowEnd}>
         <Text style={styles.rowAmount}>{formatarDinheiro(charge.amountCents)}</Text>
-        <Text style={[styles.rowStatus, paid && styles.rowStatusPaid]}>{active ? "Abrir QR" : chargeStatusCopy[charge.status] ?? formatStatus(charge.status)}</Text>
+        <Text style={[styles.rowStatus, paid && styles.rowStatusPaid]}>
+          {active ? "Abrir QR" : financialStatus ?? chargeStatusCopy[charge.status] ?? formatStatus(charge.status)}
+        </Text>
       </View>
     </Pressable>
   );
@@ -588,6 +646,18 @@ const styles = StyleSheet.create({
   operationDotActive: { backgroundColor: colors.success },
   operationStatusText: { color: colors.textMuted, fontFamily: fonts.bold, fontSize: 10, fontWeight: "700" },
   operationStatusTextActive: { color: colors.primaryDark },
+  payoutCard: { alignItems: "center", backgroundColor: colors.primarySoft, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.sm, minHeight: 68, padding: spacing.md },
+  payoutCardPending: { backgroundColor: "#FFFBEB", borderColor: "#FDE68A" },
+  payoutDot: { backgroundColor: colors.success, borderRadius: radius.round, height: 6, width: 6 },
+  payoutDotPending: { backgroundColor: colors.warning },
+  payoutIcon: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.round, height: 40, justifyContent: "center", width: 40 },
+  payoutIconPending: { backgroundColor: "#FEF3C7" },
+  payoutStatus: { alignItems: "center", backgroundColor: colors.card, borderRadius: radius.round, flexDirection: "row", gap: 4, paddingHorizontal: spacing.sm, paddingVertical: 5 },
+  payoutStatusPending: { backgroundColor: "#FEF3C7" },
+  payoutStatusText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 10, fontWeight: "700" },
+  payoutStatusTextPending: { color: "#92400E" },
+  payoutText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption },
+  payoutTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small, fontWeight: "700" },
   storeIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, height: 48, justifyContent: "center", width: 48 },
   storeIconAttention: { borderColor: colors.primaryLight, borderWidth: 1 },
   storeChatNotification: { alignItems: "center", backgroundColor: "#FEF3C7", borderColor: "#FDE68A", borderRadius: radius.round, borderWidth: 1, flexDirection: "row", gap: 4, minHeight: 28, paddingHorizontal: spacing.sm },

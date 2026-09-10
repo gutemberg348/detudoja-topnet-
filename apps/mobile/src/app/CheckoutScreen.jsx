@@ -82,8 +82,17 @@ export function CheckoutScreen({ navigation, route }) {
   const [submitError, setSubmitError] = useState("");
   const requestIdempotencyKeyRef = useRef(null);
   const totals = useMemo(
-    () => checkoutTotals(cart.items, { deliveryMode }),
-    [cart.items, deliveryMode],
+    () => checkoutTotals(cart.items, {
+      deliveryFeeCents: cart.store?.delivery?.feeCents,
+      deliveryMode,
+      serviceFeeCents: cart.store?.onlineServiceFeeCents,
+    }),
+    [
+      cart.items,
+      cart.store?.delivery?.feeCents,
+      cart.store?.onlineServiceFeeCents,
+      deliveryMode,
+    ],
   );
   const negotiatesByChat = storeUsesChatNegotiation(cart.store);
   const cepDigits = addressForm.cep.replace(/\D/g, "");
@@ -450,6 +459,7 @@ export function CheckoutScreen({ navigation, route }) {
       <View style={styles.summary}>
         <SummaryRow label="Produtos" value={formatarDinheiro(totals.subtotalCents)} />
         <SummaryRow label="Entrega" value={formatarDinheiro(totals.deliveryFeeCents)} />
+        <SummaryRow label="Taxa de servico" value={formatarDinheiro(totals.serviceFeeCents)} />
         <View style={styles.divider} />
         <SummaryRow strong label="Total" value={formatarDinheiro(totals.totalCents)} />
       </View>

@@ -21,7 +21,6 @@ import {
   formatEstimatedTime as formatEstimatedTimeValue,
   formatOrderStatus as formatOrderStatusValue,
   formatStatus as formatStatusValue,
-  inferOperationalOrderStatus as inferOperationalOrderStatusValue,
   isOrderInPeriod as isOrderInPeriodValue,
 } from "./seller.utils";
 import { normalizeStoreOpeningHours, todayWeekDay } from "./storeSchedule";
@@ -181,6 +180,11 @@ export function StoreManagerPanel({
           <View style={styles.managerBadge}>
             <Text style={styles.managerBadgeText}>
               Lojista {merchantStatus}
+            </Text>
+          </View>
+          <View style={styles.managerBadge}>
+            <Text style={styles.managerBadgeText}>
+              Entrega {formatarDinheiro(store.deliveryFeeCents ?? 790)}
             </Text>
           </View>
         </View>
@@ -933,51 +937,21 @@ function StoreOrderRow({ history = false, isSaving, onOpenChat, onUpdateStatus, 
 }
 
 function orderActions(order) {
-  const latestProposal = order.latestProposal ?? order.proposals?.at(-1);
-  const paidProposalAwaitingPreparation = order.status === "RECEBIDO"
-    && ["PAGA", "CONCLUIDA"].includes(latestProposal?.status);
   const nextByStatus = {
     ACEITO: { icon: "restaurant-outline", label: "Preparar", status: "PREPARANDO" },
     PREPARANDO:
       order.deliveryMode === "RETIRADA"
         ? { icon: "bag-check-outline", label: "Pronto", status: "PRONTO_RETIRADA" }
         : { icon: "bicycle-outline", label: "Enviar", status: "SAIU_ENTREGA" },
-    RECEBIDO: paidProposalAwaitingPreparation
-      ? { icon: "restaurant-outline", label: "Preparar", status: "PREPARANDO" }
-      : { icon: "checkmark-circle-outline", label: "Aceitar", status: "ACEITO" },
-  };
-  const previousByStatus = {
-    ACEITO: "RECEBIDO",
-    PREPARANDO: "ACEITO",
-    PRONTO_RETIRADA: "PREPARANDO",
-    SAIU_ENTREGA: "PREPARANDO",
+    RECEBIDO: { icon: "checkmark-circle-outline", label: "Aceitar", status: "ACEITO" },
   };
 
-  if (order.status === "CANCELADO") {
-    return [
-      {
-        icon: "refresh-outline",
-        label: "Reabrir",
-        status: inferOperationalOrderStatus(order),
-      },
-    ];
-  }
-
-  if (order.status === "CONCLUIDO") {
+  if (["CANCELADO", "CONCLUIDO"].includes(order.status)) {
     return [];
   }
 
   const actions = [];
-  const previousStatus = previousByStatus[order.status];
   const nextAction = nextByStatus[order.status];
-
-  if (previousStatus) {
-    actions.push({
-      icon: "arrow-undo-outline",
-      label: "Voltar etapa",
-      status: previousStatus,
-    });
-  }
 
   if (nextAction) {
     actions.push(nextAction);
@@ -994,25 +968,7 @@ function orderActions(order) {
 }
 
 function historyOrderActions(order) {
-  if (order.status === "CONCLUIDO") {
-    return [];
-  }
-
-  if (order.status === "CANCELADO") {
-    return [
-      {
-        icon: "refresh-outline",
-        label: "Reabrir",
-        status: inferOperationalOrderStatus(order),
-      },
-    ];
-  }
-
   return [];
-}
-
-function inferOperationalOrderStatus(order) {
-  return inferOperationalOrderStatusValue(order);
 }
 
 function isOrderInPeriod(order, period) {

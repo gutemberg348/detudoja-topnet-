@@ -1,7 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { BrandLogo } from "../components/BrandLogo";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { SearchBar } from "../components/SearchBar";
 import { useMarketplaceSuggestions } from "../hooks/useMarketplaceSuggestions";
@@ -53,6 +52,13 @@ export function HomeScreen({ navigation }) {
   }
 
   function openConversation(conversation) {
+    if (conversation.kind === "person") {
+      navigation.navigate("PersonalConversation", {
+        conversation: conversation.conversation,
+      });
+      return;
+    }
+
     if (conversation.kind === "order") {
       navigation.navigate("CustomerOrderDetails", { order: conversation.order });
       return;
@@ -71,15 +77,23 @@ export function HomeScreen({ navigation }) {
   }
 
   return (
-    <ScreenContainer
-      contentContainerStyle={styles.root}
-      edges={["top", "left", "right", "bottom"]}
-      padded={false}
-      style={styles.screen}
-    >
-      <View style={styles.content}>
-        <View style={styles.discovery}>
-          <BrandLogo centered size="large" />
+    <View style={styles.shell}>
+      <ScreenContainer
+        contentContainerStyle={styles.root}
+        edges={["top", "left", "right", "bottom"]}
+        padded={false}
+        style={styles.screen}
+      >
+        <View style={styles.content}>
+          <SearchBar
+            onChangeText={setQuery}
+            onSelectSuggestion={selectSuggestion}
+            onSubmit={openSearch}
+            placeholder="O que voce quer hoje?"
+            showVoice
+            suggestions={suggestions}
+            value={query}
+          />
 
           <View style={styles.quickActions}>
             <HomeAction
@@ -99,33 +113,30 @@ export function HomeScreen({ navigation }) {
             />
           </View>
 
-          <SearchBar
-            onChangeText={setQuery}
-            onSelectSuggestion={selectSuggestion}
-            onSubmit={openSearch}
-            placeholder="O que voce quer hoje?"
-            showVoice
-            suggestions={suggestions}
-            value={query}
+          <RecentConversations
+            actionLabel="Conversar"
+            conversations={recent.conversations}
+            isLoading={recent.isLoading}
+            onOpen={openConversation}
+            onViewAll={() => navigation.navigate("PersonalChatsInbox")}
           />
-
-          <View style={styles.promise}>
-            <Ionicons color={colors.primary} name="sparkles" size={18} />
-            <Text style={styles.promiseText}>
-              Compre, pague, converse, venda ou encontre servicos
+        </View>
+      </ScreenContainer>
+      <Pressable
+        accessibilityLabel="Abrir conversas com amigos"
+        onPress={() => navigation.navigate("PersonalChatsInbox")}
+        style={({ pressed }) => [styles.chatFab, pressed && styles.chatFabPressed]}
+      >
+        <Ionicons color={colors.card} name="chatbubbles" size={24} />
+        {recent.personalUnreadCount > 0 ? (
+          <View style={styles.chatBadge}>
+            <Text style={styles.chatBadgeText}>
+              {recent.personalUnreadCount > 9 ? "9+" : recent.personalUnreadCount}
             </Text>
           </View>
-        </View>
-
-        <RecentConversations
-          actionLabel="Conversar"
-          conversations={recent.conversations}
-          isLoading={recent.isLoading}
-          onOpen={openConversation}
-          onViewAll={() => navigation.navigate("StoreChatsInbox")}
-        />
-      </View>
-    </ScreenContainer>
+        ) : null}
+      </Pressable>
+    </View>
   );
 }
 
@@ -176,6 +187,39 @@ function normalizeSearch(value = "") {
 }
 
 const styles = StyleSheet.create({
+  chatBadge: {
+    alignItems: "center",
+    backgroundColor: colors.warning,
+    borderColor: colors.card,
+    borderRadius: 999,
+    borderWidth: 2,
+    height: 22,
+    justifyContent: "center",
+    position: "absolute",
+    right: -5,
+    top: -5,
+    minWidth: 22,
+    paddingHorizontal: 4,
+  },
+  chatBadgeText: {
+    color: "#4A2B00",
+    fontFamily: fonts.bold,
+    fontSize: 9,
+  },
+  chatFab: {
+    alignItems: "center",
+    backgroundColor: colors.primaryDark,
+    borderColor: colors.card,
+    borderRadius: 999,
+    borderWidth: 3,
+    bottom: spacing.xl,
+    height: 58,
+    justifyContent: "center",
+    position: "absolute",
+    right: spacing.xl,
+    width: 58,
+  },
+  chatFabPressed: { opacity: 0.8, transform: [{ scale: 0.97 }] },
   content: {
     alignItems: "center",
     flex: 1,
@@ -183,27 +227,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingBottom: spacing.xl,
     paddingTop: spacing.sm,
-  },
-  discovery: {
-    alignItems: "center",
-    gap: spacing.lg,
-    width: "100%",
-  },
-  promise: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: spacing.sm,
-    justifyContent: "center",
-    maxWidth: 390,
-    paddingHorizontal: spacing.sm,
-  },
-  promiseText: {
-    color: colors.textSecondary,
-    flexShrink: 1,
-    fontFamily: fonts.medium,
-    fontSize: typography.small,
-    lineHeight: 19,
-    textAlign: "center",
   },
   quickAction: {
     alignItems: "center",
@@ -249,5 +272,8 @@ const styles = StyleSheet.create({
   },
   screen: {
     backgroundColor: colors.card,
+  },
+  shell: {
+    flex: 1,
   },
 });

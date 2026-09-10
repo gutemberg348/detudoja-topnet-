@@ -108,7 +108,7 @@ export async function createStoreSignupQr(userId, storeId, publicBaseUrl, appDow
     }),
     registrationCode,
     registrationUrl,
-    shareMessage: `Cadastre-se no DeTudoJa pela ${store.nome}. Use o codigo ${registrationCode} ou abra ${registrationUrl}`,
+    shareMessage: `Cadastre-se no Brasil Cashback pela ${store.nome}. Use o codigo ${registrationCode} ou abra ${registrationUrl}`,
     store: {
       id: store.id,
       logoUrl: store.logo_url,
@@ -124,7 +124,7 @@ export function renderStoreSignupPage({ appDownloadUrl, store }) {
   const appUrl = `detudoja://cadastro/loja/${encodeURIComponent(store.slug)}`;
   const registrationCode = createStoreRegistrationCode(store.id);
   const downloadAction = appDownloadUrl
-    ? `<a class="secondary" href="${escapeHtml(appDownloadUrl)}">Baixar o app DeTudoJa</a>`
+    ? `<a class="secondary" href="${escapeHtml(appDownloadUrl)}">Baixar o app Brasil Cashback</a>`
     : "";
 
   return `<!doctype html>
@@ -132,7 +132,7 @@ export function renderStoreSignupPage({ appDownloadUrl, store }) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Cadastro DeTudoJa</title>
+  <title>Cadastro Brasil Cashback</title>
   <style>
     :root { color-scheme: light; font-family: Arial, sans-serif; }
     * { box-sizing: border-box; }
@@ -158,10 +158,10 @@ export function renderStoreSignupPage({ appDownloadUrl, store }) {
 </head>
 <body>
   <main>
-    <div class="brand">DeTudoJa</div>
+    <div class="brand">Brasil Cashback</div>
     <h1>Cadastre-se pela ${storeName}</h1>
     <p>Crie sua conta para comprar, pagar e receber cashback. Depois, entre no app com estes mesmos dados.</p>
-    <a class="secondary app" href="${escapeHtml(appUrl)}">Abrir no app DeTudoJa</a>
+    <a class="secondary app" href="${escapeHtml(appUrl)}">Abrir no app Brasil Cashback</a>
     <div class="code"><span>Codigo da loja</span><strong>${registrationCode}</strong></div>
     <form id="register-form">
       <label>Nome completo<input name="name" autocomplete="name" minlength="3" required></label>
@@ -214,7 +214,7 @@ export function renderStoreSignupPage({ appDownloadUrl, store }) {
         if (!response.ok) throw new Error(data?.message || "Nao foi possivel concluir o cadastro.");
         form.hidden = true;
         status.className = "success";
-        status.textContent = "Conta criada. Abra ou baixe o app DeTudoJa e entre com seu e-mail ou telefone.";
+        status.textContent = "Conta criada. Abra ou baixe o app Brasil Cashback e entre com seu e-mail ou telefone.";
       } catch (error) {
         status.className = "error";
         status.textContent = error.message || "Nao foi possivel concluir o cadastro.";

@@ -1,8 +1,15 @@
-export function errorMiddleware(error, _req, res, _next) {
+import { logError } from "../config/logger.js";
+
+export function errorMiddleware(error, req, res, _next) {
   const statusCode = error.statusCode ?? 500;
 
   if (statusCode >= 500) {
-    console.error("[API] Unhandled error", error);
+    logError("http.unhandled_error", error, {
+      method: req.method,
+      path: req.path,
+      requestId: req.requestId ?? null,
+      statusCode,
+    });
   }
 
   const response = {

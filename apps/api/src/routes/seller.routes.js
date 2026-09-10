@@ -46,12 +46,29 @@ import {
   uploadStoreProductImage,
 } from "../modules/uploads/upload.middleware.js";
 import { validate } from "../middlewares/validate.middleware.js";
+import {
+  getPayoutAccountController,
+  savePayoutAccountController,
+} from "../modules/payouts/payout.controller.js";
+import { payoutAccountSchema } from "../modules/payouts/payout.validator.js";
+import {
+  payoutPixKeyValidationGatewayRateLimit,
+  payoutPixKeyValidationRateLimit,
+} from "../middlewares/rate-limit.middleware.js";
 
 export const sellerRoutes = Router();
 
 sellerRoutes.get("/segments", listSellerSegmentsController);
 sellerRoutes.get("/store-categories", listSellerStoreCategoriesController);
 sellerRoutes.get("/profile", getSellerProfileController);
+sellerRoutes.get("/payout-account", getPayoutAccountController);
+sellerRoutes.put(
+  "/payout-account",
+  payoutPixKeyValidationGatewayRateLimit,
+  payoutPixKeyValidationRateLimit,
+  validate(payoutAccountSchema),
+  savePayoutAccountController,
+);
 sellerRoutes.get("/charges", listGeneratedChargesController);
 sellerRoutes.get("/charges/history", listGeneratedChargesHistoryController);
 sellerRoutes.get("/charges/:chargeId/qr", getGeneratedChargeQrController);

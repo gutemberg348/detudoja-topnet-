@@ -52,7 +52,7 @@ export function SupportScreen({ route }) {
     const order = route?.params?.order;
     const message = order
       ? [
-          "Ola, preciso solicitar o cancelamento de um pedido no DeTudoJa.",
+          "Ola, preciso solicitar o cancelamento de um pedido no Brasil Cashback.",
           `Pedido: ${order.code}`,
           `Loja: ${order.store?.name ?? "Nao informada"}`,
           `Valor: ${formatarDinheiro(order.totalCents)}`,
@@ -75,7 +75,7 @@ export function SupportScreen({ route }) {
         </View>
         <Text style={styles.title}>Como podemos ajudar?</Text>
         <Text style={styles.subtitle}>
-          Fale com o suporte do DeTudoJa pelo WhatsApp cadastrado no painel admin.
+          Fale com o suporte do Brasil Cashback pelo WhatsApp cadastrado no painel admin.
         </Text>
       </View>
 
@@ -110,7 +110,7 @@ export function SupportScreen({ route }) {
             <View style={styles.messageBox}>
               <Text style={styles.messageLabel}>Mensagem inicial</Text>
               <Text style={styles.messageText}>
-                {support?.message || "Ola, preciso de ajuda com minha conta no DeTudoJa."}
+                {support?.message || "Ola, preciso de ajuda com minha conta no Brasil Cashback."}
               </Text>
             </View>
 

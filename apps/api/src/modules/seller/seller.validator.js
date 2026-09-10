@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isValidCnpj } from "../../utils/cnpj.js";
 
 const optionalBoolean = z.preprocess((value) => {
   if (value === "true") {
@@ -103,7 +104,7 @@ export const sellerOnboardingSchema = z
   .superRefine((data, context) => {
     const digits = data.document?.replace(/\D/g, "") ?? "";
 
-    if (data.type === "JURIDICA" && digits.length !== 14) {
+    if (data.type === "JURIDICA" && !isValidCnpj(data.document)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Informe um CNPJ valido",
@@ -135,6 +136,7 @@ export const createSellerStoreSchema = z
     categoryId: positiveIntId("Categoria invalida"),
     address: storeAddressSchema,
     description: z.string().trim().max(1000).optional().or(z.literal("")),
+    deliveryFeeCents: z.coerce.number().int().min(0).max(100000).default(790),
     document: z.string().trim().max(18).optional().or(z.literal("")),
     email: z.string().trim().email("E-mail invalido").optional().or(z.literal("")),
     name: z.string().trim().min(2, "Informe o nome da loja").max(180),
@@ -148,7 +150,7 @@ export const createSellerStoreSchema = z
   .superRefine((data, context) => {
     const digits = data.document?.replace(/\D/g, "") ?? "";
 
-    if (data.type === "JURIDICA" && digits.length !== 14) {
+    if (data.type === "JURIDICA" && !isValidCnpj(data.document)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Informe um CNPJ valido",
@@ -169,6 +171,7 @@ export const updateSellerStoreSchema = z.object({
   address: storeAddressSchema.optional(),
   categoryId: optionalInt(positiveIntId("Categoria invalida")),
   description: z.string().trim().max(1000).optional().or(z.literal("")),
+  deliveryFeeCents: z.coerce.number().int().min(0).max(100000).optional(),
   email: z.string().trim().email("E-mail invalido").optional().or(z.literal("")),
   name: z.string().trim().min(2, "Informe o nome da loja").max(180).optional(),
   openForOrders: optionalBoolean,
@@ -257,7 +260,6 @@ export const updateStoreProductSchema = z.object(storeProductFields).partial().s
 
 export const updateStoreOrderStatusSchema = z.object({
   status: z.enum([
-    "RECEBIDO",
     "ACEITO",
     "PREPARANDO",
     "SAIU_ENTREGA",

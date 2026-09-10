@@ -97,6 +97,7 @@ export function StoreDetailsScreen({ navigation, route }) {
   const bannerUrl = resolveMediaUrl(store.bannerUrl);
   const logoUrl = resolveMediaUrl(store.logoUrl);
   const isOpen = store.openForOrders !== false;
+  const isManagedByViewer = store.isManagedByViewer === true;
   const negotiatesByChat = storeUsesChatNegotiation(store);
   const products = store.products ?? [];
   const filteredProducts = products.filter((product) => {
@@ -125,6 +126,10 @@ export function StoreDetailsScreen({ navigation, route }) {
 
   function payAtStore() {
     navigation.navigate("ChargeScan");
+  }
+
+  function openSellerHub() {
+    navigation.navigate("Main", { screen: "Vender" });
   }
 
   function openProduct(product) {
@@ -209,13 +214,36 @@ export function StoreDetailsScreen({ navigation, route }) {
           </View>
         </View>
 
+        {isManagedByViewer ? (
+          <View style={styles.ownStoreNotice}>
+            <View style={styles.ownStoreNoticeIcon}>
+              <Ionicons color={colors.primaryDark} name="storefront" size={22} />
+            </View>
+            <View style={styles.ownStoreNoticeCopy}>
+              <Text style={styles.ownStoreNoticeEyebrow}>SUA OPERACAO</Text>
+              <Text style={styles.ownStoreNoticeTitle}>Esta e sua loja</Text>
+              <Text style={styles.ownStoreNoticeText}>
+                Gerencie produtos, pedidos e conversas pela Central de Vendas.
+              </Text>
+            </View>
+            <Pressable
+              accessibilityLabel="Abrir Central de Vendas"
+              hitSlop={8}
+              onPress={openSellerHub}
+              style={({ pressed }) => [styles.ownStoreNoticeAction, pressed && styles.pressed]}
+            >
+              <Ionicons color={colors.card} name="arrow-forward" size={18} />
+            </Pressable>
+          </View>
+        ) : null}
+
         <View style={[styles.benefitBanner, cashbackPercent <= 0 && styles.benefitBannerNeutral]}>
           <View style={styles.benefitIcon}>
             <Ionicons color={colors.card} name={cashbackPercent > 0 ? "gift-outline" : "shield-checkmark-outline"} size={23} />
           </View>
           <View style={styles.benefitCopy}>
             <Text style={styles.benefitTitle}>
-              {cashbackPercent > 0 ? `Ganhe ${formatPercent(cashbackPercent)} de cashback` : "Compra protegida no DeTudoJa"}
+              {cashbackPercent > 0 ? `Ganhe ${formatPercent(cashbackPercent)} de cashback` : "Compra protegida no Brasil Cashback"}
             </Text>
             <Text style={styles.benefitText}>
               {cashbackPercent > 0 ? "O beneficio volta para sua carteira apos a conclusao." : "Pedido, conversa e pagamento ficam registrados."}
@@ -228,25 +256,47 @@ export function StoreDetailsScreen({ navigation, route }) {
           ) : null}
         </View>
 
-        <Pressable
-          accessibilityLabel={`Falar com a loja ${store.name}`}
-          onPress={() => navigation.navigate("StoreConversation", { store })}
-          style={({ pressed }) => [styles.storeChat, pressed && styles.pressed]}
-        >
-          <View style={styles.storeChatIcon}>
-            <Ionicons color={colors.primaryDark} name="chatbubbles-outline" size={20} />
-          </View>
-          <View style={styles.storeChatCopy}>
-            <Text style={styles.storeChatTitle}>Falar com a loja</Text>
-            <Text numberOfLines={1} style={styles.storeChatText}>
-              Duvidas sobre produtos, entrega ou disponibilidade
-            </Text>
-          </View>
-          <View style={styles.storeChatAction}>
-            <Text style={styles.storeChatActionText}>Conversar</Text>
-            <Ionicons color={colors.primaryDark} name="arrow-forward" size={16} />
-          </View>
-        </Pressable>
+        {isManagedByViewer ? (
+          <Pressable
+            accessibilityLabel="Atender clientes na Central de Vendas"
+            onPress={openSellerHub}
+            style={({ pressed }) => [styles.storeChat, styles.ownStoreChat, pressed && styles.pressed]}
+          >
+            <View style={styles.storeChatIcon}>
+              <Ionicons color={colors.primaryDark} name="people-outline" size={20} />
+            </View>
+            <View style={styles.storeChatCopy}>
+              <Text style={styles.storeChatTitle}>Conversas dos clientes</Text>
+              <Text numberOfLines={2} style={styles.storeChatText}>
+                Sua conta nao pode conversar com a propria loja.
+              </Text>
+            </View>
+            <View style={styles.storeChatAction}>
+              <Text style={styles.storeChatActionText}>Atender</Text>
+              <Ionicons color={colors.primaryDark} name="arrow-forward" size={16} />
+            </View>
+          </Pressable>
+        ) : (
+          <Pressable
+            accessibilityLabel={`Falar com a loja ${store.name}`}
+            onPress={() => navigation.navigate("StoreConversation", { store })}
+            style={({ pressed }) => [styles.storeChat, pressed && styles.pressed]}
+          >
+            <View style={styles.storeChatIcon}>
+              <Ionicons color={colors.primaryDark} name="chatbubbles-outline" size={20} />
+            </View>
+            <View style={styles.storeChatCopy}>
+              <Text style={styles.storeChatTitle}>Falar com a loja</Text>
+              <Text numberOfLines={1} style={styles.storeChatText}>
+                Duvidas sobre produtos, entrega ou disponibilidade
+              </Text>
+            </View>
+            <View style={styles.storeChatAction}>
+              <Text style={styles.storeChatActionText}>Conversar</Text>
+              <Ionicons color={colors.primaryDark} name="arrow-forward" size={16} />
+            </View>
+          </Pressable>
+        )}
 
         <View style={styles.actionsRow}>
           <Pressable
@@ -304,7 +354,7 @@ export function StoreDetailsScreen({ navigation, route }) {
             <Text style={styles.descriptionTitle}>Sobre {store.name}</Text>
           </View>
           <Text style={styles.description}>
-            {store.description || "Loja preparada para venda online e venda local pelo DeTudoJa."}
+            {store.description || "Loja preparada para venda online e venda local pelo Brasil Cashback."}
           </Text>
         </View>
 
@@ -739,6 +789,55 @@ const styles = StyleSheet.create({
     fontSize: 27,
     fontWeight: "800",
     lineHeight: 31,
+  },
+  ownStoreChat: {
+    backgroundColor: "#F7FBF9",
+    borderColor: colors.border,
+  },
+  ownStoreNotice: {
+    alignItems: "center",
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primaryLight,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    padding: spacing.md,
+  },
+  ownStoreNoticeAction: {
+    alignItems: "center",
+    backgroundColor: colors.primaryDark,
+    borderRadius: radius.round,
+    height: 40,
+    justifyContent: "center",
+    width: 40,
+  },
+  ownStoreNoticeCopy: { flex: 1, gap: 2, minWidth: 0 },
+  ownStoreNoticeEyebrow: {
+    color: colors.primaryDark,
+    fontFamily: fonts.bold,
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  ownStoreNoticeIcon: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderRadius: radius.round,
+    height: 44,
+    justifyContent: "center",
+    width: 44,
+  },
+  ownStoreNoticeText: {
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    fontSize: typography.caption,
+    lineHeight: 17,
+  },
+  ownStoreNoticeTitle: {
+    color: colors.textPrimary,
+    fontFamily: fonts.extraBold,
+    fontSize: typography.small,
+    fontWeight: "800",
   },
   storeChat: {
     alignItems: "center",

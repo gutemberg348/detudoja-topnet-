@@ -1,7 +1,7 @@
 BASE.md — Projeto DeTudoJá
 
 > Execucao desta etapa: criar a estrutura JS do monorepo. Banco de dados,
-> Prisma, Redis, KYC real e telas ficam para as proximas etapas.
+> Documento historico. Prisma, Redis e KYC automatico local ja foram implementados; confirme o estado atual em `docs/sistema.md`.
 
 Objetivo
 
@@ -1967,7 +1967,7 @@ Implementar desde o começo:
 Não implementar ainda:
 
 * PIX real.
-* KYC real.
+* Homologacao de KYC externo para prova de vida ativa e documentoscopia.
 * NF real.
 * Matriz 2x20 completa.
 * Bônus real.

@@ -16,7 +16,12 @@ import { colors, fonts, spacing, typography } from "../utils/theme";
 import { AppButton } from "./AppButton";
 import { AppInput } from "./AppInput";
 
-export function AuthCredentialsForm({ mode = "login", registrationCode = "", storeSlug = "" }) {
+export function AuthCredentialsForm({
+  mode = "login",
+  onForgotPassword,
+  registrationCode = "",
+  storeSlug = "",
+}) {
   const { login, register } = useAuthStore();
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState({
@@ -278,7 +283,9 @@ export function AuthCredentialsForm({ mode = "login", registrationCode = "", sto
 
       {isLogin ? (
         <Pressable
-          onPress={() => setMessage("Recuperacao de senha entra na proxima etapa.")}
+          accessibilityRole="button"
+          onPress={onForgotPassword}
+          style={({ pressed }) => [styles.forgotButton, pressed && styles.forgotPressed]}
         >
           <Text style={styles.forgot}>Esqueci minha senha</Text>
         </Pressable>
@@ -326,6 +333,14 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     fontSize: typography.small,
     fontWeight: "700",
+  },
+  forgotButton: {
+    alignSelf: "flex-start",
+    minHeight: 32,
+    justifyContent: "center",
+  },
+  forgotPressed: {
+    opacity: 0.7,
   },
   form: {
     gap: spacing.md,

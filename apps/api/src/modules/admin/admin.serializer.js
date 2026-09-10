@@ -1,4 +1,8 @@
-import { getEffectiveSegmentFeePercent } from "../earnings/order-earnings.config.js";
+import {
+  getEffectiveSegmentFeePercent,
+  resolvePaymentPolicy,
+  serializePaymentPolicyOverrides,
+} from "../earnings/order-earnings.config.js";
 
 function maskCpf(cpf) {
   if (!cpf) {
@@ -22,6 +26,13 @@ function sumWalletBalance(wallets) {
 export function serializeAdminUser(user, { includeSensitive = false } = {}) {
   return {
     accountType: user.tipo_conta,
+    adminActions: (user.auditorias_administrativas ?? []).map((audit) => ({
+      action: audit.acao,
+      adminName: audit.administrador?.nome ?? "Administrador removido",
+      at: audit.criado_em.toISOString(),
+      data: audit.dados_json,
+      id: audit.id,
+    })),
     balanceCents: sumWalletBalance(user.carteiras ?? []),
     cpf: maskCpf(user.cpf),
     ...(includeSensitive ? { cpfValue: user.cpf } : {}),
@@ -35,6 +46,7 @@ export function serializeAdminUser(user, { includeSensitive = false } = {}) {
     name: user.nome,
     phone: user.telefone,
     phoneVerified: user.telefone_verificado,
+    providerProfile: serializeProviderProfile(user),
     profiles: deriveUserProfiles(user),
     status: user.status,
     wallets: (user.carteiras ?? []).map((wallet) => ({
@@ -44,6 +56,34 @@ export function serializeAdminUser(user, { includeSensitive = false } = {}) {
       name: wallet.tipo_carteira?.nome ?? "Carteira",
       pendingCents: Number(wallet.saldo_pendente_centavos),
     })),
+  };
+}
+
+function serializeProviderProfile(user) {
+  const seller = user.vendedor;
+  if (!seller || seller.excluido_em) return null;
+
+  return {
+    courier: seller.motoboy
+      ? {
+          acceptsPlatformCalls: seller.motoboy.aceita_chamadas_plataforma,
+          id: seller.motoboy.id,
+          status: seller.motoboy.status,
+        }
+      : null,
+    id: seller.id,
+    kycStatus: seller.status_kyc,
+    publicName: seller.nome_publico,
+    services: (seller.servicos ?? []).map((service) => ({
+      availableNow: service.disponivel_agora,
+      id: service.id,
+      name: service.nome,
+      status: service.status,
+      typeId: service.tipo_servico_id,
+      typeName: service.tipo_servico?.nome ?? service.nome,
+      operationalType: service.tipo_servico?.tipo_operacao ?? "GERAL",
+    })),
+    status: seller.status,
   };
 }
 
@@ -77,7 +117,7 @@ export function serializeCategory(category) {
   };
 }
 
-export function serializeSalesSegment(segment) {
+export function serializeSalesSegment(segment, { globalPaymentPolicy = null } = {}) {
   const commission = {
     cashbackPercent:
       segment.percentual_cashback == null ? null : Number(segment.percentual_cashback),
@@ -108,6 +148,10 @@ export function serializeSalesSegment(segment) {
     orderFlow: segment.negocia_pedido_por_chat
       ? "CHAT_NEGOTIATION"
       : "DIRECT_CHECKOUT",
+    paymentPolicy: globalPaymentPolicy
+      ? resolvePaymentPolicy({ globalPolicy: globalPaymentPolicy, segment })
+      : null,
+    paymentPolicyOverrides: serializePaymentPolicyOverrides(segment),
     sellersCount: segment._count?.vendedores ?? 0,
     slug: segment.slug,
     sortOrder: segment.ordem,
@@ -139,7 +183,7 @@ export function serializeAdminServiceType(type) {
   };
 }
 
-export function serializeAdminStore(store) {
+export function serializeAdminStore(store, { globalPaymentPolicy = null } = {}) {
   const segment = store.segmento_venda ?? store.categoria?.segmento_venda ?? null;
   const categoryFeePercent = Number(store.categoria?.taxa_plataforma_percentual ?? 0);
   const segmentFeePercent = Number(segment?.taxa_plataforma_percentual ?? categoryFeePercent);
@@ -202,6 +246,10 @@ export function serializeAdminStore(store) {
     name: store.nome,
     ordersCount: store._count?.pedidos ?? 0,
     phone: store.telefone,
+    paymentPolicy: globalPaymentPolicy
+      ? resolvePaymentPolicy({ globalPolicy: globalPaymentPolicy, store })
+      : null,
+    paymentPolicyOverrides: serializePaymentPolicyOverrides(store),
     productsCount: store._count?.produtos ?? 0,
     segment: segment
       ? {

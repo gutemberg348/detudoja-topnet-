@@ -18,13 +18,21 @@
     "backfill:city-base": "node prisma/backfill-city-base.js",
     "seed:admin": "node prisma/seed.js",
     "seed:demo": "node prisma/seed-demo.js",
+    "seed:load-scenario": "node prisma/seed-load-scenario.js",
     "seed:service-types": "node prisma/seed-service-types.js",
+    "test:load-scenario": "node --import ./test.setup.js --test --test-concurrency=1 scenarios/load-scenario.scenario.js",
     "media:curated": "node prisma/apply-curated-media.js",
     "audit:business": "node prisma/audit-business.js",
     "reconcile:completed-orders": "node prisma/reconcile-completed-orders.js"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
+    "@socket.io/redis-adapter": "^8.3.0",
+    "@tensorflow/tfjs-backend-wasm": "^4.22.0",
+    "@tensorflow/tfjs-converter": "^4.22.0",
+    "@tensorflow/tfjs-core": "^4.22.0",
+    "@tesseract.js-data/por": "^1.0.0",
+    "@vladmandic/human": "^3.3.6",
     "argon2": "^0.44.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
@@ -34,16 +42,22 @@
     "file-type": "^20.5.0",
     "google-auth-library": "^10.9.1",
     "helmet": "^8.1.0",
+    "ioredis": "^5.8.2",
     "jose": "^6.2.10",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.2.0",
+    "nodemailer": "^10.0.0",
     "qrcode": "^1.5.4",
-    "sharp": "^0.34.5",
+    "rate-limit-redis": "^4.2.0",
+    "sharp": "^0.35.4",
     "socket.io": "^4.8.3",
+    "socket.io-parser": "4.2.7",
+    "tesseract.js": "^7.0.0",
     "zod": "^3.25.67"
   },
   "devDependencies": {
     "nodemon": "^3.1.10",
-    "prisma": "^6.19.3"
+    "prisma": "^6.19.3",
+    "socket.io-client": "^4.8.3"
   }
 }

@@ -62,6 +62,18 @@ enum StatusKyc {
   BLOQUEADO
 }
 
+enum TipoDocumentoKyc {
+  RG
+  CNH
+  RNE
+}
+
+enum TipoArquivoKyc {
+  DOCUMENTO_FRENTE
+  DOCUMENTO_VERSO
+  SELFIE
+}
+
 enum TipoChavePix {
   CPF
   CNPJ
@@ -164,6 +176,13 @@ enum StatusConversaLoja {
   BLOQUEADA
 }
 
+enum StatusConversaPessoal {
+  PENDENTE
+  ATIVA
+  RECUSADA
+  BLOQUEADA
+}
+
 enum OrigemMensagemConversaLoja {
   CLIENTE
   LOJA
@@ -235,6 +254,7 @@ enum StatusConversaServico {
   ABERTA
   ACORDADA
   AGUARDANDO_CONFIRMACAO
+  EM_DISPUTA
   ENCERRADA
   CANCELADA
 }
@@ -312,6 +332,7 @@ enum TipoLancamentoCarteira {
 }
 
 enum OrigemLancamentoCarteira {
+  DEPOSITO_PIX
   PAGAMENTO
   VENDA
   CASHBACK
@@ -344,6 +365,7 @@ enum MetodoPagamento {
 enum StatusPagamento {
   PENDENTE
   AGUARDANDO_PAGAMENTO
+  EM_RECONCILIACAO
   PAGO
   LIQUIDADO
   CANCELADO
@@ -439,10 +461,20 @@ enum StatusSaque {
   EM_ANALISE
   APROVADO
   PROCESSANDO
+  EM_RECONCILIACAO
   PAGO
   RECUSADO
   CANCELADO
   FALHOU
+}
+
+enum StatusRepassePix {
+  PENDENTE
+  PROCESSANDO
+  EM_RECONCILIACAO
+  PAGO
+  FALHOU
+  CANCELADO
 }
 
 enum TipoTaxaPlataforma {
@@ -537,7 +569,11 @@ model Administrador {
   atualizado_em   DateTime            @updatedAt @db.Timestamptz(3)
   excluido_em     DateTime?           @db.Timestamptz(3)
 
-  sessoes_autenticacao SessaoAutenticacao[]
+  sessoes_autenticacao        SessaoAutenticacao[]
+  saques_aprovados            Saque[]                   @relation("SaquesAprovadosAdmin")
+  saques_recusados            Saque[]                   @relation("SaquesRecusadosAdmin")
+  solicitacoes_kyc_analisadas SolicitacaoKyc[]          @relation("SolicitacoesKycAnalisadasAdmin")
+  auditorias                  AuditoriaAdministrativa[]
 
   @@index([status])
   @@index([papel])
@@ -557,9 +593,27 @@ model ConfiguracaoSistema {
   @@map("configuracoes_sistema")
 }
 
+model AuditoriaAdministrativa {
+  id               Int      @id @default(autoincrement())
+  administrador_id Int
+  usuario_alvo_id  Int?
+  acao             String   @db.VarChar(100)
+  dados_json       Json?
+  criado_em        DateTime @default(now()) @db.Timestamptz(3)
+
+  administrador Administrador @relation(fields: [administrador_id], references: [id], onDelete: Restrict)
+  usuario_alvo  Usuario?      @relation(fields: [usuario_alvo_id], references: [id], onDelete: SetNull)
+
+  @@index([administrador_id, criado_em])
+  @@index([usuario_alvo_id, criado_em])
+  @@index([acao, criado_em])
+  @@map("auditorias_administrativas")
+}
+
 model Usuario {
   id                      Int              @id @default(autoincrement())
   nome                    String           @db.VarChar(160)
+  identificador_publico   String?          @unique @db.VarChar(80)
   email                   String           @unique @db.VarChar(255)
   telefone                String?          @unique @db.VarChar(30)
   cpf                     String?          @unique @db.VarChar(14)
@@ -582,6 +636,7 @@ model Usuario {
   kyc                        KycUsuario?
   contas_bancarias           ContaBancaria[]
   carteiras                  Carteira[]
+  depositos_carteira         DepositoCarteira[]
   codigos_convite            CodigoConvite[]
   indicacoes_feitas          Indicacao[]               @relation("UsuarioIndicador")
   indicacao_recebida         Indicacao?                @relation("UsuarioIndicado")
@@ -592,10 +647,15 @@ model Usuario {
   mensagens_pedido_loja      PedidoLojaMensagem[]
   propostas_pedido_loja      PropostaPedidoLoja[]      @relation("UsuarioPropostasPedidoLoja")
   conversas_servico_cliente  ConversaServico[]         @relation("ConversaServicoCliente")
+  avaliacoes_servico_feitas  AvaliacaoServico[]        @relation("AvaliacaoServicoCliente")
   solicitacoes_motoboy       SolicitacaoMotoboy[]      @relation("UsuarioSolicitacoesMotoboy")
   mensagens_conversa_servico ConversaServicoMensagem[]
   conversas_loja_cliente     ConversaLoja[]            @relation("ConversaLojaCliente")
   mensagens_conversa_loja    ConversaLojaMensagem[]    @relation("ConversaLojaMensagemAutor")
+  conversas_pessoais_a       ConversaPessoal[]         @relation("ConversaPessoalUsuarioA")
+  conversas_pessoais_b       ConversaPessoal[]         @relation("ConversaPessoalUsuarioB")
+  amizades_solicitadas       ConversaPessoal[]         @relation("ConversaPessoalSolicitante")
+  mensagens_pessoais         ConversaPessoalMensagem[] @relation("ConversaPessoalMensagemAutor")
   saques                     Saque[]
   recompensas                Recompensa[]              @relation("UsuarioBeneficiado")
   lancamentos_carteira       LancamentoCarteira[]
@@ -604,16 +664,82 @@ model Usuario {
   lojas_vinculadas           UsuarioLoja[]
   transacoes_compradas       TransacaoComercial[]      @relation("UsuarioComprador")
   recebiveis                 Recebivel[]               @relation("UsuarioRecebedor")
+  repasses_pix               RepassePix[]
   eventos_financeiros        EventoFinanceiro[]
   identidades_sociais        IdentidadeSocialUsuario[]
   sessoes_autenticacao       SessaoAutenticacao[]
+  tokens_recuperacao_senha   TokenRecuperacaoSenha[]
+  dispositivos_push          DispositivoPush[]
+  auditorias_administrativas AuditoriaAdministrativa[]
   loja_origem_cadastro       Loja?                     @relation("UsuariosCadastroOrigemLoja", fields: [loja_origem_cadastro_id], references: [id], onDelete: SetNull)
 
   @@index([status])
+  @@index([identificador_publico])
   @@index([tipo_conta])
   @@index([nivel_kyc])
   @@index([loja_origem_cadastro_id])
   @@map("usuarios")
+}
+
+model DispositivoPush {
+  id            Int      @id @default(autoincrement())
+  usuario_id    Int
+  token         String   @unique @db.VarChar(255)
+  plataforma    String   @db.VarChar(20)
+  ativo         Boolean  @default(true)
+  ultimo_uso_em DateTime @default(now()) @db.Timestamptz(3)
+  criado_em     DateTime @default(now()) @db.Timestamptz(3)
+  atualizado_em DateTime @updatedAt @db.Timestamptz(3)
+
+  usuario Usuario @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+
+  @@index([usuario_id, ativo])
+  @@index([ultimo_uso_em])
+  @@map("dispositivos_push")
+}
+
+model ConversaPessoal {
+  id                  Int                   @id @default(autoincrement())
+  usuario_a_id        Int
+  usuario_b_id        Int
+  solicitado_por_id   Int
+  status              StatusConversaPessoal @default(PENDENTE)
+  apelido_usuario_a   String?               @db.VarChar(80)
+  apelido_usuario_b   String?               @db.VarChar(80)
+  nao_lidas_usuario_a Int                   @default(0)
+  nao_lidas_usuario_b Int                   @default(0)
+  ultima_mensagem_em  DateTime?             @db.Timestamptz(3)
+  aceito_em           DateTime?             @db.Timestamptz(3)
+  criado_em           DateTime              @default(now()) @db.Timestamptz(3)
+  atualizado_em       DateTime              @updatedAt @db.Timestamptz(3)
+
+  usuario_a      Usuario                   @relation("ConversaPessoalUsuarioA", fields: [usuario_a_id], references: [id], onDelete: Cascade)
+  usuario_b      Usuario                   @relation("ConversaPessoalUsuarioB", fields: [usuario_b_id], references: [id], onDelete: Cascade)
+  solicitado_por Usuario                   @relation("ConversaPessoalSolicitante", fields: [solicitado_por_id], references: [id], onDelete: Restrict)
+  mensagens      ConversaPessoalMensagem[]
+
+  @@unique([usuario_a_id, usuario_b_id])
+  @@index([usuario_a_id, status, ultima_mensagem_em])
+  @@index([usuario_b_id, status, ultima_mensagem_em])
+  @@index([solicitado_por_id, status])
+  @@map("conversas_pessoais")
+}
+
+model ConversaPessoalMensagem {
+  id               Int       @id @default(autoincrement())
+  conversa_id      Int
+  autor_usuario_id Int
+  mensagem         String    @db.VarChar(2000)
+  lido_em          DateTime? @db.Timestamptz(3)
+  criado_em        DateTime  @default(now()) @db.Timestamptz(3)
+
+  conversa ConversaPessoal @relation(fields: [conversa_id], references: [id], onDelete: Cascade)
+  autor    Usuario         @relation("ConversaPessoalMensagemAutor", fields: [autor_usuario_id], references: [id], onDelete: Cascade)
+
+  @@index([conversa_id, criado_em])
+  @@index([autor_usuario_id])
+  @@index([conversa_id, lido_em])
+  @@map("conversas_pessoais_mensagens")
 }
 
 model SessaoAutenticacao {
@@ -636,6 +762,21 @@ model SessaoAutenticacao {
   @@index([expira_em])
   @@index([revogada_em])
   @@map("sessoes_autenticacao")
+}
+
+model TokenRecuperacaoSenha {
+  id         Int       @id @default(autoincrement())
+  usuario_id Int
+  token_hash String    @unique @db.VarChar(128)
+  expira_em  DateTime  @db.Timestamptz(3)
+  usado_em   DateTime? @db.Timestamptz(3)
+  criado_em  DateTime  @default(now()) @db.Timestamptz(3)
+
+  usuario Usuario @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+
+  @@index([usuario_id, expira_em])
+  @@index([expira_em])
+  @@map("tokens_recuperacao_senha")
 }
 
 model IdentidadeSocialUsuario {
@@ -702,7 +843,8 @@ model KycUsuario {
   criado_em            DateTime   @default(now()) @db.Timestamptz(3)
   atualizado_em        DateTime   @updatedAt @db.Timestamptz(3)
 
-  usuario Usuario @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+  usuario      Usuario          @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+  solicitacoes SolicitacaoKyc[]
 
   @@index([usuario_id])
   @@index([cpf])
@@ -711,28 +853,76 @@ model KycUsuario {
   @@map("kyc_usuarios")
 }
 
+model SolicitacaoKyc {
+  id                     Int              @id @default(autoincrement())
+  kyc_usuario_id         Int
+  tipo_documento         TipoDocumentoKyc
+  status                 StatusKyc        @default(EM_ANALISE)
+  triagem_json           Json
+  motivo_decisao         String?
+  analisado_por_admin_id Int?
+  enviado_em             DateTime         @default(now()) @db.Timestamptz(3)
+  analisado_em           DateTime?        @db.Timestamptz(3)
+  criado_em              DateTime         @default(now()) @db.Timestamptz(3)
+  atualizado_em          DateTime         @updatedAt @db.Timestamptz(3)
+
+  kyc_usuario         KycUsuario     @relation(fields: [kyc_usuario_id], references: [id], onDelete: Cascade)
+  analisado_por_admin Administrador? @relation("SolicitacoesKycAnalisadasAdmin", fields: [analisado_por_admin_id], references: [id], onDelete: SetNull)
+  arquivos            ArquivoKyc[]
+
+  @@index([kyc_usuario_id, enviado_em])
+  @@index([status, enviado_em])
+  @@index([analisado_por_admin_id])
+  // O indice unico parcial para EM_ANALISE e criado por SQL na migration correspondente.
+  @@map("solicitacoes_kyc")
+}
+
+model ArquivoKyc {
+  id              Int            @id @default(autoincrement())
+  solicitacao_id  Int
+  tipo            TipoArquivoKyc
+  caminho_privado String
+  mime_type       String         @db.VarChar(80)
+  sha256          String         @db.Char(64)
+  tamanho_bytes   Int
+  largura         Int
+  altura          Int
+  brilho_medio    Decimal?       @db.Decimal(6, 2)
+  contraste_medio Decimal?       @db.Decimal(6, 2)
+  criado_em       DateTime       @default(now()) @db.Timestamptz(3)
+
+  solicitacao SolicitacaoKyc @relation(fields: [solicitacao_id], references: [id], onDelete: Cascade)
+
+  @@unique([solicitacao_id, tipo])
+  @@index([sha256])
+  @@map("arquivos_kyc")
+}
+
 model ContaBancaria {
-  id                Int                 @id @default(autoincrement())
-  usuario_id        Int
-  tipo_chave        TipoChavePix?
-  chave_pix         String?             @db.VarChar(255)
-  banco             String?             @db.VarChar(120)
-  agencia           String?             @db.VarChar(20)
-  conta             String?             @db.VarChar(30)
-  tipo_conta        TipoContaBancaria?
-  nome_titular      String              @db.VarChar(180)
-  documento_titular String              @db.VarChar(18)
-  status            StatusContaBancaria @default(PENDENTE)
-  principal         Boolean             @default(false)
-  criado_em         DateTime            @default(now()) @db.Timestamptz(3)
-  atualizado_em     DateTime            @updatedAt @db.Timestamptz(3)
-  excluido_em       DateTime?           @db.Timestamptz(3)
+  id                 Int                 @id @default(autoincrement())
+  usuario_id         Int
+  tipo_chave         TipoChavePix?
+  chave_pix          String?             @db.VarChar(255)
+  banco              String?             @db.VarChar(120)
+  agencia            String?             @db.VarChar(20)
+  conta              String?             @db.VarChar(30)
+  tipo_conta         TipoContaBancaria?
+  nome_titular       String              @db.VarChar(180)
+  documento_titular  String              @db.VarChar(18)
+  status             StatusContaBancaria @default(PENDENTE)
+  principal          Boolean             @default(false)
+  validado_em        DateTime?           @db.Timestamptz(3)
+  provedor_validacao String?             @db.VarChar(32)
+  criado_em          DateTime            @default(now()) @db.Timestamptz(3)
+  atualizado_em      DateTime            @updatedAt @db.Timestamptz(3)
+  excluido_em        DateTime?           @db.Timestamptz(3)
 
-  usuario Usuario @relation(fields: [usuario_id], references: [id], onDelete: Restrict)
-  saques  Saque[]
+  usuario      Usuario      @relation(fields: [usuario_id], references: [id], onDelete: Restrict)
+  saques       Saque[]
+  repasses_pix RepassePix[]
 
+  @@unique([chave_pix])
   @@index([usuario_id])
-  @@index([chave_pix])
   @@index([documento_titular])
   @@index([status])
   @@index([principal])
@@ -860,6 +1050,10 @@ model Loja {
   horarios_funcionamento                   Json?
   aceita_pagamento_online                  Boolean    @default(false)
   aceita_qrcode                            Boolean    @default(false)
+  taxa_entrega_centavos                    BigInt     @default(790) @db.BigInt
+  taxa_servico_online_centavos             BigInt?    @db.BigInt
+  taxa_processamento_local_centavos        BigInt?    @db.BigInt
+  limite_cashback_prioritario_centavos     BigInt?    @db.BigInt
   taxa_plataforma_personalizada_percentual Decimal?   @db.Decimal(7, 4)
   taxa_plataforma_alterada_por_admin_id    Int?
   taxa_plataforma_alterada_em              DateTime?  @db.Timestamptz(3)
@@ -1044,46 +1238,50 @@ model Vendedor {
   atualizado_em                      DateTime       @updatedAt @db.Timestamptz(3)
   excluido_em                        DateTime?      @db.Timestamptz(3)
 
-  usuario           Usuario              @relation(fields: [usuario_id], references: [id], onDelete: Restrict)
-  segmento_venda    SegmentoVenda?       @relation(fields: [segmento_venda_id], references: [id], onDelete: SetNull)
-  servicos          ServicoVendedor[]
-  pagamentos        Pagamento[]
-  transacoes        TransacaoComercial[]
-  vendas_autonomas  VendaAutonoma[]
-  cobrancas         Cobranca[]
-  conversas_servico ConversaServico[]
-  propostas_servico PropostaServico[]
-  motoboy           Motoboy?
+  usuario            Usuario              @relation(fields: [usuario_id], references: [id], onDelete: Restrict)
+  segmento_venda     SegmentoVenda?       @relation(fields: [segmento_venda_id], references: [id], onDelete: SetNull)
+  servicos           ServicoVendedor[]
+  pagamentos         Pagamento[]
+  transacoes         TransacaoComercial[]
+  vendas_autonomas   VendaAutonoma[]
+  cobrancas          Cobranca[]
+  conversas_servico  ConversaServico[]
+  propostas_servico  PropostaServico[]
+  avaliacoes_servico AvaliacaoServico[]
+  motoboy            Motoboy?
 
+  @@unique([cpf])
+  @@unique([cnpj])
   @@index([status])
   @@index([status_kyc])
   @@index([categoria])
-  @@unique([cpf])
-  @@unique([cnpj])
   @@index([segmento_venda_id])
   @@map("vendedores")
 }
 
 model SegmentoVenda {
-  id                              Int                 @id @default(autoincrement())
-  categoria_loja_id               Int?
-  nome                            String              @db.VarChar(120)
-  slug                            String              @unique @db.VarChar(140)
-  descricao                       String?
-  icone                           String?             @db.VarChar(80)
-  status                          StatusSegmentoVenda @default(ATIVO)
-  ordem                           Int                 @default(0)
-  taxa_plataforma_percentual      Decimal             @default(10) @db.Decimal(7, 4)
-  percentual_cashback             Decimal?            @db.Decimal(7, 4)
-  percentual_rede                 Decimal?            @db.Decimal(7, 4)
-  percentual_indicacao_consumidor Decimal?            @db.Decimal(7, 4)
-  percentual_indicacao_vendedor   Decimal?            @db.Decimal(7, 4)
-  atende_por_chat                 Boolean             @default(false)
-  negocia_pedido_por_chat         Boolean             @default(false)
-  taxa_plataforma_atualizada_em   DateTime?           @db.Timestamptz(3)
-  criado_em                       DateTime            @default(now()) @db.Timestamptz(3)
-  atualizado_em                   DateTime            @updatedAt @db.Timestamptz(3)
-  excluido_em                     DateTime?           @db.Timestamptz(3)
+  id                                   Int                 @id @default(autoincrement())
+  categoria_loja_id                    Int?
+  nome                                 String              @db.VarChar(120)
+  slug                                 String              @unique @db.VarChar(140)
+  descricao                            String?
+  icone                                String?             @db.VarChar(80)
+  status                               StatusSegmentoVenda @default(ATIVO)
+  ordem                                Int                 @default(0)
+  taxa_plataforma_percentual           Decimal             @default(10) @db.Decimal(7, 4)
+  percentual_cashback                  Decimal?            @db.Decimal(7, 4)
+  percentual_rede                      Decimal?            @db.Decimal(7, 4)
+  percentual_indicacao_consumidor      Decimal?            @db.Decimal(7, 4)
+  percentual_indicacao_vendedor        Decimal?            @db.Decimal(7, 4)
+  taxa_servico_online_centavos         BigInt?             @db.BigInt
+  taxa_processamento_local_centavos    BigInt?             @db.BigInt
+  limite_cashback_prioritario_centavos BigInt?             @db.BigInt
+  atende_por_chat                      Boolean             @default(false)
+  negocia_pedido_por_chat              Boolean             @default(false)
+  taxa_plataforma_atualizada_em        DateTime?           @db.Timestamptz(3)
+  criado_em                            DateTime            @default(now()) @db.Timestamptz(3)
+  atualizado_em                        DateTime            @updatedAt @db.Timestamptz(3)
+  excluido_em                          DateTime?           @db.Timestamptz(3)
 
   vendedores        Vendedor[]
   vendas_autonomas  VendaAutonoma[]
@@ -1101,18 +1299,19 @@ model SegmentoVenda {
 }
 
 model ServicoVendedor {
-  id               Int                   @id @default(autoincrement())
-  vendedor_id      Int
-  tipo_servico_id  Int?
-  nome             String                @db.VarChar(180)
-  descricao        String?
-  preco_centavos   BigInt?               @db.BigInt
-  categoria        String?               @db.VarChar(120)
-  status           StatusServicoVendedor @default(ATIVO)
-  disponivel_agora Boolean               @default(false)
-  criado_em        DateTime              @default(now()) @db.Timestamptz(3)
-  atualizado_em    DateTime              @updatedAt @db.Timestamptz(3)
-  excluido_em      DateTime?             @db.Timestamptz(3)
+  id                            Int                   @id @default(autoincrement())
+  vendedor_id                   Int
+  tipo_servico_id               Int?
+  nome                          String                @db.VarChar(180)
+  descricao                     String?
+  preco_centavos                BigInt?               @db.BigInt
+  categoria                     String?               @db.VarChar(120)
+  status                        StatusServicoVendedor @default(ATIVO)
+  disponivel_agora              Boolean               @default(false)
+  disponibilidade_atualizada_em DateTime?             @db.Timestamptz(3)
+  criado_em                     DateTime              @default(now()) @db.Timestamptz(3)
+  atualizado_em                 DateTime              @updatedAt @db.Timestamptz(3)
+  excluido_em                   DateTime?             @db.Timestamptz(3)
 
   vendedor          Vendedor          @relation(fields: [vendedor_id], references: [id], onDelete: Cascade)
   tipo_servico      TipoServico?      @relation(fields: [tipo_servico_id], references: [id], onDelete: SetNull)
@@ -1122,6 +1321,7 @@ model ServicoVendedor {
   @@index([vendedor_id])
   @@index([tipo_servico_id])
   @@index([disponivel_agora])
+  @@index([disponivel_agora, disponibilidade_atualizada_em])
   @@index([categoria])
   @@index([status])
   @@map("servicos_vendedor")
@@ -1178,6 +1378,7 @@ model ConversaServico {
   mensagens           ConversaServicoMensagem[]
   propostas           PropostaServico[]
   solicitacao_motoboy SolicitacaoMotoboy?       @relation("SolicitacaoMotoboyConversa")
+  avaliacao           AvaliacaoServico?
 
   @@index([cliente_usuario_id, status])
   @@index([vendedor_id, status])
@@ -1187,6 +1388,25 @@ model ConversaServico {
   @@index([segmento_venda_id, status])
   @@index([atualizado_em])
   @@map("conversas_servico")
+}
+
+model AvaliacaoServico {
+  id                   Int      @id @default(autoincrement())
+  conversa_servico_id  Int      @unique
+  avaliador_usuario_id Int
+  vendedor_id          Int
+  nota                 Int
+  comentario           String?  @db.VarChar(600)
+  criado_em            DateTime @default(now()) @db.Timestamptz(3)
+  atualizado_em        DateTime @updatedAt @db.Timestamptz(3)
+
+  conversa_servico ConversaServico @relation(fields: [conversa_servico_id], references: [id], onDelete: Cascade)
+  avaliador        Usuario         @relation("AvaliacaoServicoCliente", fields: [avaliador_usuario_id], references: [id], onDelete: Restrict)
+  vendedor         Vendedor        @relation(fields: [vendedor_id], references: [id], onDelete: Restrict)
+
+  @@index([vendedor_id, criado_em])
+  @@index([avaliador_usuario_id])
+  @@map("avaliacoes_servico")
 }
 
 model Motoboy {
@@ -1376,7 +1596,9 @@ model Carteira {
   tipo_carteira         TipoCarteira          @relation(fields: [tipo_carteira_id], references: [id], onDelete: Restrict)
   lancamentos           LancamentoCarteira[]
   saques                Saque[]
+  origens_saque         SaqueOrigemCarteira[]
   composicoes_pagamento PagamentoComposicao[]
+  depositos             DepositoCarteira[]
 
   @@unique([usuario_id, tipo_carteira_id])
   @@index([usuario_id])
@@ -1450,6 +1672,7 @@ model Pagamento {
   comprovantes        ComprovantePagamento[]
   eventos_financeiros EventoFinanceiro[]
   eventos_gateway     EventoGatewayPagamento[]
+  deposito_carteira   DepositoCarteira?
 
   @@unique([gateway, gateway_pagamento_id])
   @@index([usuario_pagador_id])
@@ -1460,6 +1683,38 @@ model Pagamento {
   @@index([gateway_pagamento_id])
   @@index([criado_em])
   @@map("pagamentos")
+}
+
+enum StatusDepositoCarteira {
+  PENDENTE
+  CONFIRMADO
+  CANCELADO
+  FALHOU
+  EM_REVISAO
+}
+
+model DepositoCarteira {
+  id                          Int                    @id @default(autoincrement())
+  usuario_id                  Int
+  carteira_id                 Int
+  pagamento_id                Int                    @unique
+  chave_idempotencia          String                 @db.VarChar(100)
+  valor_centavos              BigInt                 @db.BigInt
+  taxa_processamento_centavos BigInt                 @default(0) @db.BigInt
+  valor_liquido_centavos      BigInt                 @default(0) @db.BigInt
+  status                      StatusDepositoCarteira @default(PENDENTE)
+  creditado_em                DateTime?              @db.Timestamptz(3)
+  criado_em                   DateTime               @default(now()) @db.Timestamptz(3)
+  atualizado_em               DateTime               @updatedAt @db.Timestamptz(3)
+
+  usuario   Usuario   @relation(fields: [usuario_id], references: [id], onDelete: Restrict)
+  carteira  Carteira  @relation(fields: [carteira_id], references: [id], onDelete: Restrict)
+  pagamento Pagamento @relation(fields: [pagamento_id], references: [id], onDelete: Restrict)
+
+  @@unique([usuario_id, chave_idempotencia])
+  @@index([usuario_id, status, criado_em])
+  @@index([carteira_id])
+  @@map("depositos_carteira")
 }
 
 model EventoGatewayPagamento {
@@ -1573,6 +1828,7 @@ model PedidoLoja {
   status                         StatusPedidoLoja  @default(RECEBIDO)
   subtotal_centavos              BigInt            @db.BigInt
   taxa_entrega_centavos          BigInt            @default(0) @db.BigInt
+  taxa_servico_centavos          BigInt            @default(0) @db.BigInt
   total_centavos                 BigInt            @db.BigInt
   valor_pago_saldo_centavos      BigInt            @default(0) @db.BigInt
   valor_pago_pix_centavos        BigInt            @default(0) @db.BigInt
@@ -1681,7 +1937,11 @@ model TransacaoComercial {
   lojista_id                      Int?
   vendedor_id                     Int?
   valor_bruto_centavos            BigInt                   @db.BigInt
+  base_comissao_centavos          BigInt                   @default(0) @db.BigInt
+  valor_entrega_lojista_centavos  BigInt                   @default(0) @db.BigInt
   taxa_plataforma_centavos        BigInt                   @default(0) @db.BigInt
+  taxa_processamento_centavos     BigInt                   @default(0) @db.BigInt
+  cashback_prioritario_centavos   BigInt                   @default(0) @db.BigInt
   valor_liquido_lojista_centavos  BigInt                   @default(0) @db.BigInt
   valor_pool_recompensas_centavos BigInt                   @default(0) @db.BigInt
   valor_empresa_centavos          BigInt                   @default(0) @db.BigInt
@@ -1706,12 +1966,14 @@ model TransacaoComercial {
   lancamentos_plataforma LancamentoPlataforma[]
   eventos_financeiros    EventoFinanceiro[]
   documento_fiscal       DocumentoFiscal?
+  repasse_pix            RepassePix?
 
   @@index([comprador_usuario_id])
   @@index([loja_id])
   @@index([lojista_id])
   @@index([vendedor_id])
   @@index([status])
+  @@index([status, validada_em])
   @@index([criado_em])
   @@index([liquidada_em])
   @@map("transacoes_comerciais")
@@ -1737,6 +1999,7 @@ model Recebivel {
   transacao_comercial TransacaoComercial @relation(fields: [transacao_comercial_id], references: [id], onDelete: Restrict)
   usuario_recebedor   Usuario            @relation("UsuarioRecebedor", fields: [usuario_recebedor_id], references: [id], onDelete: Restrict)
   loja                Loja?              @relation(fields: [loja_id], references: [id], onDelete: Restrict)
+  repasse_pix         RepassePix?
 
   @@unique([transacao_comercial_id, usuario_recebedor_id, tipo_recebedor])
   @@index([transacao_comercial_id])
@@ -1819,32 +2082,106 @@ model CampanhaCashback {
 }
 
 model Saque {
-  id                     Int         @id @default(autoincrement())
+  id                     Int              @id @default(autoincrement())
   usuario_id             Int
   carteira_id            Int
   conta_bancaria_id      Int
-  valor_centavos         BigInt      @db.BigInt
-  taxa_saque_centavos    BigInt      @default(0) @db.BigInt
-  valor_liquido_centavos BigInt      @db.BigInt
-  status                 StatusSaque @default(SOLICITADO)
-  gateway_saque_id       String?     @db.VarChar(255)
-  solicitado_em          DateTime    @default(now()) @db.Timestamptz(3)
-  processado_em          DateTime?   @db.Timestamptz(3)
-  cancelado_em           DateTime?   @db.Timestamptz(3)
+  valor_centavos         BigInt           @db.BigInt
+  taxa_saque_centavos    BigInt           @default(0) @db.BigInt
+  valor_liquido_centavos BigInt           @db.BigInt
+  status                 StatusSaque      @default(SOLICITADO)
+  chave_idempotencia     String?          @db.VarChar(100)
+  referencia_externa     String?          @unique @db.VarChar(120)
+  tipo_chave_pix         TipoChavePix?
+  chave_pix_destino      String?          @db.VarChar(255)
+  nome_titular           String?          @db.VarChar(180)
+  documento_titular      String?          @db.VarChar(18)
+  gateway                GatewayPagamento @default(ASAAS)
+  gateway_saque_id       String?          @unique @db.VarChar(255)
+  tentativas             Int              @default(0)
+  aprovado_por_admin_id  Int?
+  recusado_por_admin_id  Int?
+  solicitado_em          DateTime         @default(now()) @db.Timestamptz(3)
+  aprovado_em            DateTime?        @db.Timestamptz(3)
+  enviado_em             DateTime?        @db.Timestamptz(3)
+  processado_em          DateTime?        @db.Timestamptz(3)
+  falhou_em              DateTime?        @db.Timestamptz(3)
+  cancelado_em           DateTime?        @db.Timestamptz(3)
   motivo_cancelamento    String?
-  criado_em              DateTime    @default(now()) @db.Timestamptz(3)
-  atualizado_em          DateTime    @updatedAt @db.Timestamptz(3)
+  motivo_falha           String?
+  comprovante_url        String?
+  criado_em              DateTime         @default(now()) @db.Timestamptz(3)
+  atualizado_em          DateTime         @updatedAt @db.Timestamptz(3)
 
-  usuario        Usuario       @relation(fields: [usuario_id], references: [id], onDelete: Restrict)
-  carteira       Carteira      @relation(fields: [carteira_id], references: [id], onDelete: Restrict)
-  conta_bancaria ContaBancaria @relation(fields: [conta_bancaria_id], references: [id], onDelete: Restrict)
+  usuario          Usuario               @relation(fields: [usuario_id], references: [id], onDelete: Restrict)
+  carteira         Carteira              @relation(fields: [carteira_id], references: [id], onDelete: Restrict)
+  conta_bancaria   ContaBancaria         @relation(fields: [conta_bancaria_id], references: [id], onDelete: Restrict)
+  aprovado_por     Administrador?        @relation("SaquesAprovadosAdmin", fields: [aprovado_por_admin_id], references: [id], onDelete: Restrict)
+  recusado_por     Administrador?        @relation("SaquesRecusadosAdmin", fields: [recusado_por_admin_id], references: [id], onDelete: Restrict)
+  lancamento_taxa  LancamentoPlataforma?
+  origens_carteira SaqueOrigemCarteira[]
 
+  @@unique([usuario_id, chave_idempotencia])
   @@index([usuario_id])
   @@index([carteira_id])
   @@index([conta_bancaria_id])
   @@index([status])
+  @@index([aprovado_por_admin_id])
+  @@index([recusado_por_admin_id])
   @@index([solicitado_em])
   @@map("saques")
+}
+
+model SaqueOrigemCarteira {
+  id             Int      @id @default(autoincrement())
+  saque_id       Int
+  carteira_id    Int
+  valor_centavos BigInt   @db.BigInt
+  criado_em      DateTime @default(now()) @db.Timestamptz(3)
+
+  saque    Saque    @relation(fields: [saque_id], references: [id], onDelete: Cascade)
+  carteira Carteira @relation(fields: [carteira_id], references: [id], onDelete: Restrict)
+
+  @@unique([saque_id, carteira_id])
+  @@index([carteira_id])
+  @@map("saques_origens_carteira")
+}
+
+model RepassePix {
+  id                       Int              @id @default(autoincrement())
+  transacao_comercial_id   Int              @unique
+  recebivel_id             Int              @unique
+  usuario_id               Int
+  conta_bancaria_id        Int
+  valor_centavos           BigInt           @db.BigInt
+  tipo_chave               TipoChavePix
+  chave_pix_destino        String           @db.VarChar(255)
+  nome_titular             String           @db.VarChar(180)
+  documento_titular        String           @db.VarChar(18)
+  status                   StatusRepassePix @default(PENDENTE)
+  gateway                  GatewayPagamento @default(ASAAS)
+  gateway_transferencia_id String?          @unique @db.VarChar(255)
+  referencia_externa       String           @unique @db.VarChar(120)
+  tentativas               Int              @default(0)
+  motivo_falha             String?
+  comprovante_url          String?
+  solicitado_em            DateTime         @default(now()) @db.Timestamptz(3)
+  enviado_em               DateTime?        @db.Timestamptz(3)
+  pago_em                  DateTime?        @db.Timestamptz(3)
+  falhou_em                DateTime?        @db.Timestamptz(3)
+  criado_em                DateTime         @default(now()) @db.Timestamptz(3)
+  atualizado_em            DateTime         @updatedAt @db.Timestamptz(3)
+
+  transacao_comercial TransacaoComercial @relation(fields: [transacao_comercial_id], references: [id], onDelete: Restrict)
+  recebivel           Recebivel          @relation(fields: [recebivel_id], references: [id], onDelete: Restrict)
+  usuario             Usuario            @relation(fields: [usuario_id], references: [id], onDelete: Restrict)
+  conta_bancaria      ContaBancaria      @relation(fields: [conta_bancaria_id], references: [id], onDelete: Restrict)
+
+  @@index([usuario_id])
+  @@index([conta_bancaria_id])
+  @@index([status, solicitado_em])
+  @@index([gateway])
+  @@map("repasses_pix")
 }
 
 model TaxaPlataforma {
@@ -1896,6 +2233,7 @@ model LancamentoPlataforma {
   id                     Int                        @id @default(autoincrement())
   conta_plataforma_id    Int
   transacao_comercial_id Int?
+  saque_id               Int?                       @unique
   tipo_lancamento        TipoLancamentoPlataforma
   valor_centavos         BigInt                     @db.BigInt
   descricao              String?
@@ -1905,9 +2243,11 @@ model LancamentoPlataforma {
 
   conta_plataforma    ContaPlataforma     @relation(fields: [conta_plataforma_id], references: [id], onDelete: Restrict)
   transacao_comercial TransacaoComercial? @relation(fields: [transacao_comercial_id], references: [id], onDelete: Restrict)
+  saque               Saque?              @relation(fields: [saque_id], references: [id], onDelete: Restrict)
 
   @@index([conta_plataforma_id])
   @@index([transacao_comercial_id])
+  @@index([saque_id])
   @@index([tipo_lancamento])
   @@index([status])
   @@index([criado_em])

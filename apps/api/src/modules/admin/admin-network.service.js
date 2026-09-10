@@ -1,5 +1,10 @@
 import { env } from "../../config/env.js";
-import { adminNetworkRepository } from "./admin-network.repository.js";
+import { AppError } from "../../utils/errors.js";
+import { parsePositiveId } from "../../utils/ids.js";
+import {
+  adminNetworkRepository,
+  createAdminNetworkRepository,
+} from "./admin-network.repository.js";
 
 function activeVerifiedDirectCount(user) {
   return user.indicacoes_feitas.filter(
@@ -257,4 +262,142 @@ export async function getAdminNetworkOverview(query = {}) {
       verified: people.filter((person) => person.verified).length,
     },
   };
+}
+
+function buildPlacementGraph(placements) {
+  const byUser = new Map(placements.map((placement) => [placement.indicado_usuario_id, placement]));
+  const childrenByParent = new Map();
+
+  for (const placement of placements) {
+    if (!placement.alocado_sob_usuario_id) continue;
+    const children = childrenByParent.get(placement.alocado_sob_usuario_id) ?? [];
+    children.push(placement.indicado_usuario_id);
+    childrenByParent.set(placement.alocado_sob_usuario_id, children);
+  }
+
+  return { byUser, childrenByParent };
+}
+
+function collectSubtree(rootUserId, childrenByParent) {
+  const levels = new Map([[rootUserId, 0]]);
+  const queue = [rootUserId];
+
+  while (queue.length) {
+    const parentId = queue.shift();
+    const parentLevel = levels.get(parentId);
+    for (const childId of childrenByParent.get(parentId) ?? []) {
+      if (levels.has(childId)) continue;
+      levels.set(childId, parentLevel + 1);
+      queue.push(childId);
+    }
+  }
+
+  return levels;
+}
+
+function depthFromRoot(userId, rootId, byUser) {
+  if (userId === rootId) return 0;
+
+  const visited = new Set();
+  let currentId = userId;
+  let depth = 0;
+
+  while (currentId !== rootId) {
+    if (visited.has(currentId)) return null;
+    visited.add(currentId);
+    const placement = byUser.get(currentId);
+    if (!placement?.alocado_sob_usuario_id) return null;
+    currentId = placement.alocado_sob_usuario_id;
+    depth += 1;
+    if (depth > 20) return null;
+  }
+
+  return depth;
+}
+
+export async function moveAdminNetworkPlacement(adminId, userId, data) {
+  const movedUserId = parsePositiveId(userId, "Participante invalido");
+  const parentUserId = parsePositiveId(data.parentUserId, "Destino invalido");
+
+  if (movedUserId === parentUserId) {
+    throw new AppError("O participante nao pode ser alocado sob ele mesmo", 409);
+  }
+
+  const companyRoot = await findCompanyRoot();
+  if (!companyRoot) throw new AppError("Raiz da empresa nao encontrada", 409);
+  if (movedUserId === companyRoot.id) throw new AppError("A raiz da empresa nao pode ser movida", 409);
+
+  try {
+    await adminNetworkRepository.transaction(async (database) => {
+      const repository = createAdminNetworkRepository(database);
+      await repository.lockMatrix();
+
+      const [placement, parent, placements] = await Promise.all([
+        repository.findPlacementByUser(movedUserId),
+        repository.findPlacementUser(parentUserId),
+        repository.listPlacements(),
+      ]);
+
+      if (!placement) throw new AppError("Participante ainda nao possui posicao na matriz", 404);
+      if (!parent) throw new AppError("Participante de destino nao encontrado", 404);
+
+      const { byUser, childrenByParent } = buildPlacementGraph(placements);
+      const subtree = collectSubtree(movedUserId, childrenByParent);
+      if (subtree.has(parentUserId)) {
+        throw new AppError("O destino esta dentro da subarvore movida e criaria um ciclo", 409);
+      }
+
+      const occupied = placements.find(
+        (item) =>
+          item.indicado_usuario_id !== movedUserId &&
+          item.alocado_sob_usuario_id === parentUserId &&
+          item.posicao_matriz === data.position,
+      );
+      if (occupied) {
+        throw new AppError(`A posicao ${sideLabel(data.position).toLowerCase()} desse participante ja esta ocupada`, 409);
+      }
+
+      const parentDepth = depthFromRoot(parentUserId, companyRoot.id, byUser);
+      if (parentDepth === null) {
+        throw new AppError("O destino nao esta conectado a raiz real da empresa", 409);
+      }
+
+      const subtreeHeight = Math.max(...subtree.values());
+      const movedDepth = parentDepth + 1;
+      if (movedDepth + subtreeHeight > 20) {
+        throw new AppError("A mudanca ultrapassaria o limite de 20 niveis da matriz", 409);
+      }
+
+      await repository.updatePlacement(placement.id, {
+        alocado_sob_usuario_id: parentUserId,
+        nivel_matriz: movedDepth,
+        posicao_matriz: data.position,
+      });
+
+      for (const [descendantUserId, relativeDepth] of subtree.entries()) {
+        if (descendantUserId === movedUserId) continue;
+        const descendant = byUser.get(descendantUserId);
+        if (descendant) {
+          await repository.updatePlacement(descendant.id, {
+            nivel_matriz: movedDepth + relativeDepth,
+          });
+        }
+      }
+    });
+  } catch (error) {
+    if (error?.code === "P2002") {
+      throw new AppError("A posicao escolhida acabou de ser ocupada. Atualize a rede.", 409);
+    }
+    throw error;
+  }
+
+  console.info("[admin-network] placement moved", {
+    adminId,
+    movedUserId,
+    parentUserId,
+    position: data.position,
+    reason: data.reason,
+  });
+
+  return getAdminNetworkOverview({ maxDepth: 20 });
 }

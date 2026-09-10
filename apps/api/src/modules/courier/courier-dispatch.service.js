@@ -8,11 +8,16 @@ import { AppError } from "../../utils/errors.js";
 import { sameCity } from "../../utils/location.js";
 import { getServiceConversation } from "../service-chats/service-chats.service.js";
 import {
+  availableServiceWhere,
+  isServiceAvailable,
+} from "../service-chats/service-availability.js";
+import {
   activeCourierConversationStatuses,
   getBusyCourierSellerIds,
   isCourierSellerBusy,
 } from "./courier-availability.js";
 import { courierRepository, createCourierRepository } from "./courier.repository.js";
+import { sendExpoPushToUsers } from "../notifications/notifications.service.js";
 
 const courierRequestLifetimeMs = 24 * 60 * 60 * 1000;
 
@@ -49,6 +54,7 @@ function formatAddress(address) {
 }
 
 function serializeRequest(request) {
+  const routeIsSharedInChat = !request.loja_id;
   return {
     acceptedAt: request.aceito_em?.toISOString() ?? null,
     acceptedCourier: request.motoboy_aceite ? {
@@ -61,12 +67,12 @@ function serializeRequest(request) {
     conversationStatus: request.conversa_servico?.status ?? null,
     createdAt: request.criado_em.toISOString(),
     description: request.descricao,
-    destination: request.destino,
+    destination: routeIsSharedInChat ? "A combinar no chat" : request.destino,
     expiresAt: request.expira_em.toISOString(),
     id: request.id,
     isDirect: request.tipo_chamada === "EQUIPE",
     order: request.pedido_loja ? { code: request.pedido_loja.codigo, id: request.pedido_loja.id } : null,
-    origin: request.origem,
+    origin: routeIsSharedInChat ? "A combinar no chat" : request.origem,
     requesterUserId: request.solicitante_usuario_id,
     serviceType: { id: request.tipo_servico.id, name: request.tipo_servico.nome },
     status: request.status,
@@ -120,24 +126,34 @@ async function deliveryType(serviceTypeId = null) {
   return type;
 }
 
-function platformDispatchEligibility() {
+function platformDispatchEligibility(requestingStoreId = null) {
   return {
     OR: [
       { aceita_chamadas_plataforma: true },
       { lojas: { none: { ativo: true } } },
+      ...(requestingStoreId
+        ? [{ lojas: { some: { ativo: true, loja_id: requestingStoreId } } }]
+        : []),
     ],
   };
 }
 
-function canReceivePlatformCalls(courier) {
-  return courier.aceita_chamadas_plataforma || !(courier.lojas ?? []).some((membership) => membership.ativo);
+function canReceivePlatformCalls(courier, requestingStoreId = null) {
+  return courier.aceita_chamadas_plataforma
+    || !(courier.lojas ?? []).some((membership) => membership.ativo)
+    || Boolean(
+      requestingStoreId
+      && (courier.lojas ?? []).some((membership) => (
+        membership.ativo && membership.loja_id === requestingStoreId
+      )),
+    );
 }
 
-async function onlineCandidates(address, typeId, { excludeStoreTeamId = null } = {}) {
+async function onlineCandidates(address, typeId, { requestingStoreId = null } = {}) {
   const services = await courierRepository.findSellerServices({
     include: { vendedor: { include: { motoboy: true, usuario: { select: { id: true } } } } },
     where: {
-      disponivel_agora: true,
+      ...availableServiceWhere(),
       excluido_em: null,
       status: "ATIVO",
       tipo_servico_id: typeId,
@@ -147,10 +163,10 @@ async function onlineCandidates(address, typeId, { excludeStoreTeamId = null } =
           cidade_base: { equals: address.cidade, mode: "insensitive" },
           estado_base: { equals: address.estado, mode: "insensitive" },
           status: "ATIVO",
-          ...platformDispatchEligibility(),
-          ...(excludeStoreTeamId ? { lojas: { none: { ativo: true, loja_id: excludeStoreTeamId } } } : {}),
+          ...platformDispatchEligibility(requestingStoreId),
         },
-        status: { in: ["ATIVO", "PENDENTE"] },
+        status: "ATIVO",
+        status_kyc: "APROVADO",
       },
     },
   });
@@ -161,21 +177,27 @@ async function onlineCandidates(address, typeId, { excludeStoreTeamId = null } =
   return services.filter((service) => !busySellerIds.has(service.vendedor_id));
 }
 
-async function activeRequestForStore(storeId, userId) {
-  return courierRepository.findCourierRequest({
+async function activeRequestForStore(storeId, repository = courierRepository) {
+  return repository.findCourierRequest({
     include: requestInclude,
     orderBy: { criado_em: "desc" },
     where: {
-      expira_em: { gt: new Date() },
       loja_id: storeId,
-      solicitante_usuario_id: userId,
-      status: "PENDENTE",
+      OR: [
+        { expira_em: { gt: new Date() }, status: "PENDENTE" },
+        {
+          conversa_servico: {
+            is: { status: { in: activeCourierConversationStatuses } },
+          },
+          status: "ACEITA",
+        },
+      ],
     },
   });
 }
 
-async function activeCustomerRequests(userId, serviceTypeId = null) {
-  return courierRepository.findCourierRequests({
+async function activeCustomerRequests(userId, serviceTypeId = null, repository = courierRepository) {
+  return repository.findCourierRequests({
     include: requestInclude,
     orderBy: { criado_em: "desc" },
     where: {
@@ -212,8 +234,8 @@ export async function getStoreCourierDispatch(userId, storeId) {
       orderBy: { criado_em: "asc" },
       where: { ativo: true, loja_id: store.id },
     }),
-    onlineCandidates(store.endereco, type.id, { excludeStoreTeamId: store.id }),
-    activeRequestForStore(store.id, userId),
+    onlineCandidates(store.endereco, type.id, { requestingStoreId: store.id }),
+    activeRequestForStore(store.id),
   ]);
   const busySellerIds = await getBusyCourierSellerIds(
     courierRepository,
@@ -224,7 +246,11 @@ export async function getStoreCourierDispatch(userId, storeId) {
     platformAvailable: candidates.some((candidate) => candidate.vendedor.usuario_id !== userId),
     team: members.map((member) => {
       const service = member.motoboy.vendedor.servicos.find((item) => item.tipo_servico_id === type.id && item.status === "ATIVO");
-      const isOnline = member.motoboy.status === "ATIVO" && Boolean(service?.disponivel_agora);
+      const sellerIsEligible = member.motoboy.vendedor.status === "ATIVO"
+        && member.motoboy.vendedor.status_kyc === "APROVADO";
+      const isOnline = sellerIsEligible
+        && member.motoboy.status === "ATIVO"
+        && isServiceAvailable(service);
       const isBusy = busySellerIds.has(member.motoboy.vendedor_id);
       return {
         available: isOnline && !isBusy,
@@ -246,7 +272,7 @@ export async function getStoreCourierDispatch(userId, storeId) {
 export async function createCourierRequest(userId, storeId, data) {
   const store = await accessibleStore(userId, storeId);
   await expireCourierRequests({ loja_id: store.id, solicitante_usuario_id: userId });
-  const existing = await activeRequestForStore(store.id, userId);
+  const existing = await activeRequestForStore(store.id);
   if (existing) return { request: serializeRequest(existing) };
 
   const type = await deliveryType();
@@ -257,15 +283,21 @@ export async function createCourierRequest(userId, storeId, data) {
       include: { motoboy: { include: { vendedor: { include: { servicos: true } } } } },
       where: { ativo: true, id: data.teamMemberId, loja_id: store.id },
     });
-    const service = member?.motoboy?.vendedor?.servicos?.find((item) => item.tipo_servico_id === type.id && item.status === "ATIVO" && item.disponivel_agora);
-    if (!member || member.motoboy.status !== "ATIVO" || !service) throw new AppError("Este motoboy da equipe esta offline", 409);
+    const service = member?.motoboy?.vendedor?.servicos?.find((item) => item.tipo_servico_id === type.id && item.status === "ATIVO" && isServiceAvailable(item));
+    if (
+      !member
+      || member.motoboy.status !== "ATIVO"
+      || member.motoboy.vendedor.status !== "ATIVO"
+      || member.motoboy.vendedor.status_kyc !== "APROVADO"
+      || !service
+    ) throw new AppError("Este motoboy da equipe esta offline ou precisa concluir o KYC", 409);
     if (await isCourierSellerBusy(courierRepository, member.motoboy.vendedor_id)) {
       throw new AppError("Este motoboy esta atendendo outra corrida", 409);
     }
     target = member.motoboy;
     targetUsers = [member.motoboy.vendedor.usuario_id];
   } else {
-    const candidates = await onlineCandidates(store.endereco, type.id, { excludeStoreTeamId: store.id });
+    const candidates = await onlineCandidates(store.endereco, type.id, { requestingStoreId: store.id });
     targetUsers = candidates.map((item) => item.vendedor.usuario_id).filter((id) => id !== userId);
     if (!targetUsers.length) throw new AppError("Nenhum motoboy esta disponivel agora", 409);
   }
@@ -276,23 +308,39 @@ export async function createCourierRequest(userId, storeId, data) {
     if (!order) throw new AppError("Pedido nao encontrado nesta loja", 404);
     orderId = order.id;
   }
-  const created = await courierRepository.createCourierRequest({
-    include: requestInclude,
-    data: {
-      descricao: data.description || null,
-      destino: data.destination,
-      expira_em: new Date(Date.now() + courierRequestLifetimeMs),
-      loja_id: store.id,
-      motoboy_direcionado_id: target?.id ?? null,
-      origem: data.origin,
-      pedido_loja_id: orderId,
-      solicitante_usuario_id: userId,
-      tipo_chamada: target ? "EQUIPE" : "PLATAFORMA",
-      tipo_servico_id: type.id,
-    },
+  const result = await courierRepository.transaction(async (database) => {
+    const repository = createCourierRepository(database);
+    await repository.lockStoreDispatch(store.id);
+    const lockedExisting = await activeRequestForStore(store.id, repository);
+    if (lockedExisting) return { created: false, request: lockedExisting };
+
+    const request = await repository.createCourierRequest({
+      include: requestInclude,
+      data: {
+        descricao: data.description || null,
+        destino: data.destination,
+        expira_em: new Date(Date.now() + courierRequestLifetimeMs),
+        loja_id: store.id,
+        motoboy_direcionado_id: target?.id ?? null,
+        origem: data.origin,
+        pedido_loja_id: orderId,
+        solicitante_usuario_id: userId,
+        tipo_chamada: target ? "EQUIPE" : "PLATAFORMA",
+        tipo_servico_id: type.id,
+      },
+    });
+    return { created: true, request };
   });
-  const request = serializeRequest(created);
-  emitCourierRequestCreated({ request, targetUserIds: targetUsers });
+  const request = serializeRequest(result.request);
+  if (result.created) {
+    emitCourierRequestCreated({ request, targetUserIds: targetUsers });
+    void sendExpoPushToUsers({
+      body: "Uma entrega esta aguardando o primeiro aceite.",
+      data: { requestId: request.id, screen: "ServiceDesk", type: "courier_request" },
+      title: "Nova corrida disponivel",
+      userIds: targetUsers,
+    });
+  }
   return { request };
 }
 
@@ -315,31 +363,50 @@ export async function createCustomerCourierRequest(userId, data) {
     .filter((candidateUserId) => candidateUserId !== userId);
   if (!targetUserIds.length) throw new AppError("Nenhum motoboy esta disponivel agora", 409);
 
-  const created = await courierRepository.createCourierRequest({
-    include: requestInclude,
-    data: {
-      descricao: data.description || "Quero combinar uma entrega.",
-      destino: data.destination || "A combinar no chat",
-      expira_em: new Date(Date.now() + courierRequestLifetimeMs),
-      origem: data.origin || formatAddress(address) || "A combinar no chat",
-      solicitante_usuario_id: userId,
-      tipo_chamada: "PLATAFORMA",
-      tipo_servico_id: type.id,
-    },
+  const result = await courierRepository.transaction(async (database) => {
+    const repository = createCourierRepository(database);
+    await repository.lockCustomerDispatch(userId);
+    const lockedExisting = (await activeCustomerRequests(userId, type.id, repository))[0];
+    if (lockedExisting) return { created: false, request: lockedExisting };
+
+    const request = await repository.createCourierRequest({
+      include: requestInclude,
+      data: {
+        descricao: data.description || "Quero combinar uma entrega.",
+        destino: "A combinar no chat",
+        expira_em: new Date(Date.now() + courierRequestLifetimeMs),
+        origem: "A combinar no chat",
+        solicitante_usuario_id: userId,
+        tipo_chamada: "PLATAFORMA",
+        tipo_servico_id: type.id,
+      },
+    });
+    return { created: true, request };
   });
-  const request = serializeRequest(created);
-  emitCourierRequestCreated({ request, targetUserIds });
+  const request = serializeRequest(result.request);
+  if (result.created) {
+    emitCourierRequestCreated({ request, targetUserIds });
+    void sendExpoPushToUsers({
+      body: "Uma entrega da sua cidade esta aguardando o primeiro aceite.",
+      data: { requestId: request.id, screen: "ServiceDesk", type: "courier_request" },
+      title: "Nova corrida disponivel",
+      userIds: targetUserIds,
+    });
+  }
   return { request };
 }
 
 export async function listCourierRequests(userId) {
   await expireCourierRequests();
   const courier = await courierRepository.findCourier({
-    include: { lojas: { where: { ativo: true }, select: { ativo: true } }, vendedor: { include: { servicos: true } } },
-    where: { status: "ATIVO", vendedor: { excluido_em: null, usuario_id: userId } },
+    include: { lojas: { where: { ativo: true }, select: { ativo: true, loja_id: true } }, vendedor: { include: { servicos: true } } },
+    where: {
+      status: "ATIVO",
+      vendedor: { excluido_em: null, status: "ATIVO", status_kyc: "APROVADO", usuario_id: userId },
+    },
   });
   if (!courier) return { dashboard: null, requests: [] };
-  const onlineTypeIds = courier.vendedor.servicos.filter((item) => item.disponivel_agora && item.status === "ATIVO").map((item) => item.tipo_servico_id).filter(Boolean);
+  const onlineTypeIds = courier.vendedor.servicos.filter((item) => isServiceAvailable(item) && item.status === "ATIVO").map((item) => item.tipo_servico_id).filter(Boolean);
   const isBusy = await isCourierSellerBusy(courierRepository, courier.vendedor_id);
   const requests = !onlineTypeIds.length || isBusy ? [] : await courierRepository.findCourierRequests({
     include: requestInclude,
@@ -351,6 +418,23 @@ export async function listCourierRequests(userId) {
       tipo_servico_id: { in: onlineTypeIds },
       OR: [
         { motoboy_direcionado_id: courier.id, tipo_chamada: "EQUIPE" },
+        {
+          tipo_chamada: "PLATAFORMA",
+          motoboy_direcionado_id: null,
+          loja: {
+            is: {
+              endereco: {
+                is: {
+                  cidade: { equals: courier.cidade_base, mode: "insensitive" },
+                  estado: { equals: courier.estado_base, mode: "insensitive" },
+                },
+              },
+              motoboys_equipe: {
+                some: { ativo: true, motoboy_id: courier.id },
+              },
+            },
+          },
+        },
         ...(canReceivePlatformCalls(courier) ? [{
           tipo_chamada: "PLATAFORMA",
           motoboy_direcionado_id: null,
@@ -430,8 +514,11 @@ export async function acceptCourierRequest(userId, requestId) {
   const id = parseId(requestId, "Chamada invalida");
   await expireCourierRequests({ id });
   const courier = await courierRepository.findCourier({
-    include: { lojas: { where: { ativo: true }, select: { ativo: true } }, vendedor: { include: { servicos: { include: { tipo_servico: { include: { segmento_venda: true } } } } } } },
-    where: { status: "ATIVO", vendedor: { excluido_em: null, usuario_id: userId } },
+    include: { lojas: { where: { ativo: true }, select: { ativo: true, loja_id: true } }, vendedor: { include: { servicos: { include: { tipo_servico: { include: { segmento_venda: true } } } } } } },
+    where: {
+      status: "ATIVO",
+      vendedor: { excluido_em: null, status: "ATIVO", status_kyc: "APROVADO", usuario_id: userId },
+    },
   });
   if (!courier) throw new AppError("Cadastre seu perfil de motoboy", 428);
   const original = await courierRepository.findCourierRequestById({ include: requestInclude, where: { id } });
@@ -443,9 +530,9 @@ export async function acceptCourierRequest(userId, requestId) {
   )) throw new AppError("Esta corrida pertence a outra cidade", 403);
   if (original.tipo_chamada === "EQUIPE" && original.motoboy_direcionado_id !== courier.id) throw new AppError("Esta chamada pertence a outro motoboy", 403);
   if (original.tipo_chamada === "PLATAFORMA") {
-    if (!canReceivePlatformCalls(courier)) throw new AppError("Sua disponibilidade esta limitada as lojas credenciadas", 409);
+    if (!canReceivePlatformCalls(courier, original.loja_id)) throw new AppError("Sua disponibilidade esta limitada as lojas credenciadas", 409);
   }
-  const sellerService = courier.vendedor.servicos.find((item) => item.tipo_servico_id === original.tipo_servico_id && item.status === "ATIVO" && item.disponivel_agora);
+  const sellerService = courier.vendedor.servicos.find((item) => item.tipo_servico_id === original.tipo_servico_id && item.status === "ATIVO" && isServiceAvailable(item));
   const segment = sellerService?.tipo_servico?.segmento_venda;
   if (!sellerService || !segment || segment.status !== "ATIVO") throw new AppError("Voce esta offline para esta entrega", 409);
 
@@ -460,17 +547,23 @@ export async function acceptCourierRequest(userId, requestId) {
       where: { expira_em: { gt: new Date() }, id, status: "PENDENTE" },
     });
     if (claimed.count !== 1) throw new AppError("Outro motoboy ja aceitou esta chamada", 409);
+    const conversationOrigin = original.loja_id ? original.origem : "A combinar no chat";
+    const conversationDestination = original.loja_id ? original.destino : "A combinar no chat";
+    const acceptanceMessage = original.loja_id
+      ? `Corrida aceita. Retirada: ${original.origem}. Destino: ${original.destino}.${original.descricao ? ` Detalhes: ${original.descricao}` : ""}`
+      : `Corrida aceita. Retirada e destino serao combinados no chat.${original.descricao ? ` Detalhes: ${original.descricao}` : ""}`;
     const conversation = await repository.createServiceConversation({
       data: {
         cliente_usuario_id: original.solicitante_usuario_id,
         descricao_inicial: original.descricao,
-        destino: original.destino,
+        destino: conversationDestination,
         loja_solicitante_id: original.loja_id,
-        mensagens: { create: { lido_vendedor_em: new Date(), mensagem: `Corrida aceita. Retirada: ${original.origem}. Destino: ${original.destino}.${original.descricao ? ` Detalhes: ${original.descricao}` : ""}`, origem: "SISTEMA" } },
-        origem: original.origem,
+        mensagens: { create: { lido_vendedor_em: new Date(), mensagem: acceptanceMessage, origem: "SISTEMA" } },
+        origem: conversationOrigin,
         pedido_loja_id: original.pedido_loja_id,
         segmento_venda_id: segment.id,
         servico_vendedor_id: sellerService.id,
+        status: "ACORDADA",
         vendedor_id: courier.vendedor_id,
       },
     });
@@ -481,7 +574,7 @@ export async function acceptCourierRequest(userId, requestId) {
     ? await onlineCandidates(
         original.loja?.endereco ?? original.solicitante.enderecos[0],
         original.tipo_servico_id,
-        { excludeStoreTeamId: original.loja_id },
+        { requestingStoreId: original.loja_id },
       )
     : [];
   emitServiceChatCreated(response.conversation);
@@ -500,17 +593,32 @@ export async function acceptCourierRequest(userId, requestId) {
 
 export async function cancelCourierRequest(userId, requestId) {
   const id = parseId(requestId, "Chamada invalida");
-  const original = await courierRepository.findCourierRequest({ include: requestInclude, where: { id, solicitante_usuario_id: userId } });
+  const original = await courierRepository.findCourierRequest({ include: requestInclude, where: { id } });
   if (!original) throw new AppError("Chamada nao encontrada", 404);
+  if (original.loja_id) {
+    await accessibleStore(userId, original.loja_id);
+  } else if (original.solicitante_usuario_id !== userId) {
+    throw new AppError("Chamada nao encontrada", 404);
+  }
   if (original.status !== "PENDENTE") throw new AppError("Esta chamada nao pode mais ser cancelada", 409);
   const candidates = original.tipo_chamada === "PLATAFORMA"
     ? await onlineCandidates(
         original.loja?.endereco ?? original.solicitante.enderecos[0],
         original.tipo_servico_id,
-        { excludeStoreTeamId: original.loja_id },
+        { requestingStoreId: original.loja_id },
       )
     : [];
-  const updated = await courierRepository.updateCourierRequest({ include: requestInclude, data: { cancelado_em: new Date(), status: "CANCELADA" }, where: { id } });
+  const updated = await courierRepository.transaction(async (database) => {
+    const repository = createCourierRepository(database);
+    const claimed = await repository.updateCourierRequests({
+      data: { cancelado_em: new Date(), status: "CANCELADA" },
+      where: { id, status: "PENDENTE" },
+    });
+    if (claimed.count !== 1) {
+      throw new AppError("Esta chamada nao pode mais ser cancelada", 409);
+    }
+    return repository.findCourierRequestById({ include: requestInclude, where: { id } });
+  });
   emitCourierRequestUpdated({
     request: serializeRequest(updated),
     targetUserIds: [

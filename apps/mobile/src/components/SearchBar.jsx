@@ -102,10 +102,16 @@ export function SearchBar({
             showsVerticalScrollIndicator
             style={styles.suggestionsScroll}
           >
-            {suggestions.map((suggestion) => {
-              const key = suggestion.id ?? suggestion.label ?? suggestion.name;
+            {suggestions.map((suggestion, index) => {
               const label = suggestion.label ?? suggestion.name ?? String(suggestion);
+              const key = [
+                suggestion.type ?? "result",
+                suggestion.id ?? label,
+                label,
+              ].join(":");
               const meta = suggestion.description ?? suggestion.type ?? "";
+              const visual = suggestionVisual(suggestion.type);
+              const detail = suggestionDetail(suggestion.type, meta);
 
               return (
                 <Pressable
@@ -113,25 +119,29 @@ export function SearchBar({
                   onPress={() => selectSuggestion(suggestion)}
                   style={({ pressed }) => [
                     styles.suggestion,
+                    index < suggestions.length - 1 && styles.suggestionDivider,
                     pressed && styles.suggestionPressed,
                   ]}
                 >
-                  <View style={styles.suggestionIcon}>
+                  <View style={[styles.suggestionIcon, { backgroundColor: visual.background }]}>
                     <Ionicons
-                      color={colors.primaryDark}
-                      name={suggestionIcon(suggestion.type)}
-                      size={18}
+                      color={visual.color}
+                      name={visual.icon}
+                      size={20}
                     />
                   </View>
                   <View style={styles.suggestionCopy}>
                     <Text numberOfLines={1} style={styles.suggestionText}>
                       {label}
                     </Text>
-                    {meta ? (
-                      <Text numberOfLines={1} style={styles.suggestionMeta}>
-                        {suggestionLabel(suggestion.type, meta)}
-                      </Text>
-                    ) : null}
+                    <View style={styles.suggestionMetaRow}>
+                      <View style={[styles.suggestionKind, { backgroundColor: visual.badgeBackground }]}>
+                        <Text style={[styles.suggestionKindText, { color: visual.color }]}>
+                          {suggestionTypeLabel(suggestion.type)}
+                        </Text>
+                      </View>
+                      {detail ? <Text numberOfLines={1} style={styles.suggestionMeta}>{detail}</Text> : null}
+                    </View>
                   </View>
                   <Ionicons color={colors.textMuted} name="chevron-forward" size={16} />
                 </Pressable>
@@ -164,24 +174,74 @@ function suggestionIcon(type) {
   return "search";
 }
 
-function suggestionLabel(type, fallback) {
+function suggestionTypeLabel(type) {
   if (type === "category") {
     return "Categoria";
   }
 
   if (type === "store") {
-    return `Loja - ${fallback}`;
+    return "Loja";
   }
 
   if (type === "product") {
-    return `Produto - ${fallback}`;
+    return "Produto";
   }
 
   if (type === "service") {
-    return `Servico - ${fallback}`;
+    return "Servico";
   }
 
-  return fallback;
+  return "Resultado";
+}
+
+function suggestionDetail(type, value) {
+  if (!value || type === "category") {
+    return "";
+  }
+
+  const parts = String(value)
+    .split(" - ")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts[0]?.toLocaleLowerCase("pt-BR") === suggestionTypeLabel(type).toLocaleLowerCase("pt-BR")) {
+    parts.shift();
+  }
+
+  return parts.join(" · ");
+}
+
+function suggestionVisual(type) {
+  const visuals = {
+    category: {
+      background: colors.primarySoft,
+      badgeBackground: "#DCFCE7",
+      color: colors.primaryDark,
+    },
+    product: {
+      background: "#FFF7E8",
+      badgeBackground: "#FEF3C7",
+      color: "#B45309",
+    },
+    service: {
+      background: "#F3E8FF",
+      badgeBackground: "#EDE9FE",
+      color: "#7C3AED",
+    },
+    store: {
+      background: "#EAF2FF",
+      badgeBackground: "#DBEAFE",
+      color: "#2563EB",
+    },
+  };
+
+  const visual = visuals[type] ?? {
+    background: colors.cardMuted,
+    badgeBackground: colors.backgroundSoft,
+    color: colors.textSecondary,
+  };
+
+  return { ...visual, icon: suggestionIcon(type) };
 }
 
 const styles = StyleSheet.create({
@@ -217,31 +277,39 @@ const styles = StyleSheet.create({
   },
   suggestion: {
     alignItems: "center",
-    borderBottomColor: colors.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
-    gap: spacing.sm,
-    minHeight: 56,
+    gap: spacing.md,
+    minHeight: 68,
     paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
   },
   suggestionCopy: {
     flex: 1,
-    gap: 2,
+    gap: 4,
     minWidth: 0,
   },
+  suggestionDivider: { borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth },
   suggestionIcon: {
     alignItems: "center",
-    backgroundColor: colors.primarySoft,
     borderRadius: 999,
-    height: 34,
+    height: 40,
     justifyContent: "center",
-    width: 34,
+    width: 40,
   },
+  suggestionKind: { borderRadius: radius.round, paddingHorizontal: 7, paddingVertical: 3 },
+  suggestionKindText: { fontFamily: fonts.bold, fontSize: 9, fontWeight: "700", textTransform: "uppercase" },
   suggestionMeta: {
     color: colors.textSecondary,
     flex: 1,
     fontFamily: fonts.regular,
     fontSize: 11,
+    minWidth: 0,
+  },
+  suggestionMetaRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.xs,
+    minWidth: 0,
   },
   suggestionPressed: {
     backgroundColor: colors.primarySoft,
@@ -249,8 +317,9 @@ const styles = StyleSheet.create({
   suggestionText: {
     color: colors.textPrimary,
     fontFamily: fonts.bold,
-    fontSize: typography.small,
+    fontSize: typography.body,
     fontWeight: "700",
+    lineHeight: 19,
   },
   suggestions: {
     backgroundColor: colors.card,
@@ -268,11 +337,11 @@ const styles = StyleSheet.create({
     ...shadow,
   },
   suggestionsContent: {
-    paddingVertical: spacing.xs,
+    paddingVertical: 2,
   },
   suggestionsCompact: { top: 54 },
   suggestionsScroll: {
-    maxHeight: 252,
+    maxHeight: 244,
   },
   wrapper: {
     maxWidth: 540,

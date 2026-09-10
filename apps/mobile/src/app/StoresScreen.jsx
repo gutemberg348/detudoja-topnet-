@@ -35,22 +35,32 @@ import {
 } from "../utils/theme";
 
 const SERVICES_CATEGORY_ID = "__servicos__";
+const RESULT_MODES = ["stores", "products", "services"];
+
+function initialResultMode(route) {
+  if (route.params?.category === SERVICES_CATEGORY_ID) return "services";
+  return RESULT_MODES.includes(route.params?.resultMode) ? route.params.resultMode : "stores";
+}
 
 export function StoresScreen({ navigation, route }) {
   const { session } = useAuthStore();
-  const [category, setCategory] = useState(route.params?.category ?? "todas");
+  const [category, setCategory] = useState(
+    route.params?.category === SERVICES_CATEGORY_ID ? "todas" : route.params?.category ?? "todas",
+  );
   const [categories, setCategories] = useState([]);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [marketplaceSearch, setMarketplaceSearch] = useState(route.params?.query ?? "");
   const [products, setProducts] = useState([]);
-  const [resultMode, setResultMode] = useState(route.params?.resultMode === "products" ? "products" : "stores");
+  const [resultMode, setResultMode] = useState(() => initialResultMode(route));
   const [serviceTypes, setServiceTypes] = useState([]);
   const [search, setSearch] = useState(route.params?.query ?? "");
   const [stores, setStores] = useState([]);
   const { suggestions } = useMarketplaceSuggestions(session?.accessToken, search, {
     limit: 8,
   });
-  const isServicesCategory = category === SERVICES_CATEGORY_ID;
+  const hasSearch = Boolean(search.trim());
+  const hasMarketplaceSearch = Boolean(marketplaceSearch.trim());
   const regularCategories = useMemo(
     () => categories.filter((item) => !isServiceStoreCategory(item)),
     [categories],
@@ -66,7 +76,7 @@ export function StoresScreen({ navigation, route }) {
   const matchingServiceTypes = useMemo(() => {
     const term = normalizeSearch(search);
 
-    if (isServicesCategory) {
+    if (resultMode === "services" && !term) {
       return serviceTypes;
     }
 
@@ -78,17 +88,31 @@ export function StoresScreen({ navigation, route }) {
       matchesSearchText(serviceType.name, term)
       || matchesSearchText(serviceType.description, term)
     ));
-  }, [isServicesCategory, search, serviceTypes]);
-  const showServiceResults = isServicesCategory || matchingServiceTypes.length > 0;
+  }, [resultMode, search, serviceTypes]);
+  const showServiceResults = resultMode === "services";
+  const showStoreResults = resultMode === "stores";
+  const showProductResults = resultMode === "products";
+  const hasAnySearchResult = Boolean(
+    matchingServiceTypes.length || visibleStores.length || products.length,
+  );
+  const showGlobalEmptySearch = hasSearch
+    && !isLoading
+    && !error
+    && !hasAnySearchResult;
 
   useEffect(() => {
     if (route.params?.category) {
-      setCategory(route.params.category);
+      if (route.params.category === SERVICES_CATEGORY_ID) {
+        setCategory("todas");
+        setResultMode("services");
+      } else {
+        setCategory(route.params.category);
+      }
     }
   }, [route.params?.category]);
 
   useEffect(() => {
-    if (["stores", "products"].includes(route.params?.resultMode)) {
+    if (RESULT_MODES.includes(route.params?.resultMode)) {
       setResultMode(route.params.resultMode);
     }
   }, [route.params?.resultMode]);
@@ -102,6 +126,12 @@ export function StoresScreen({ navigation, route }) {
       }
     }
   }, [route.params?.query]);
+
+  useEffect(() => {
+    setIsLoading(true);
+    const timeout = setTimeout(() => setMarketplaceSearch(search), 280);
+    return () => clearTimeout(timeout);
+  }, [search]);
 
   useEffect(() => {
     let active = true;
@@ -118,17 +148,17 @@ export function StoresScreen({ navigation, route }) {
       try {
         const [categoriesResponse, storesResponse, productsResponse, servicesResponse] = await Promise.all([
           getMarketplaceCategories(session.accessToken),
-          isServicesCategory || resultMode !== "stores"
+          !hasMarketplaceSearch && resultMode !== "stores"
             ? Promise.resolve({ stores: [] })
             : getMarketplaceStores(session.accessToken, {
                 categoryId: category === "todas" ? "" : category,
-                search,
+                search: marketplaceSearch,
               }),
-          isServicesCategory || resultMode !== "products"
+          !hasMarketplaceSearch && resultMode !== "products"
             ? Promise.resolve({ products: [] })
             : getMarketplaceProducts(session.accessToken, {
                 categoryId: category === "todas" ? "" : category,
-                search,
+                search: marketplaceSearch,
               }),
           getServiceTypes(session.accessToken),
         ]);
@@ -157,7 +187,7 @@ export function StoresScreen({ navigation, route }) {
     return () => {
       active = false;
     };
-  }, [category, isServicesCategory, resultMode, search, session?.accessToken]);
+  }, [category, hasMarketplaceSearch, marketplaceSearch, resultMode, session?.accessToken]);
 
   const refreshServiceTypes = useCallback(async () => {
     if (!session?.accessToken) {
@@ -211,7 +241,8 @@ export function StoresScreen({ navigation, route }) {
       if (serviceType) {
         navigation.navigate("ServiceProviders", { serviceType });
       } else {
-        setCategory(SERVICES_CATEGORY_ID);
+        setCategory("todas");
+        setResultMode("services");
         setSearch(suggestion.label ?? "");
       }
 
@@ -220,6 +251,7 @@ export function StoresScreen({ navigation, route }) {
 
     if (suggestion.type === "category") {
       setCategory(suggestion.id);
+      setResultMode("stores");
       setSearch("");
       return true;
     }
@@ -285,9 +317,7 @@ export function StoresScreen({ navigation, route }) {
     setSearch("");
   }
 
-  const resultDescription = isServicesCategory
-    ? "Prestadores online para atender voce"
-    : search.trim()
+  const resultDescription = search.trim()
     ? `Resultados para "${search.trim()}"`
     : selectedCategory
       ? `${resultMode === "products" ? "Produtos" : "Lojas"} em ${selectedCategory.name}`
@@ -315,7 +345,19 @@ export function StoresScreen({ navigation, route }) {
       </View>
 
       <View style={styles.body}>
-        <View style={styles.section}>
+        <ResultModeSelector mode={resultMode} onChange={(mode) => {
+          setResultMode(mode);
+          setCategory("todas");
+        }} />
+
+        {hasSearch ? (
+          <View style={styles.globalSearchHint}>
+            <Ionicons color={colors.primaryDark} name="search-outline" size={16} />
+            <Text style={styles.globalSearchHintText}>Buscando em lojas, produtos e servicos</Text>
+          </View>
+        ) : null}
+
+        {!hasSearch && resultMode !== "services" ? <View style={styles.section}>
           <View style={styles.exploreHeader}>
             <View style={styles.exploreCopy}>
               <Text style={styles.sectionTitle}>Explorar</Text>
@@ -334,12 +376,6 @@ export function StoresScreen({ navigation, route }) {
               label="Todas"
               onPress={() => selectCategory("todas")}
             />
-            <CategoryCard
-              active={isServicesCategory}
-              icon="briefcase-outline"
-              label="Servicos"
-              onPress={() => selectCategory(SERVICES_CATEGORY_ID)}
-            />
             {regularCategories.map((item) => (
               <CategoryCard
                 active={category === item.id}
@@ -350,22 +386,18 @@ export function StoresScreen({ navigation, route }) {
               />
             ))}
           </ScrollView>
-        </View>
-
-      {!isServicesCategory ? (
-        <ResultModeSelector mode={resultMode} onChange={setResultMode} />
-      ) : null}
+        </View> : null}
 
       {showServiceResults ? (
         <View style={styles.resultsSection}>
           <View style={styles.resultsHeader}>
             <View style={styles.resultsCopy}>
               <Text style={styles.sectionTitle}>
-                {isServicesCategory ? "Servicos" : "Servicos encontrados"}
+                {hasSearch ? "Servicos encontrados" : "Servicos"}
               </Text>
               <Text numberOfLines={1} style={styles.sectionSubtitle}>
-                {isServicesCategory
-                  ? "Escolha quem pode atender agora"
+                {!hasSearch
+                  ? "Escolha uma atividade para encontrar atendimento"
                   : `Resultados para "${search.trim()}"`}
               </Text>
             </View>
@@ -374,7 +406,9 @@ export function StoresScreen({ navigation, route }) {
             </View>
           </View>
 
-          {matchingServiceTypes.length ? (
+          {isLoading && !serviceTypes.length ? (
+            <StatePanel icon="briefcase-outline" loading text="Buscando servicos..." />
+          ) : matchingServiceTypes.length ? (
             <View style={styles.serviceList}>
               {matchingServiceTypes.map((serviceType) => (
                 <ServiceTypeCard
@@ -384,17 +418,17 @@ export function StoresScreen({ navigation, route }) {
                 />
               ))}
             </View>
-          ) : (
+          ) : !hasSearch ? (
             <StatePanel
               icon="time-outline"
               text="Assim que um prestador ficar online, ele aparece aqui automaticamente."
               title="Nenhum servico disponivel agora"
             />
-          )}
+          ) : null}
         </View>
       ) : null}
 
-      {!isServicesCategory && resultMode === "stores" ? <View style={styles.resultsSection}>
+      {showStoreResults ? <View style={styles.resultsSection}>
         <View style={styles.resultsHeader}>
           <View style={styles.resultsCopy}>
             <Text style={styles.sectionTitle}>Lojas</Text>
@@ -419,16 +453,16 @@ export function StoresScreen({ navigation, route }) {
               <StoreCard fluid key={store.id} store={store} onPress={openStore} />
             ))}
           </View>
-        ) : (
+        ) : !hasSearch ? (
           <StatePanel
             icon="search-outline"
             text="Nenhuma loja encontrada. Tente outra busca ou limpe os filtros."
             title="Nenhum resultado"
           />
-        )}
+        ) : null}
       </View> : null}
 
-      {!isServicesCategory && resultMode === "products" ? (
+      {showProductResults ? (
         <View style={styles.resultsSection}>
           <View style={styles.resultsHeader}>
             <View style={styles.resultsCopy}>
@@ -450,26 +484,54 @@ export function StoresScreen({ navigation, route }) {
             <StatePanel danger icon="alert-circle-outline" text={error} title="Nao foi possivel buscar" />
           ) : products.length ? (
             <View style={styles.productList}>
-              {products.map((item) => (
-                <MarketplaceProductCard
-                  item={item}
-                  key={`${item.store?.id}-${item.product?.id}`}
-                  onPress={openProduct}
-                />
+              {chunkItems(products, 2).map((row, rowIndex) => (
+                <View
+                  key={`product-row-${rowIndex}-${row[0]?.product?.id ?? "empty"}`}
+                  style={styles.productRow}
+                >
+                  {row.map((item) => (
+                    <MarketplaceProductCard
+                      item={item}
+                      key={`${item.store?.id}-${item.product?.id}`}
+                      onPress={openProduct}
+                      style={styles.productGridCard}
+                      variant="grid"
+                    />
+                  ))}
+                  {row.length < 2 ? <View style={styles.productGridSpacer} /> : null}
+                </View>
               ))}
             </View>
-          ) : (
+          ) : !hasSearch ? (
             <StatePanel
               icon="search-outline"
               text="Nenhum produto encontrado. Tente outra busca ou escolha outra categoria."
               title="Nenhum resultado"
             />
-          )}
+          ) : null}
         </View>
+      ) : null}
+
+      {showGlobalEmptySearch ? (
+        <StatePanel
+          icon="search-outline"
+          text="Tente outro nome, produto, categoria ou servico."
+          title="Nenhum resultado para esta busca"
+        />
       ) : null}
       </View>
     </ScreenContainer>
   );
+}
+
+function chunkItems(items, size) {
+  const rows = [];
+
+  for (let index = 0; index < items.length; index += size) {
+    rows.push(items.slice(index, index + size));
+  }
+
+  return rows;
 }
 
 function ResultModeSelector({ mode, onChange }) {
@@ -483,9 +545,15 @@ function ResultModeSelector({ mode, onChange }) {
       />
       <ResultModeOption
         active={mode === "products"}
-        icon="cube-outline"
+        icon="bag-handle-outline"
         label="Produtos"
         onPress={() => onChange("products")}
+      />
+      <ResultModeOption
+        active={mode === "services"}
+        icon="briefcase-outline"
+        label="Servicos"
+        onPress={() => onChange("services")}
       />
     </View>
   );
@@ -550,6 +618,7 @@ function CategoryCard({ active, category, icon, label, onPress }) {
 
 function ServiceTypeCard({ onPress, serviceType }) {
   const isAvailable = Boolean(serviceType.availableNow);
+  const visual = serviceVisual(serviceType);
 
   return (
     <Pressable
@@ -563,30 +632,38 @@ function ServiceTypeCard({ onPress, serviceType }) {
         pressed && styles.pressed,
       ]}
     >
-      <View style={[styles.serviceIcon, !isAvailable && styles.serviceIconUnavailable]}>
+      <View style={[styles.serviceIcon, { backgroundColor: visual.background }, !isAvailable && styles.serviceIconUnavailable]}>
         <Ionicons
-          color={isAvailable ? colors.primaryDark : colors.textMuted}
-          name={serviceIcon(serviceType.iconName)}
-          size={22}
+          color={isAvailable ? visual.color : colors.textMuted}
+          name={visual.icon}
+          size={26}
         />
       </View>
       <View style={styles.serviceCopy}>
+        <Text style={[styles.serviceEyebrow, { color: isAvailable ? visual.color : colors.textMuted }]}>
+          {serviceType.operationalType === "ENTREGA_LOCAL" ? "ENTREGA" : "SERVICO LOCAL"}
+        </Text>
         <Text style={styles.serviceName}>{serviceType.name}</Text>
-        <Text numberOfLines={1} style={styles.serviceDescription}>
+        <Text numberOfLines={2} style={styles.serviceDescription}>
           {serviceType.description || "Encontre prestadores disponiveis."}
         </Text>
+        <View style={styles.serviceFooter}>
+          <View style={[styles.serviceStatus, !isAvailable && styles.serviceStatusOffline]}>
+            <View style={[styles.serviceStatusDot, !isAvailable && styles.serviceStatusDotOffline]} />
+            <Text style={[styles.serviceStatusText, !isAvailable && styles.serviceStatusTextOffline]}>
+              {isAvailable ? "Disponivel agora" : "Indisponivel"}
+            </Text>
+          </View>
+          {isAvailable ? <Text style={styles.serviceAction}>Ver opcoes</Text> : null}
+        </View>
       </View>
-      <View style={[styles.serviceStatus, !isAvailable && styles.serviceStatusOffline]}>
-        <View style={[styles.serviceStatusDot, !isAvailable && styles.serviceStatusDotOffline]} />
-        <Text style={[styles.serviceStatusText, !isAvailable && styles.serviceStatusTextOffline]}>
-          {isAvailable ? "Disponivel" : "Indisponivel"}
-        </Text>
+      <View style={[styles.serviceArrow, !isAvailable && styles.serviceArrowUnavailable]}>
+        <Ionicons
+          color={isAvailable ? visual.color : colors.textMuted}
+          name={isAvailable ? "arrow-forward" : "remove"}
+          size={17}
+        />
       </View>
-      <Ionicons
-        color={isAvailable ? colors.primaryDark : colors.textMuted}
-        name={isAvailable ? "chevron-forward" : "remove"}
-        size={18}
-      />
     </Pressable>
   );
 }
@@ -641,6 +718,39 @@ function serviceIcon(iconName) {
   };
 
   return icons[String(iconName ?? "").toLowerCase()] ?? "briefcase-outline";
+}
+
+function serviceVisual(serviceType) {
+  const value = normalizeSearch([
+    serviceType?.slug,
+    serviceType?.name,
+    serviceType?.iconName,
+  ].filter(Boolean).join(" "));
+
+  if (/moto|entrega|delivery|bicycle/.test(value)) {
+    return { background: "#EAF2FF", color: "#2563EB", icon: "bicycle-outline" };
+  }
+  if (/frete|mudanca|carga|car/.test(value)) {
+    return { background: "#FFF4E5", color: "#C56A00", icon: "car-outline" };
+  }
+  if (/limpeza|faxina|terreno/.test(value)) {
+    return { background: "#F2EDFF", color: "#7C3AED", icon: "sparkles-outline" };
+  }
+  if (/beleza|cabelo|unha|estetica/.test(value)) {
+    return { background: "#FFF0F6", color: "#DB2777", icon: "cut-outline" };
+  }
+  if (/reparo|manutencao|constr|eletric|encan/.test(value)) {
+    return { background: "#FFF7E6", color: "#B77900", icon: "construct-outline" };
+  }
+  if (/aula|professor|educa/.test(value)) {
+    return { background: "#EEF2FF", color: "#4F46E5", icon: "school-outline" };
+  }
+
+  return {
+    background: colors.primarySoft,
+    color: colors.primaryDark,
+    icon: serviceIcon(serviceType?.iconName),
+  };
 }
 
 const styles = StyleSheet.create({
@@ -715,6 +825,17 @@ const styles = StyleSheet.create({
   content: { paddingBottom: 0 },
   exploreCopy: { flex: 1, gap: 3 },
   exploreHeader: { alignItems: "center", flexDirection: "row" },
+  globalSearchHint: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.round,
+    flexDirection: "row",
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+  },
+  globalSearchHintText: { color: colors.primaryDark, fontFamily: fonts.semiBold, fontSize: 10 },
   hero: {
     alignItems: "center",
     backgroundColor: colors.card,
@@ -728,9 +849,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: colors.cardMuted,
     borderRadius: radius.round,
-    height: 30,
+    height: 28,
     justifyContent: "center",
-    width: 30,
+    width: 28,
   },
   modeIconActive: { backgroundColor: "rgba(255,255,255,0.16)" },
   modeOption: {
@@ -738,10 +859,10 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     flex: 1,
     flexDirection: "row",
-    gap: spacing.sm,
+    gap: 5,
     justifyContent: "center",
     minHeight: 46,
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.xs,
   },
   modeOptionActive: { backgroundColor: colors.primaryDark },
   modeSelector: {
@@ -756,12 +877,17 @@ const styles = StyleSheet.create({
   modeText: {
     color: colors.textSecondary,
     fontFamily: fonts.bold,
-    fontSize: typography.small,
+    fontSize: 11,
     fontWeight: "700",
   },
   modeTextActive: { color: colors.card },
   pressed: { opacity: 0.78, transform: [{ scale: 0.98 }] },
-  productList: { gap: spacing.sm },
+  productList: {
+    gap: spacing.sm,
+  },
+  productGridCard: { flex: 1 },
+  productGridSpacer: { flex: 1, minWidth: 0 },
+  productRow: { alignItems: "stretch", flexDirection: "row", gap: spacing.sm },
   resultCount: {
     alignItems: "center",
     backgroundColor: colors.primarySoft,
@@ -806,30 +932,43 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
   serviceCard: {
-    alignItems: "center",
+    alignItems: "flex-start",
     backgroundColor: colors.card,
     borderColor: colors.border,
     borderRadius: radius.lg,
     borderWidth: 1,
     flexDirection: "row",
     gap: spacing.sm,
-    minHeight: 72,
-    padding: spacing.md,
+    minHeight: 116,
+    padding: spacing.lg,
   },
-  serviceCopy: { flex: 1, gap: 3, minWidth: 0 },
+  serviceAction: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 10 },
+  serviceArrow: {
+    alignItems: "center",
+    backgroundColor: colors.cardMuted,
+    borderRadius: radius.round,
+    height: 32,
+    justifyContent: "center",
+    marginTop: 10,
+    width: 32,
+  },
+  serviceArrowUnavailable: { backgroundColor: colors.backgroundSoft },
+  serviceCopy: { flex: 1, gap: 4, minWidth: 0 },
   serviceCardUnavailable: { backgroundColor: colors.backgroundSoft, opacity: 0.72 },
-  serviceDescription: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 11 },
+  serviceDescription: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
+  serviceEyebrow: { fontFamily: fonts.extraBold, fontSize: 9 },
+  serviceFooter: { alignItems: "center", flexDirection: "row", gap: spacing.sm, justifyContent: "space-between", marginTop: spacing.xs },
   serviceIcon: {
     alignItems: "center",
     backgroundColor: colors.primarySoft,
-    borderRadius: radius.round,
-    height: 38,
+    borderRadius: radius.lg,
+    height: 52,
     justifyContent: "center",
-    width: 38,
+    width: 52,
   },
   serviceIconUnavailable: { backgroundColor: colors.cardMuted },
   serviceList: { gap: spacing.sm },
-  serviceName: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small },
+  serviceName: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.body },
   serviceStatus: {
     alignItems: "center",
     backgroundColor: colors.primarySoft,

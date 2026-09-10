@@ -1,6 +1,7 @@
 import { Server } from "socket.io";
 import { env } from "../config/env.js";
 import { prisma } from "../config/prisma.js";
+import { createSocketIoRedisAdapter } from "../config/redis.js";
 import {
   authAudiences,
   verifyAccessToken,
@@ -20,6 +21,9 @@ export const realtimeEvents = {
   orderCreated: "order.created",
   orderMessageCreated: "order.message.created",
   orderStatusUpdated: "order.status.updated",
+  personalChatCreated: "personal-chat.created",
+  personalChatMessageCreated: "personal-chat.message.created",
+  personalChatUpdated: "personal-chat.updated",
   serviceAvailabilityUpdated: "service.availability.updated",
   serviceChatCreated: "service-chat.created",
   serviceChatMessageCreated: "service-chat.message.created",
@@ -237,13 +241,18 @@ function registerJoinHandlers(socket) {
   });
 }
 
-export function initRealtimeServer(httpServer) {
+export async function initRealtimeServer(httpServer) {
   io = new Server(httpServer, {
     cors: {
       credentials: true,
       origin: env.corsOrigins,
     },
   });
+
+  const redisAdapter = await createSocketIoRedisAdapter();
+  if (redisAdapter) {
+    io.adapter(redisAdapter);
+  }
 
   io.use((socket, next) => {
     const token = getSocketToken(socket);
@@ -520,6 +529,52 @@ export function emitStoreChatUpdated({
       storeId,
     },
     { customerUserId, storeId },
+  );
+}
+
+function emitToPersonalChatUsers(event, payload, userIds = []) {
+  if (!io) {
+    return;
+  }
+
+  const uniqueUserIds = [...new Set(userIds.filter(Boolean))];
+  let target = null;
+
+  uniqueUserIds.forEach((userId) => {
+    target = target ? target.to(userRoom(userId)) : io.to(userRoom(userId));
+  });
+
+  target?.emit(event, payload);
+}
+
+export function emitPersonalChatCreated({ conversationId, userIds }) {
+  if (!conversationId) return;
+  emitToPersonalChatUsers(
+    realtimeEvents.personalChatCreated,
+    { conversationId },
+    userIds,
+  );
+}
+
+export function emitPersonalChatMessageCreated({
+  conversationId,
+  message,
+  userIds,
+}) {
+  if (!conversationId || !message) return;
+  emitToPersonalChatUsers(
+    realtimeEvents.personalChatMessageCreated,
+    { conversationId, message },
+    userIds,
+  );
+}
+
+export function emitPersonalChatUpdated({ conversationId, reason, userIds }) {
+  if (!conversationId) return;
+  emitToPersonalChatUsers(
+    realtimeEvents.personalChatUpdated,
+    { conversationId, reason: reason ?? "updated" },
+    userIds,
   );
 }
 

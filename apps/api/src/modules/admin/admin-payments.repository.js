@@ -4,7 +4,19 @@ import { assertCommercialSettlementReversible } from "../earnings/order-earnings
 const refundableStatuses = ["PAGO", "LIQUIDADO"];
 const paymentInclude = {
   composicoes: { include: { carteira: { include: { tipo_carteira: true } } } },
-  cobranca: { select: { id: true, codigo_publico: true } },
+  cobranca: {
+    include: {
+      proposta_servico: {
+        include: {
+          conversa_servico: {
+            include: {
+              vendedor: { select: { usuario_id: true } },
+            },
+          },
+        },
+      },
+    },
+  },
   loja: { select: { id: true, nome: true } },
   pedido_loja: {
     include: {
@@ -16,7 +28,7 @@ const paymentInclude = {
       propostas: { orderBy: { criado_em: "asc" } },
     },
   },
-  transacao_comercial: { select: { id: true, status: true } },
+  transacao_comercial: { select: { id: true, status: true, validada_em: true } },
   usuario_pagador: { select: { email: true, id: true, nome: true } },
 };
 
@@ -34,6 +46,24 @@ export function createAdminPaymentsRepository(database = prisma) {
       });
     },
 
+    cancelUnattendedOrder(orderId, statuses) {
+      return database.pedidoLoja.updateMany({
+        data: { cancelado_em: new Date(), status: "CANCELADO" },
+        where: {
+          id: orderId,
+          preparando_em: null,
+          status: { in: statuses },
+        },
+      });
+    },
+
+    cancelUnattendedServiceConversation(conversationId) {
+      return database.conversaServico.updateMany({
+        data: { encerrado_em: new Date(), status: "CANCELADA" },
+        where: { id: conversationId, status: "ACORDADA" },
+      });
+    },
+
     claimInternalRefund(paymentId) {
       return database.pagamento.updateMany({
         data: { estornado_em: new Date(), status: "ESTORNADO" },
@@ -48,6 +78,8 @@ export function createAdminPaymentsRepository(database = prisma) {
     createOrderMessage(data) {
       return database.pedidoLojaMensagem.create({ data });
     },
+
+    createServiceMessage(args) { return database.conversaServicoMensagem.create(args); },
 
     createWalletMovement(data) {
       return database.lancamentoCarteira.create({ data });
@@ -77,6 +109,20 @@ export function createAdminPaymentsRepository(database = prisma) {
       });
     },
 
+    restoreUnattendedOrder(orderId, status) {
+      return database.pedidoLoja.updateMany({
+        data: { cancelado_em: null, status },
+        where: { id: orderId, status: "CANCELADO" },
+      });
+    },
+
+    restoreUnattendedServiceConversation(conversationId) {
+      return database.conversaServico.updateMany({
+        data: { encerrado_em: null, status: "ACORDADA" },
+        where: { id: conversationId, status: "CANCELADA" },
+      });
+    },
+
     restoreWalletBalance(walletId, amount) {
       return database.carteira.update({
         data: { saldo_disponivel_centavos: { increment: BigInt(amount) } },
@@ -90,6 +136,8 @@ export function createAdminPaymentsRepository(database = prisma) {
         work(createAdminPaymentsRepository(transaction), transaction),
       );
     },
+    updateCharges(args) { return database.cobranca.updateMany(args); },
+    updateServiceProposals(args) { return database.propostaServico.updateMany(args); },
   };
 }
 

@@ -3,7 +3,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
+  Keyboard,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -43,6 +45,7 @@ export function StoreConversationScreen({ navigation, route }) {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(!initialConversation?.messages);
+  const [keyboardInset, setKeyboardInset] = useState(0);
   const [openingContent, setOpeningContent] = useState("");
   const [sending, setSending] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -87,6 +90,36 @@ export function StoreConversationScreen({ navigation, route }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (Platform.OS !== "ios") {
+      return undefined;
+    }
+
+    const updateKeyboardInset = (event) => {
+      const keyboardHeight = Number(event?.endCoordinates?.height ?? 0);
+
+      setKeyboardInset(Math.max(0, keyboardHeight));
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+    };
+    const changeSubscription = Keyboard.addListener(
+      "keyboardWillChangeFrame",
+      updateKeyboardInset,
+    );
+    const showSubscription = Keyboard.addListener(
+      "keyboardWillShow",
+      updateKeyboardInset,
+    );
+    const hideSubscription = Keyboard.addListener("keyboardWillHide", () => {
+      setKeyboardInset(0);
+    });
+
+    return () => {
+      changeSubscription.remove();
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
 
   const refreshConversation = useCallback(() => {
     load({ silent: true });
@@ -255,8 +288,12 @@ export function StoreConversationScreen({ navigation, route }) {
 
   return (
     <ScreenContainer
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[
+        styles.content,
+        keyboardInset > 0 && { paddingBottom: keyboardInset },
+      ]}
       edges={["left", "right"]}
+      keyboardAvoiding={Platform.OS !== "ios"}
       padded={false}
       scroll={false}
     >
@@ -302,6 +339,7 @@ export function StoreConversationScreen({ navigation, route }) {
 
       <ScrollView
         contentContainerStyle={styles.messages}
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         keyboardShouldPersistTaps="handled"
         onContentSizeChange={() =>
           scrollRef.current?.scrollToEnd({ animated: true })
@@ -347,6 +385,9 @@ export function StoreConversationScreen({ navigation, route }) {
           </Pressable>
         ) : null}
         onChangeDraft={setDraft}
+        onFocus={() =>
+          setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80)
+        }
         onSend={send}
         placeholder={
           conversation?.isStore
@@ -786,7 +827,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     padding: spacing.md,
   },
-  content: { backgroundColor: colors.background },
+  content: { backgroundColor: colors.background, flex: 1 },
   context: {
     alignItems: "flex-start",
     backgroundColor: colors.primarySoft,

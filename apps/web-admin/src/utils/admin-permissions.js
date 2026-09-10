@@ -1,9 +1,12 @@
 const permissionsByPage = {
   categories: ["super_admin", "admin", "operacoes"],
   dashboard: ["super_admin", "admin", "operacoes", "suporte", "financeiro", "compliance", "kyc"],
+  kyc: ["super_admin", "admin", "compliance", "kyc"],
   network: ["super_admin", "admin", "operacoes"],
   participants: ["super_admin", "admin", "operacoes", "financeiro", "compliance", "kyc"],
   payments: ["super_admin", "admin", "financeiro"],
+  wallets: ["super_admin", "admin", "financeiro"],
+  withdrawals: ["super_admin", "admin", "financeiro"],
   segments: ["super_admin", "admin", "operacoes"],
   serviceTypes: ["super_admin", "admin", "operacoes"],
   settings: ["super_admin", "admin", "financeiro", "suporte"],
@@ -18,8 +21,16 @@ export function canManageWallet(role) {
   return ["super_admin", "financeiro"].includes(String(role ?? "").toLowerCase());
 }
 
+export function canManageNetwork(role) {
+  return String(role ?? "").toLowerCase() === "super_admin";
+}
+
 export function canRefundPayments(role) {
   return canManageWallet(role);
+}
+
+export function canManageWithdrawals(role) {
+  return ["super_admin", "financeiro"].includes(String(role ?? "").toLowerCase());
 }
 
 export function canManageEarnings(role) {
@@ -31,6 +42,10 @@ export function canManageSupport(role) {
 }
 
 export function canManageParticipantData(role) {
+  return ["super_admin", "admin", "operacoes"].includes(String(role ?? "").toLowerCase());
+}
+
+export function canManageProviderProfiles(role) {
   return ["super_admin", "admin", "operacoes"].includes(String(role ?? "").toLowerCase());
 }
 

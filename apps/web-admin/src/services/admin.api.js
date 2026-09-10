@@ -1,4 +1,4 @@
-import { apiGet, apiRequest } from "./api";
+import { apiBlob, apiGet, apiRequest } from "./api";
 
 function withQuery(path, params) {
   const query = new URLSearchParams();
@@ -15,6 +15,38 @@ function withQuery(path, params) {
 
 export function getAdminDashboard(accessToken) {
   return apiGet("/api/admin/dashboard", accessToken);
+}
+
+export function getAdminKycSubmissions(accessToken, params) {
+  return apiGet(withQuery("/api/admin/kyc/submissions", params), accessToken);
+}
+
+export function getAdminKycFile(accessToken, fileUrl) {
+  return apiBlob(fileUrl, accessToken);
+}
+
+export function approveAdminKyc(accessToken, submissionId, reason) {
+  return apiRequest(`/api/admin/kyc/submissions/${submissionId}/approve`, {
+    body: { reason },
+    method: "POST",
+    token: accessToken,
+  });
+}
+
+export function rejectAdminKyc(accessToken, submissionId, reason) {
+  return apiRequest(`/api/admin/kyc/submissions/${submissionId}/reject`, {
+    body: { reason },
+    method: "POST",
+    token: accessToken,
+  });
+}
+
+export function revokeAdminKyc(accessToken, submissionId, reason) {
+  return apiRequest(`/api/admin/kyc/submissions/${submissionId}/revoke`, {
+    body: { reason },
+    method: "POST",
+    token: accessToken,
+  });
 }
 
 export function getAdminPayments(accessToken, params) {
@@ -38,6 +70,14 @@ export function refreshAdminRefund(accessToken, paymentId) {
 
 export function getAdminNetwork(accessToken, params) {
   return apiGet(withQuery("/api/admin/network", params), accessToken);
+}
+
+export function moveAdminNetworkPlacement(accessToken, userId, data) {
+  return apiRequest(`/api/admin/network/placements/${userId}`, {
+    body: data,
+    method: "PATCH",
+    token: accessToken,
+  });
 }
 
 export function getAdminUsers(accessToken, params) {
@@ -68,6 +108,58 @@ export function creditAdminUserWallet(accessToken, userId, data) {
   return apiRequest(`/api/admin/users/${userId}/wallet-credit`, {
     body: data,
     method: "POST",
+    token: accessToken,
+  });
+}
+
+export function adjustAdminUserWallet(accessToken, userId, data) {
+  return apiRequest(`/api/admin/users/${userId}/wallet-adjustment`, {
+    body: data,
+    method: "POST",
+    token: accessToken,
+  });
+}
+
+export function updateAdminSellerProfile(accessToken, userId, data) {
+  return apiRequest(`/api/admin/users/${userId}/seller-profile`, {
+    body: data,
+    method: "PATCH",
+    token: accessToken,
+  });
+}
+
+export function updateAdminCourierProfile(accessToken, userId, data) {
+  return apiRequest(`/api/admin/users/${userId}/courier-profile`, {
+    body: data,
+    method: "PATCH",
+    token: accessToken,
+  });
+}
+
+export function addAdminUserService(accessToken, userId, serviceTypeId) {
+  return apiRequest(`/api/admin/users/${userId}/seller-services`, {
+    body: { serviceTypeId },
+    method: "POST",
+    token: accessToken,
+  });
+}
+
+export function updateAdminUserService(accessToken, userId, sellerServiceId, status) {
+  return apiRequest(`/api/admin/users/${userId}/seller-services/${sellerServiceId}`, {
+    body: { status },
+    method: "PATCH",
+    token: accessToken,
+  });
+}
+
+export function getAdminWallets(accessToken) {
+  return apiGet("/api/admin/wallet", accessToken);
+}
+
+export function updateAdminWalletType(accessToken, typeId, canWithdraw) {
+  return apiRequest(`/api/admin/wallet/types/${typeId}`, {
+    body: { canWithdraw },
+    method: "PATCH",
     token: accessToken,
   });
 }
@@ -208,10 +300,56 @@ export function updateAdminOrderEarningsDistribution(accessToken, distribution) 
   });
 }
 
+export function updateAdminPaymentPolicy(accessToken, policy) {
+  return apiRequest("/api/admin/settings/earnings/payment-policy", {
+    body: policy,
+    method: "PATCH",
+    token: accessToken,
+  });
+}
+
 export function updateAdminSegmentFee(accessToken, segmentId, commission) {
   return apiRequest(`/api/admin/settings/earnings/segments/${segmentId}`, {
     body: commission,
     method: "PATCH",
+    token: accessToken,
+  });
+}
+
+export function getAdminWithdrawalSettings(accessToken) {
+  return apiGet("/api/admin/settings/withdrawals", accessToken);
+}
+
+export function updateAdminWithdrawalSettings(accessToken, settings) {
+  return apiRequest("/api/admin/settings/withdrawals", {
+    body: settings,
+    method: "PATCH",
+    token: accessToken,
+  });
+}
+
+export function getAdminWithdrawals(accessToken, params = {}) {
+  return apiGet(withQuery("/api/admin/withdrawals", params), accessToken);
+}
+
+export function approveAdminWithdrawal(accessToken, withdrawalId) {
+  return apiRequest(`/api/admin/withdrawals/${withdrawalId}/approve`, {
+    method: "POST",
+    token: accessToken,
+  });
+}
+
+export function rejectAdminWithdrawal(accessToken, withdrawalId, reason) {
+  return apiRequest(`/api/admin/withdrawals/${withdrawalId}/reject`, {
+    body: { reason },
+    method: "POST",
+    token: accessToken,
+  });
+}
+
+export function refreshAdminWithdrawal(accessToken, withdrawalId) {
+  return apiRequest(`/api/admin/withdrawals/${withdrawalId}/refresh`, {
+    method: "POST",
     token: accessToken,
   });
 }

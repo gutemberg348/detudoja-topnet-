@@ -9,16 +9,63 @@ const qualificationInclude = {
   kyc: true,
 };
 
-export const adminNetworkRepository = {
+export function createAdminNetworkRepository(database = prisma) {
+  return {
+  lockMatrix() {
+    return database.$executeRawUnsafe("SELECT pg_advisory_xact_lock(84217001)");
+  },
+
+  listPlacements() {
+    return database.indicacao.findMany({
+      select: {
+        alocado_sob_usuario_id: true,
+        id: true,
+        indicado_usuario_id: true,
+        nivel_matriz: true,
+        posicao_matriz: true,
+      },
+    });
+  },
+
+  updatePlacement(id, data) {
+    return database.indicacao.update({ data, where: { id } });
+  },
+
+  findPlacementByUser(userId) {
+    return database.indicacao.findUnique({
+      include: {
+        alocado_sob: { select: { email: true, id: true, nome: true } },
+        indicado: { select: { email: true, id: true, nome: true } },
+        indicador: { select: { email: true, id: true, nome: true } },
+      },
+      where: { indicado_usuario_id: userId },
+    });
+  },
+
+  findPlacementUser(id) {
+    return database.usuario.findFirst({
+      select: { email: true, id: true, nome: true, status: true },
+      where: {
+        excluido_em: null,
+        id,
+        tipo_conta: { notIn: ["ADMIN", "SUPORTE"] },
+      },
+    });
+  },
+
+  transaction(work) {
+    return prisma.$transaction(work);
+  },
+
   findCompanyRoot(email) {
-    return prisma.usuario.findUnique({
+    return database.usuario.findUnique({
       include: qualificationInclude,
       where: { email },
     });
   },
 
   findMatrixChildren(parentIds) {
-    return prisma.indicacao.findMany({
+    return database.indicacao.findMany({
       include: {
         alocado_sob: { select: { email: true, id: true, nome: true } },
         indicado: { include: qualificationInclude },
@@ -33,7 +80,7 @@ export const adminNetworkRepository = {
   },
 
   findOrphanUsers(rootUserId) {
-    return prisma.usuario.findMany({
+    return database.usuario.findMany({
       orderBy: { criado_em: "asc" },
       select: {
         criado_em: true,
@@ -53,14 +100,14 @@ export const adminNetworkRepository = {
   },
 
   findRootById(id) {
-    return prisma.usuario.findUnique({
+    return database.usuario.findUnique({
       include: qualificationInclude,
       where: { id },
     });
   },
 
   findUnallocatedIndications() {
-    return prisma.indicacao.findMany({
+    return database.indicacao.findMany({
       include: {
         indicado: { select: { email: true, id: true, nome: true } },
         indicador: { select: { email: true, id: true, nome: true } },
@@ -73,4 +120,7 @@ export const adminNetworkRepository = {
       },
     });
   },
-};
+  };
+}
+
+export const adminNetworkRepository = createAdminNetworkRepository();

@@ -31,9 +31,21 @@ export function createCommercialLimitRepository(database) {
       return database.pagamento.aggregate({
         _sum: { valor_total_centavos: true },
         where: {
-          ...paymentWhere,
-          pago_em: { gte: startDate },
-          status: { in: paidStatuses },
+          AND: [
+            paymentWhere,
+            {
+              OR: [
+                {
+                  pago_em: { gte: startDate },
+                  status: { in: paidStatuses },
+                },
+                {
+                  criado_em: { gte: startDate },
+                  status: "AGUARDANDO_PAGAMENTO",
+                },
+              ],
+            },
+          ],
         },
       });
     },

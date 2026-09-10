@@ -1,5 +1,15 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { useEffect, useState } from "react";
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { AppButton } from "../../components/AppButton";
 import { AppInput } from "../../components/AppInput";
 import { colors } from "../../utils/theme";
@@ -97,25 +107,9 @@ export function SaleDestinationModal({ onClose, onSelectAutonomous, onSelectStor
             showsVerticalScrollIndicator={false}
           >
             <Text style={styles.choiceMeta}>
-              Escolha a loja para registrar a venda nela ou siga com uma venda autonoma.
+              Registre a venda no comercio correto para manter historico, taxas e repasse organizados.
             </Text>
-
-            <Pressable
-              onPress={onSelectAutonomous}
-              style={({ pressed }) => [styles.choiceCard, pressed && styles.pressed]}
-            >
-              <View style={styles.choiceIcon}>
-                <Ionicons color={colors.primaryDark} name="qr-code-outline" size={23} />
-              </View>
-              <View style={styles.choiceCopy}>
-                <Text style={styles.choiceLabel}>Venda autonoma</Text>
-                <Text style={styles.choiceMeta}>Venda sem loja, recebida direto por voce.</Text>
-              </View>
-              <View style={styles.choiceArrow}>
-                <Ionicons color={colors.primaryDark} name="arrow-forward" size={18} />
-              </View>
-            </Pressable>
-
+            <Text style={styles.destinationSectionLabel}>SUAS LOJAS</Text>
             {stores.map((store) => (
               <Pressable
                 key={store.id}
@@ -134,6 +128,23 @@ export function SaleDestinationModal({ onClose, onSelectAutonomous, onSelectStor
                 </View>
               </Pressable>
             ))}
+            <View style={styles.destinationDivider} />
+            <Text style={styles.destinationSectionLabel}>VENDA SEM LOJA</Text>
+            <Pressable
+              onPress={onSelectAutonomous}
+              style={({ pressed }) => [styles.choiceCard, styles.choiceCardSecondary, pressed && styles.pressed]}
+            >
+              <View style={styles.choiceIcon}>
+                <Ionicons color={colors.primaryDark} name="person-outline" size={23} />
+              </View>
+              <View style={styles.choiceCopy}>
+                <Text style={styles.choiceLabel}>Cobrar como autonomo</Text>
+                <Text style={styles.choiceMeta}>Use somente quando a venda nao pertence a nenhuma loja.</Text>
+              </View>
+              <View style={styles.choiceArrow}>
+                <Ionicons color={colors.primaryDark} name="arrow-forward" size={18} />
+              </View>
+            </Pressable>
           </ScrollView>
         </View>
       </View>
@@ -141,15 +152,42 @@ export function SaleDestinationModal({ onClose, onSelectAutonomous, onSelectStor
   );
 }
 
-export function StoreChargeModal({ error, form, isSaving, onChange, onClose, onSubmit, open, store }) {
+export function StoreChargeModal({
+  error,
+  form,
+  isSaving,
+  onChange,
+  onClose,
+  onSubmit,
+  open,
+  quickOptions = [],
+  store,
+}) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
+
+  useEffect(() => {
+    if (open) setDetailsOpen(false);
+  }, [open]);
+
+  function selectQuickOption(option) {
+    onChange((current) => ({
+      ...current,
+      amount: option.amountCents ? centsToInput(option.amountCents) : current.amount,
+      title: option.label,
+    }));
+  }
+
   return (
     <Modal animationType="fade" transparent visible={open}>
-      <View style={styles.modalBackdrop}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={styles.modalBackdrop}
+      >
         <View style={styles.modal}>
           <View style={styles.modalHeader}>
             <View>
               <Text style={styles.modalKicker}>Venda presencial</Text>
-              <Text style={styles.modalTitle}>Gerar QR da cobranca</Text>
+              <Text style={styles.modalTitle}>Cobranca rapida</Text>
             </View>
             <Pressable onPress={onClose} style={styles.modalClose}>
               <Ionicons color={colors.textPrimary} name="close" size={20} />
@@ -166,46 +204,110 @@ export function StoreChargeModal({ error, form, isSaving, onChange, onClose, onS
               <Text style={styles.documentHintText}>A cobranca sera recebida por {store?.name ?? "sua loja"}.</Text>
             </View>
             <AppInput
-              autoCapitalize="sentences"
-              icon="pricetag-outline"
-              label="Descricao da cobranca"
-              onChangeText={(value) => onChange((current) => ({ ...current, title: value }))}
-              placeholder="Ex.: Compra no caixa"
-              value={form.title}
-            />
-            <AppInput
+              autoFocus
               icon="cash-outline"
               keyboardType="decimal-pad"
-              label="Valor"
+              label="Quanto cobrar?"
               onChangeText={(value) => onChange((current) => ({ ...current, amount: value }))}
               placeholder="Ex.: 49,90"
               value={form.amount}
             />
-            <QrExpirationHint />
-            <AppInput
-              autoCapitalize="sentences"
-              icon="reader-outline"
-              label="Observacao"
-              multiline
-              onChangeText={(value) => onChange((current) => ({ ...current, description: value }))}
-              placeholder="Opcional: itens ou referencia do atendimento"
-              value={form.description}
-            />
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setDetailsOpen((current) => !current)}
+              style={({ pressed }) => [styles.optionalDetailsButton, pressed && styles.pressed]}
+            >
+              <View style={styles.optionalDetailsIcon}>
+                <Ionicons color={colors.primaryDark} name="receipt-outline" size={18} />
+              </View>
+              <View style={styles.optionalDetailsCopy}>
+                <Text style={styles.optionalDetailsTitle}>
+                  {detailsOpen ? "Ocultar detalhes" : "Adicionar detalhes"}
+                </Text>
+                <Text style={styles.optionalDetailsText}>Opcional: item, servico ou observacao.</Text>
+              </View>
+              <Ionicons color={colors.primaryDark} name={detailsOpen ? "chevron-up" : "chevron-down"} size={19} />
+            </Pressable>
+            {detailsOpen ? (
+              <View style={styles.quickChargeDetails}>
+                {quickOptions.length ? (
+                  <View style={styles.quickChargeSection}>
+                    <View style={styles.quickChargeHeading}>
+                      <Text style={styles.quickChargeTitle}>Itens e cobrancas usadas</Text>
+                      <Text style={styles.quickChargeMeta}>Toque para preencher; voce ainda pode alterar.</Text>
+                    </View>
+                    <View style={styles.quickChargeOptions}>
+                      {quickOptions.map((option) => {
+                        const selected = form.title === option.label;
+                        return (
+                          <Pressable
+                            key={`${option.source}-${option.label}`}
+                            onPress={() => selectQuickOption(option)}
+                            style={({ pressed }) => [
+                              styles.quickChargeOption,
+                              selected && styles.quickChargeOptionSelected,
+                              pressed && styles.pressed,
+                            ]}
+                          >
+                            <Text style={[styles.quickChargeOptionText, selected && styles.quickChargeOptionTextSelected]}>
+                              {option.label}
+                            </Text>
+                            {option.amountCents ? (
+                              <Text style={[styles.quickChargeOptionPrice, selected && styles.quickChargeOptionTextSelected]}>
+                                {formatCents(option.amountCents)}
+                              </Text>
+                            ) : null}
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ) : null}
+                <AppInput
+                  autoCapitalize="sentences"
+                  icon="pricetag-outline"
+                  label="O que foi vendido?"
+                  onChangeText={(value) => onChange((current) => ({ ...current, title: value }))}
+                  placeholder="Ex.: Corte e barba"
+                  value={form.title}
+                />
+                <AppInput
+                  autoCapitalize="sentences"
+                  icon="reader-outline"
+                  label="Observacao"
+                  multiline
+                  onChangeText={(value) => onChange((current) => ({ ...current, description: value }))}
+                  placeholder="Opcional: itens ou referencia do atendimento"
+                  value={form.description}
+                />
+                <QrExpirationHint />
+              </View>
+            ) : null}
             {error ? <Text style={styles.modalError}>{error}</Text> : null}
-            <View style={styles.modalActions}>
-              <AppButton onPress={onClose} title="Cancelar" variant="neutral" />
-              <AppButton
-                disabled={!form.title.trim() || !form.amount.trim()}
-                loading={isSaving}
-                onPress={onSubmit}
-                title="Gerar QR"
-              />
-            </View>
+            <AppButton
+              disabled={!form.amount.trim()}
+              icon="qr-code-outline"
+              loading={isSaving}
+              onPress={onSubmit}
+              style={styles.quickChargeSubmit}
+              title="Gerar QR para pagar"
+            />
           </ScrollView>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
+}
+
+function centsToInput(value) {
+  return (Number(value) / 100).toFixed(2).replace(".", ",");
+}
+
+function formatCents(value) {
+  return Number(value / 100).toLocaleString("pt-BR", {
+    currency: "BRL",
+    style: "currency",
+  });
 }
 
 function QrExpirationHint() {

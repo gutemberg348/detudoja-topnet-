@@ -1,8 +1,15 @@
 import { AppError } from "../../utils/errors.js";
 import { parsePositiveId } from "../../utils/ids.js";
 import { cityAddressWhere } from "../../utils/location.js";
-import { getSegmentCommissionDistribution } from "../earnings/order-earnings.config.js";
+import {
+  getSegmentCommissionDistribution,
+  resolvePaymentPolicy,
+} from "../earnings/order-earnings.config.js";
 import { defaultDeliveryFeeCents } from "../orders/orders.config.js";
+import {
+  createCacheKey,
+  getOrSetJsonCache,
+} from "../cache/cache.service.js";
 import {
   marketplaceRepository,
   publicStoreWhere,
@@ -46,7 +53,11 @@ async function findMarketplaceSearchMatches(search) {
 }
 
 async function queryMarketplaceSearchMatches(patterns) {
-  return marketplaceRepository.querySearchMatches(patterns);
+  return getOrSetJsonCache({
+    key: createCacheKey("marketplace-search-matches", patterns),
+    load: () => marketplaceRepository.querySearchMatches(patterns),
+    ttlSeconds: 90,
+  });
 }
 
 function buildSearchPatterns(search, { includeWords = false } = {}) {
@@ -150,7 +161,10 @@ function serializeProduct(product) {
   };
 }
 
-function serializeStore(store, { globalDistribution, includeProducts = false } = {}) {
+function serializeStore(
+  store,
+  { globalDistribution, includeProducts = false, paymentPolicy, viewerId = null } = {},
+) {
   const products = store.produtos ?? [];
   const deliveryAvailable = products.some((product) => product.aceita_entrega);
   const pickupAvailable = products.some((product) => product.aceita_retirada);
@@ -167,6 +181,11 @@ function serializeStore(store, { globalDistribution, includeProducts = false } =
     return minimum === null || duration < minimum ? duration : minimum;
   }, null);
   const segment = store.segmento_venda ?? store.categoria?.segmento_venda ?? null;
+  const effectivePaymentPolicy = resolvePaymentPolicy({
+    globalPolicy: paymentPolicy,
+    segment,
+    store,
+  });
   const customFeePercent = store.taxa_plataforma_personalizada_percentual;
   const feePercentOverride = customFeePercent != null
     ? Number(customFeePercent)
@@ -176,6 +195,15 @@ function serializeStore(store, { globalDistribution, includeProducts = false } =
   const commission = getSegmentCommissionDistribution(segment, globalDistribution, {
     feePercentOverride,
   });
+  const isManagedByViewer = Boolean(
+    viewerId
+    && (
+      store.lojista?.usuario_id === viewerId
+      || store.usuarios?.some(
+        (member) => member.usuario_id === viewerId && member.status === "ATIVO",
+      )
+    ),
+  );
 
   return {
     acceptsOnlinePayment: store.aceita_pagamento_online,
@@ -187,16 +215,20 @@ function serializeStore(store, { globalDistribution, includeProducts = false } =
     delivery: {
       available: deliveryAvailable,
       estimatedMinutes: estimatedDeliveryMinutes,
-      feeCents: deliveryAvailable ? defaultDeliveryFeeCents : null,
+      feeCents: deliveryAvailable
+        ? cents(store.taxa_entrega_centavos ?? defaultDeliveryFeeCents)
+        : null,
       pickupAvailable,
     },
     description: store.descricao,
     email: store.email,
     id: store.id,
+    isManagedByViewer,
     logoUrl: store.logo_url,
     minimumProductPriceCents,
     name: store.nome,
     openForOrders: store.aberta_para_pedidos,
+    onlineServiceFeeCents: effectivePaymentPolicy.onlineServiceFeeCents,
     orderFlow: (store.segmento_venda
       ? store.segmento_venda.negocia_pedido_por_chat
       : store.categoria?.negocia_pedido_por_chat)
@@ -265,15 +297,16 @@ export async function listMarketplaceCategories(userId) {
 export async function listMarketplaceStores(userId, query = {}) {
   const baseAddress = await marketplaceRepository.getBaseAddress(userId);
   const where = await marketplaceQuery(query, baseAddress);
-  const [stores, globalDistribution] = await Promise.all([
+  const [stores, globalDistribution, paymentPolicy] = await Promise.all([
     marketplaceRepository.listStores(where),
     marketplaceRepository.getEarningsDistribution(),
+    marketplaceRepository.getPaymentPolicy(),
   ]);
 
   return {
     stores: stores
       .filter((store) => !isServiceStoreCategory(store.categoria))
-      .map((store) => serializeStore(store, { globalDistribution })),
+      .map((store) => serializeStore(store, { globalDistribution, paymentPolicy, viewerId: userId })),
   };
 }
 
@@ -286,12 +319,13 @@ export async function listMarketplaceProducts(userId, query = {}) {
       : parsePositiveId(query.categoryId, "Categoria invalida");
   const matches = search ? await findMarketplaceSearchMatches(search) : null;
 
-  const [products, globalDistribution] = await Promise.all([
+  const [products, globalDistribution, paymentPolicy] = await Promise.all([
     marketplaceRepository.listProducts(baseAddress, {
       categoryId,
       productIds: matches?.productIds,
     }),
     marketplaceRepository.getEarningsDistribution(),
+    marketplaceRepository.getPaymentPolicy(),
   ]);
 
   return {
@@ -299,7 +333,7 @@ export async function listMarketplaceProducts(userId, query = {}) {
       .filter((product) => !isServiceStoreCategory(product.loja.categoria))
       .map((product) => ({
         product: serializeProduct(product),
-        store: serializeStore(product.loja, { globalDistribution }),
+        store: serializeStore(product.loja, { globalDistribution, paymentPolicy, viewerId: userId }),
       })),
   };
 }
@@ -374,14 +408,22 @@ export async function listMarketplaceSuggestions(userId, query = {}) {
 export async function getMarketplaceStore(userId, storeId) {
   const parsedStoreId = parsePositiveId(storeId, "Loja invalida");
   const baseAddress = await marketplaceRepository.getBaseAddress(userId);
-  const [store, globalDistribution] = await Promise.all([
+  const [store, globalDistribution, paymentPolicy] = await Promise.all([
     marketplaceRepository.findStore(baseAddress, parsedStoreId),
     marketplaceRepository.getEarningsDistribution(),
+    marketplaceRepository.getPaymentPolicy(),
   ]);
 
   if (!store) {
     throw new AppError("Loja nao encontrada ou indisponivel", 404);
   }
 
-  return { store: serializeStore(store, { globalDistribution, includeProducts: true }) };
+  return {
+    store: serializeStore(store, {
+      globalDistribution,
+      includeProducts: true,
+      paymentPolicy,
+      viewerId: userId,
+    }),
+  };
 }

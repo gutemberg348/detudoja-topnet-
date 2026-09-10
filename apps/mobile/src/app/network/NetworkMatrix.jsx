@@ -1,18 +1,33 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useMemo, useRef, useState } from "react";
-import { Animated, PanResponder, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  Animated,
+  Modal,
+  PanResponder,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../../utils/theme";
 import { connectionLabel, isDirectConnection, personInitials } from "./network.utils";
 
 export function NetworkMatrix({ currentUser, levels, onSelectPerson, people, selectedPerson }) {
-  const minZoom = 0.65;
+  const minZoom = 0.25;
   const maxZoom = 1.45;
-  const zoomStep = 0.15;
+  const zoomStep = 0.1;
   const [detailsVisible, setDetailsVisible] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [fullScreenVisible, setFullScreenVisible] = useState(false);
   const [treeDepth, setTreeDepth] = useState(4);
   const [zoom, setZoom] = useState(1);
+  const zoomRef = useRef(1);
   const pan = useRef(new Animated.ValueXY()).current;
+  const pinching = useRef(false);
+  const pinchStartDistance = useRef(null);
+  const pinchStartZoom = useRef(1);
   const panPosition = useRef({ x: 0, y: 0 });
   const panStart = useRef({ x: 0, y: 0 });
   const visibleTreePeople = useMemo(
@@ -26,13 +41,44 @@ export function NetworkMatrix({ currentUser, levels, onSelectPerson, people, sel
   const panResponder = useMemo(
     () => PanResponder.create({
       onMoveShouldSetPanResponder: (_event, gesture) =>
-        gesture.numberActiveTouches === 1
-        && (Math.abs(gesture.dx) > 4 || Math.abs(gesture.dy) > 4),
-      onPanResponderGrant: () => {
+        gesture.numberActiveTouches >= 1
+        && (Math.abs(gesture.dx) > 3 || Math.abs(gesture.dy) > 3),
+      onMoveShouldSetPanResponderCapture: (_event, gesture) =>
+        gesture.numberActiveTouches >= 1
+        && (Math.abs(gesture.dx) > 3 || Math.abs(gesture.dy) > 3),
+      onPanResponderGrant: (event) => {
         panStart.current = { ...panPosition.current };
+        const distance = touchDistance(event.nativeEvent.touches);
+        pinching.current = Boolean(distance);
+        pinchStartDistance.current = distance;
+        pinchStartZoom.current = zoomRef.current;
         setDragging(true);
       },
-      onPanResponderMove: (_event, gesture) => {
+      onPanResponderMove: (event, gesture) => {
+        const distance = touchDistance(event.nativeEvent.touches);
+
+        if (distance) {
+          pinching.current = true;
+
+          if (!pinchStartDistance.current) {
+            pinchStartDistance.current = distance;
+            pinchStartZoom.current = zoomRef.current;
+            return;
+          }
+
+          const nextZoom = Math.max(
+            minZoom,
+            Math.min(maxZoom, pinchStartZoom.current * (distance / pinchStartDistance.current)),
+          );
+          zoomRef.current = nextZoom;
+          setZoom(nextZoom);
+          return;
+        }
+
+        if (pinching.current) {
+          return;
+        }
+
         if (gesture.numberActiveTouches !== 1) {
           return;
         }
@@ -45,12 +91,16 @@ export function NetworkMatrix({ currentUser, levels, onSelectPerson, people, sel
         pan.setValue(nextPosition);
       },
       onPanResponderRelease: () => {
+        pinching.current = false;
+        pinchStartDistance.current = null;
         setDragging(false);
       },
       onPanResponderTerminate: () => {
+        pinching.current = false;
+        pinchStartDistance.current = null;
         setDragging(false);
       },
-      onPanResponderTerminationRequest: () => true,
+      onPanResponderTerminationRequest: () => false,
     }),
     [pan],
   );
@@ -59,11 +109,19 @@ export function NetworkMatrix({ currentUser, levels, onSelectPerson, people, sel
     panPosition.current = { x: 0, y: 0 };
     panStart.current = { x: 0, y: 0 };
     pan.setValue({ x: 0, y: 0 });
+    zoomRef.current = 1;
     setZoom(1);
   }
 
   function changeZoom(amount) {
-    setZoom((currentZoom) => Math.max(minZoom, Math.min(maxZoom, currentZoom + amount)));
+    setZoom((currentZoom) => {
+      const nextZoom = Math.max(
+        minZoom,
+        Math.min(maxZoom, currentZoom + amount),
+      );
+      zoomRef.current = nextZoom;
+      return nextZoom;
+    });
   }
 
   function changeDepth(depth) {
@@ -110,58 +168,60 @@ export function NetworkMatrix({ currentUser, levels, onSelectPerson, people, sel
         })}
       </View>
 
-      <View
-        {...panResponder.panHandlers}
-        style={[styles.treeViewport, dragging && styles.treeViewportDragging]}
+      <MatrixViewport
+        dragging={dragging}
+        maxZoom={maxZoom}
+        minZoom={minZoom}
+        onChangeZoom={changeZoom}
+        onSelectPerson={onSelectPerson}
+        onToggleFullscreen={() => setFullScreenVisible(true)}
+        onResetViewport={resetViewport}
+        pan={pan}
+        panHandlers={panResponder.panHandlers}
+        selectedPerson={selectedPerson}
+        tree={tree}
+        zoom={zoom}
+        zoomStep={zoomStep}
+      />
+
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setFullScreenVisible(false)}
+        presentationStyle="fullScreen"
+        visible={fullScreenVisible}
       >
-        <View style={styles.viewportToolbar}>
-          <View style={styles.viewportHint}>
-            <Ionicons color={colors.primaryDark} name="hand-left-outline" size={15} />
-            <Text style={styles.viewportHintText}>Arraste para explorar</Text>
-          </View>
-          <View style={styles.zoomControls}>
+        <SafeAreaView style={styles.fullScreenModal}>
+          <View style={styles.fullScreenHeader}>
+            <View>
+              <Text style={styles.eyebrow}>MAPA DA SUA REDE</Text>
+              <Text style={styles.fullScreenTitle}>Explore sua matriz</Text>
+            </View>
             <Pressable
-              accessibilityLabel="Diminuir zoom da matriz"
-              disabled={zoom <= minZoom}
-              onPress={() => changeZoom(-zoomStep)}
-              style={[styles.zoomButton, zoom <= minZoom && styles.zoomButtonDisabled]}
+              accessibilityLabel="Fechar mapa em tela cheia"
+              onPress={() => setFullScreenVisible(false)}
+              style={styles.fullScreenClose}
             >
-              <Ionicons color={colors.primaryDark} name="remove" size={18} />
-            </Pressable>
-            <Text style={styles.zoomValue}>{Math.round(zoom * 100)}%</Text>
-            <Pressable
-              accessibilityLabel="Aumentar zoom da matriz"
-              disabled={zoom >= maxZoom}
-              onPress={() => changeZoom(zoomStep)}
-              style={[styles.zoomButton, zoom >= maxZoom && styles.zoomButtonDisabled]}
-            >
-              <Ionicons color={colors.primaryDark} name="add" size={18} />
-            </Pressable>
-            <Pressable
-              accessibilityLabel="Centralizar matriz"
-              onPress={resetViewport}
-              style={styles.zoomResetButton}
-            >
-              <Ionicons color={colors.primaryDark} name="scan-outline" size={16} />
+              <Ionicons color={colors.primaryDark} name="close" size={22} />
             </Pressable>
           </View>
-        </View>
-        <View style={styles.treeClip}>
-          <Animated.View
-            style={[
-              styles.treeCanvas,
-              { transform: [{ translateX: pan.x }, { translateY: pan.y }, { scale: zoom }] },
-            ]}
-          >
-            <MatrixTreeNode
-              node={tree}
-              onSelectPerson={onSelectPerson}
-              root
-              selectedId={selectedPerson?.id}
-            />
-          </Animated.View>
-        </View>
-      </View>
+          <MatrixViewport
+            dragging={dragging}
+            fullScreen
+            maxZoom={maxZoom}
+            minZoom={minZoom}
+            onChangeZoom={changeZoom}
+            onSelectPerson={onSelectPerson}
+            onToggleFullscreen={() => setFullScreenVisible(false)}
+            onResetViewport={resetViewport}
+            pan={pan}
+            panHandlers={panResponder.panHandlers}
+            selectedPerson={selectedPerson}
+            tree={tree}
+            zoom={zoom}
+            zoomStep={zoomStep}
+          />
+        </SafeAreaView>
+      </Modal>
 
       {people.length === 0 ? (
         <View style={styles.emptyState}>
@@ -193,6 +253,108 @@ export function NetworkMatrix({ currentUser, levels, onSelectPerson, people, sel
       {detailsVisible ? <LevelsTable levels={levels} /> : null}
     </View>
   );
+}
+
+function MatrixViewport({
+  dragging,
+  fullScreen = false,
+  maxZoom,
+  minZoom,
+  onChangeZoom,
+  onResetViewport,
+  onSelectPerson,
+  onToggleFullscreen,
+  pan,
+  panHandlers,
+  selectedPerson,
+  tree,
+  zoom,
+  zoomStep,
+}) {
+  return (
+    <View
+      {...panHandlers}
+      style={[
+        styles.treeViewport,
+        fullScreen && styles.treeViewportFullScreen,
+        dragging && styles.treeViewportDragging,
+      ]}
+    >
+      <View style={styles.viewportToolbar}>
+        <View style={styles.viewportHint}>
+          <Ionicons color={colors.primaryDark} name="hand-left-outline" size={15} />
+          <Text style={styles.viewportHintText}>
+            {fullScreen ? "Arraste ou aproxime com dois dedos" : "Arraste para explorar"}
+          </Text>
+        </View>
+        <View style={styles.zoomControls}>
+          <Pressable
+            accessibilityLabel="Diminuir zoom da matriz"
+            disabled={zoom <= minZoom}
+            onPress={() => onChangeZoom(-zoomStep)}
+            style={[styles.zoomButton, zoom <= minZoom && styles.zoomButtonDisabled]}
+          >
+            <Ionicons color={colors.primaryDark} name="remove" size={18} />
+          </Pressable>
+          <Text style={styles.zoomValue}>{Math.round(zoom * 100)}%</Text>
+          <Pressable
+            accessibilityLabel="Aumentar zoom da matriz"
+            disabled={zoom >= maxZoom}
+            onPress={() => onChangeZoom(zoomStep)}
+            style={[styles.zoomButton, zoom >= maxZoom && styles.zoomButtonDisabled]}
+          >
+            <Ionicons color={colors.primaryDark} name="add" size={18} />
+          </Pressable>
+          <Pressable
+            accessibilityLabel="Centralizar matriz"
+            onPress={onResetViewport}
+            style={styles.zoomResetButton}
+          >
+            <Ionicons color={colors.primaryDark} name="locate-outline" size={16} />
+          </Pressable>
+          <Pressable
+            accessibilityLabel={fullScreen ? "Sair da tela cheia" : "Abrir mapa em tela cheia"}
+            onPress={onToggleFullscreen}
+            style={styles.zoomFullscreenButton}
+          >
+            <Ionicons
+              color={colors.primaryDark}
+              name={fullScreen ? "contract-outline" : "expand-outline"}
+              size={16}
+            />
+          </Pressable>
+        </View>
+      </View>
+      <View style={[styles.treeClip, fullScreen && styles.treeClipFullScreen]}>
+        <Animated.View
+          style={[
+            styles.treeCanvas,
+            fullScreen && styles.treeCanvasFullScreen,
+            { transform: [{ translateX: pan.x }, { translateY: pan.y }, { scale: zoom }] },
+          ]}
+        >
+          <MatrixTreeNode
+            node={tree}
+            onSelectPerson={onSelectPerson}
+            root
+            selectedId={selectedPerson?.id}
+          />
+        </Animated.View>
+      </View>
+    </View>
+  );
+}
+
+function touchDistance(touches) {
+  if (!touches || touches.length < 2) {
+    return null;
+  }
+
+  const [firstTouch, secondTouch] = touches;
+  const horizontal = secondTouch.pageX - firstTouch.pageX;
+  const vertical = secondTouch.pageY - firstTouch.pageY;
+
+  return Math.sqrt((horizontal ** 2) + (vertical ** 2));
 }
 
 function Legend({ color, icon, label }) {
@@ -396,6 +558,10 @@ const styles = StyleSheet.create({
   emptyText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption, lineHeight: 17 },
   emptyTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small, fontWeight: "700" },
   eyebrow: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 10, fontWeight: "700", textTransform: "uppercase" },
+  fullScreenClose: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 42, justifyContent: "center", width: 42 },
+  fullScreenHeader: { alignItems: "center", backgroundColor: colors.card, borderBottomColor: colors.border, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  fullScreenModal: { backgroundColor: colors.background, flex: 1 },
+  fullScreenTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.h3, fontWeight: "800", marginTop: 2 },
   header: { alignItems: "center", flexDirection: "row", gap: spacing.md, justifyContent: "space-between" },
   headerCopy: { flex: 1, gap: 3 },
   legend: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
@@ -426,7 +592,9 @@ const styles = StyleSheet.create({
   totalLabel: { color: "#D1FAE5", fontFamily: fonts.medium, fontSize: 9 },
   totalValue: { color: colors.card, fontFamily: fonts.extraBold, fontSize: typography.h3, fontWeight: "800" },
   treeCanvas: { alignItems: "center", minWidth: 320, paddingBottom: spacing.md, paddingHorizontal: spacing.md },
+  treeCanvasFullScreen: { minWidth: 560, paddingBottom: spacing.xxxl, paddingHorizontal: spacing.xxxl, paddingTop: spacing.xl },
   treeClip: { minHeight: 176, overflow: "hidden", paddingBottom: spacing.md, paddingHorizontal: spacing.md, paddingTop: spacing.md },
+  treeClipFullScreen: { flex: 1, minHeight: 520, paddingBottom: spacing.xxl, paddingHorizontal: spacing.xl, paddingTop: spacing.xl },
   treeViewport: {
     backgroundColor: "#F7F9F8",
     borderColor: colors.primaryLight,
@@ -435,6 +603,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     ...Platform.select({ web: { cursor: "grab", touchAction: "none", userSelect: "none" } }),
   },
+  treeViewportFullScreen: { borderRadius: 0, borderWidth: 0, flex: 1 },
   treeViewportDragging: Platform.select({ web: { cursor: "grabbing" } }),
   viewportHint: { alignItems: "center", flexDirection: "row", gap: 5 },
   viewportHintText: { color: colors.primaryDark, fontFamily: fonts.medium, fontSize: 10 },
@@ -442,6 +611,7 @@ const styles = StyleSheet.create({
   zoomButton: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, height: 28, justifyContent: "center", width: 28 },
   zoomButtonDisabled: { opacity: 0.4 },
   zoomControls: { alignItems: "center", flexDirection: "row", gap: 3 },
+  zoomFullscreenButton: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, height: 28, justifyContent: "center", marginLeft: spacing.xs, width: 28 },
   zoomResetButton: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, height: 28, justifyContent: "center", marginLeft: spacing.xs, width: 28 },
   zoomValue: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 10, minWidth: 34, textAlign: "center" },
 });

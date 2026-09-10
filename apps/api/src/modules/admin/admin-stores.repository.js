@@ -1,4 +1,5 @@
 import { prisma } from "../../config/prisma.js";
+import { getPaymentPolicy } from "../earnings/order-earnings.config.js";
 
 const storeInclude = {
   _count: {
@@ -35,6 +36,10 @@ export function createAdminStoresRepository(database = prisma) {
         select: { id: true },
         where: { excluido_em: null, id },
       });
+    },
+
+    getPaymentPolicy() {
+      return getPaymentPolicy(database);
     },
 
     findCurrentStore(id) {

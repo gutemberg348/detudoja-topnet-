@@ -1,10 +1,16 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { AppButton } from "../components/AppButton";
-import { AppInput } from "../components/AppInput";
 import { ScreenContainer } from "../components/ScreenContainer";
+import { ProfileEditModal } from "./profile/ProfileEditModal";
 import { useRealtimeOrders } from "../hooks/useRealtimeOrders";
 import { getCustomerOrders } from "../services/orders.api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
@@ -26,13 +32,7 @@ import {
   onlyDigits,
 } from "../utils/authValidation";
 import { formatarDinheiro } from "../utils/money";
-import {
-  colors,
-  fonts,
-  radius,
-  spacing,
-  typography,
-} from "../utils/theme";
+import { colors, fonts, radius, spacing, typography } from "../utils/theme";
 
 const accountTypeLabels = {
   ADMIN: "Administrador",
@@ -75,7 +75,10 @@ function unreadCustomerMessages(order) {
 }
 
 function countUnreadCustomerMessages(orders) {
-  return orders.reduce((total, order) => total + unreadCustomerMessages(order), 0);
+  return orders.reduce(
+    (total, order) => total + unreadCustomerMessages(order),
+    0,
+  );
 }
 
 export function ProfileScreen({ navigation }) {
@@ -89,7 +92,16 @@ export function ProfileScreen({ navigation }) {
   const [isSaving, setIsSaving] = useState(false);
   const [name, setName] = useState("");
   const [activeOrdersCount, setActiveOrdersCount] = useState(0);
-  const [address, setAddress] = useState({ city: "", complement: "", district: "", number: "", reference: "", state: "", street: "", zipCode: "" });
+  const [address, setAddress] = useState({
+    city: "",
+    complement: "",
+    district: "",
+    number: "",
+    reference: "",
+    state: "",
+    street: "",
+    zipCode: "",
+  });
   const [unreadOrderMessagesCount, setUnreadOrderMessagesCount] = useState(0);
   const [unreadServiceCount, setUnreadServiceCount] = useState(0);
   const [unreadStoreChatCount, setUnreadStoreChatCount] = useState(0);
@@ -168,7 +180,8 @@ export function ProfileScreen({ navigation }) {
       const conversations = response.conversations ?? [];
       setUnreadStoreChatCount(
         conversations.reduce(
-          (total, conversation) => total + Number(conversation.unreadCount ?? 0),
+          (total, conversation) =>
+            total + Number(conversation.unreadCount ?? 0),
           0,
         ),
       );
@@ -177,12 +190,14 @@ export function ProfileScreen({ navigation }) {
     }
   }, [session?.accessToken]);
 
-  useFocusEffect(useCallback(() => {
-    loadProfile();
-    loadOrders();
-    loadServices();
-    loadStoreChats();
-  }, [loadOrders, loadProfile, loadServices, loadStoreChats]));
+  useFocusEffect(
+    useCallback(() => {
+      loadProfile();
+      loadOrders();
+      loadServices();
+      loadStoreChats();
+    }, [loadOrders, loadProfile, loadServices, loadStoreChats]),
+  );
 
   const handleRealtimeOrder = useCallback(() => {
     loadOrders();
@@ -225,11 +240,12 @@ export function ProfileScreen({ navigation }) {
   }, [loadStoreChats, session?.accessToken]);
 
   useEffect(
-    () => subscribeStoreConversationRead(({ scope }) => {
-      if (scope === "customer") {
-        loadStoreChats();
-      }
-    }),
+    () =>
+      subscribeStoreConversationRead(({ scope }) => {
+        if (scope === "customer") {
+          loadStoreChats();
+        }
+      }),
     [loadStoreChats],
   );
 
@@ -266,8 +282,10 @@ export function ProfileScreen({ navigation }) {
     if (!address.number.trim()) errors.number = "Informe o numero.";
     if (!address.district.trim()) errors.district = "Informe seu bairro.";
     if (!address.city.trim()) errors.city = "Informe sua cidade.";
-    if (!/^[A-Za-z]{2}$/.test(address.state.trim())) errors.state = "Informe a UF.";
-    if (onlyDigits(address.zipCode).length !== 8) errors.zipCode = "Informe um CEP valido.";
+    if (!/^[A-Za-z]{2}$/.test(address.state.trim()))
+      errors.state = "Informe a UF.";
+    if (onlyDigits(address.zipCode).length !== 8)
+      errors.zipCode = "Informe um CEP valido.";
 
     setFieldErrors(errors);
     setError("");
@@ -320,7 +338,11 @@ export function ProfileScreen({ navigation }) {
   if (!profile) {
     return (
       <View style={styles.centered}>
-        <Ionicons color={colors.danger} name="person-circle-outline" size={38} />
+        <Ionicons
+          color={colors.danger}
+          name="person-circle-outline"
+          size={38}
+        />
         <Text style={styles.errorText}>{error}</Text>
         <AppButton onPress={loadProfile} title="Tentar novamente" />
       </View>
@@ -429,8 +451,17 @@ export function ProfileScreen({ navigation }) {
 
   return (
     <ScreenContainer contentContainerStyle={styles.content}>
+      <View style={styles.profilePageHeading}>
+        <View style={styles.profilePageIcon}>
+          <Ionicons color={colors.primaryDark} name="person-outline" size={22} />
+        </View>
+        <View style={styles.profilePageCopy}>
+          <Text style={styles.profilePageTitle}>Perfil</Text>
+          <Text style={styles.profilePageSubtitle}>Conta, saldos e seguranca</Text>
+        </View>
+      </View>
+
       <ProfileHero
-        editing={editing}
         onEdit={() => {
           fillForm(profile);
           setError("");
@@ -447,108 +478,40 @@ export function ProfileScreen({ navigation }) {
         wallets={wallet.wallets}
       />
 
-      {editing ? (
-        <View style={styles.editCard}>
-          <Text style={styles.sectionTitle}>Meus dados</Text>
-          <AppInput
-            autoCapitalize="words"
-            autoComplete="name"
-            error={fieldErrors.name}
-            icon="person-outline"
-            label="Nome completo"
-            onChangeText={(value) => {
-              setName(value);
-              setFieldErrors((current) => ({ ...current, name: undefined }));
-            }}
-            value={name}
-          />
-          <AppInput
-            autoComplete="email"
-            error={fieldErrors.email}
-            icon="mail-outline"
-            keyboardType="email-address"
-            label="E-mail"
-            onChangeText={(value) => {
-              setEmail(value);
-              setFieldErrors((current) => ({ ...current, email: undefined }));
-            }}
-            value={email}
-          />
-          <AppInput
-            autoComplete="tel"
-            error={fieldErrors.phone}
-            icon="call-outline"
-            keyboardType="phone-pad"
-            label="Telefone"
-            maxLength={15}
-            onChangeText={(value) => {
-              setPhone(formatPhone(value));
-              setFieldErrors((current) => ({ ...current, phone: undefined }));
-            }}
-            value={phone}
-          />
-          <Text style={styles.addressTitle}>Sua cidade</Text>
-          <Text style={styles.addressHint}>Essa localizacao define o comercio que aparece para voce.</Text>
-          <AppInput
-            autoComplete="postal-code"
-            error={fieldErrors.zipCode}
-            icon="location-outline"
-            inputMode="numeric"
-            keyboardType="number-pad"
-            label="CEP"
-            maxLength={9}
-            onChangeText={handleAddressCep}
-            value={address.zipCode}
-          />
-          <AppInput
-            autoCapitalize="words"
-            error={fieldErrors.street}
-            icon="map-outline"
-            label="Rua"
-            onChangeText={(value) => updateAddress("street", value)}
-            value={address.street}
-          />
-          <AppInput
-            error={fieldErrors.number}
-            icon="business-outline"
-            label="Numero"
-            onChangeText={(value) => updateAddress("number", value)}
-            value={address.number}
-          />
-          <AppInput
-            autoCapitalize="words"
-            error={fieldErrors.district}
-            icon="navigate-outline"
-            label="Bairro"
-            onChangeText={(value) => updateAddress("district", value)}
-            value={address.district}
-          />
-          <View style={styles.addressRow}>
-            <View style={styles.addressCity}>
-              <AppInput
-                autoCapitalize="words"
-                error={fieldErrors.city}
-                icon="location-outline"
-                label="Cidade"
-                onChangeText={(value) => updateAddress("city", value)}
-                value={address.city}
-              />
-            </View>
-            <View style={styles.addressState}>
-              <AppInput
-                autoCapitalize="characters"
-                error={fieldErrors.state}
-                label="UF"
-                maxLength={2}
-                onChangeText={(value) => updateAddress("state", value.toUpperCase())}
-                value={address.state}
-              />
-            </View>
-          </View>
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
-          <AppButton loading={isSaving} onPress={saveProfile} title="Salvar alteracoes" />
-        </View>
-      ) : null}
+      <ProfileEditModal
+        address={address}
+        error={error}
+        fieldErrors={fieldErrors}
+        isSaving={isSaving}
+        onAddressChange={{
+          city: (value) => updateAddress("city", value),
+          district: (value) => updateAddress("district", value),
+          number: (value) => updateAddress("number", value),
+          state: (value) => updateAddress("state", value.toUpperCase()),
+          street: (value) => updateAddress("street", value),
+          zipCode: handleAddressCep,
+        }}
+        onClose={() => {
+          setEditing(false);
+          setError("");
+          setFieldErrors({});
+        }}
+        onEmailChange={(value) => {
+          setEmail(value);
+          setFieldErrors((current) => ({ ...current, email: undefined }));
+        }}
+        onNameChange={(value) => {
+          setName(value);
+          setFieldErrors((current) => ({ ...current, name: undefined }));
+        }}
+        onPhoneChange={(value) => {
+          setPhone(formatPhone(value));
+          setFieldErrors((current) => ({ ...current, phone: undefined }));
+        }}
+        onSubmit={saveProfile}
+        open={editing}
+        values={{ email, name, phone }}
+      />
 
       <View style={styles.quickMenu}>
         {quickActions.map((item) => (
@@ -560,7 +523,10 @@ export function ProfileScreen({ navigation }) {
             label={item.label}
             meta={item.meta}
             notifyColor={item.notifyColor}
-            onPress={item.onPress ?? (() => navigation.navigate(item.route, item.params))}
+            onPress={
+              item.onPress ??
+              (() => navigation.navigate(item.route, item.params))
+            }
           />
         ))}
       </View>
@@ -576,7 +542,9 @@ export function ProfileScreen({ navigation }) {
           icon="ribbon-outline"
           label="Nivel da conta"
           tone={accountLevel === "OURO" ? "gold" : "silver"}
-          value={statusLabels[accountLevel] ?? profile.accountLevelLabel ?? "Prata"}
+          value={
+            statusLabels[accountLevel] ?? profile.accountLevelLabel ?? "Prata"
+          }
         />
         <View style={styles.statusDivider} />
         <StatusItem
@@ -635,29 +603,39 @@ export function ProfileScreen({ navigation }) {
   );
 }
 
-function ProfileHero({ editing, onEdit, profile }) {
+function ProfileHero({ onEdit, profile }) {
   return (
     <View style={styles.profileHero}>
       <View style={styles.profileHeroTopline}>
         <View style={styles.profileEyebrowRow}>
-          <Ionicons color={colors.primaryDark} name="person-circle-outline" size={16} />
-          <Text style={styles.profileEyebrow}>SUA CONTA</Text>
+          <Ionicons
+            color={colors.primaryDark}
+            name="id-card-outline"
+            size={16}
+          />
+          <Text style={styles.profileEyebrow}>SUA IDENTIDADE</Text>
         </View>
         <View style={styles.statusBadge}>
           <View style={styles.statusDot} />
-          <Text style={styles.statusBadgeText}>{statusLabels[profile.status] ?? profile.status}</Text>
+          <Text style={styles.statusBadgeText}>
+            {statusLabels[profile.status] ?? profile.status}
+          </Text>
         </View>
       </View>
 
       <View style={styles.profileIdentity}>
         <View style={styles.avatarRing}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{profile.name.slice(0, 1).toUpperCase()}</Text>
+            <Ionicons color={colors.card} name="person-outline" size={31} />
           </View>
         </View>
         <View style={styles.profileCopy}>
-          <Text numberOfLines={1} style={styles.name}>{profile.name}</Text>
-          <Text numberOfLines={1} style={styles.email}>{profile.email}</Text>
+          <Text numberOfLines={1} style={styles.name}>
+            {profile.name}
+          </Text>
+          <Text numberOfLines={1} style={styles.email}>
+            {profile.email}
+          </Text>
           <Text style={styles.memberMeta}>
             Cliente desde {new Date(profile.createdAt).getFullYear()}
           </Text>
@@ -665,9 +643,16 @@ function ProfileHero({ editing, onEdit, profile }) {
         <Pressable
           accessibilityLabel="Editar meus dados"
           onPress={onEdit}
-          style={({ pressed }) => [styles.editButton, pressed && styles.pressed]}
+          style={({ pressed }) => [
+            styles.editButton,
+            pressed && styles.pressed,
+          ]}
         >
-          <Ionicons color={colors.primaryDark} name={editing ? "close" : "create-outline"} size={20} />
+          <Ionicons
+            color={colors.primaryDark}
+            name="pencil-outline"
+            size={20}
+          />
         </Pressable>
       </View>
     </View>
@@ -684,18 +669,37 @@ function QuickAction({
   onPress,
 }) {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.quickAction, pressed && styles.pressed]}>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.quickAction, pressed && styles.pressed]}
+    >
       <View style={styles.quickIcon}>
         <Ionicons color={colors.primaryDark} name={icon} size={21} />
         {badgeText ? (
-          <View style={[styles.quickBadge, notifyColor && { backgroundColor: notifyColor }]}>
-            <Text style={[styles.quickBadgeText, badgeTextColor && { color: badgeTextColor }]}>{badgeText}</Text>
+          <View
+            style={[
+              styles.quickBadge,
+              notifyColor && { backgroundColor: notifyColor },
+            ]}
+          >
+            <Text
+              style={[
+                styles.quickBadgeText,
+                badgeTextColor && { color: badgeTextColor },
+              ]}
+            >
+              {badgeText}
+            </Text>
           </View>
         ) : null}
       </View>
       <View style={styles.quickCopy}>
-        <Text numberOfLines={1} style={styles.quickLabel}>{label}</Text>
-        <Text numberOfLines={1} style={styles.quickMeta}>{meta}</Text>
+        <Text numberOfLines={1} style={styles.quickLabel}>
+          {label}
+        </Text>
+        <Text numberOfLines={1} style={styles.quickMeta}>
+          {meta}
+        </Text>
       </View>
       <Ionicons color={colors.textMuted} name="chevron-forward" size={18} />
     </Pressable>
@@ -755,16 +759,23 @@ function WalletPreview({ isLoading, onOpen, summary, wallets = [] }) {
     <View style={styles.walletPreview}>
       <Pressable
         onPress={onOpen}
-        style={({ pressed }) => [styles.walletPreviewHero, pressed && styles.walletPreviewHeroPressed]}
+        style={({ pressed }) => [
+          styles.walletPreviewHero,
+          pressed && styles.walletPreviewHeroPressed,
+        ]}
       >
         <View style={styles.walletPreviewHeader}>
           <View style={styles.walletPreviewIcon}>
             <Ionicons color={colors.card} name="wallet-outline" size={22} />
           </View>
           <View style={styles.walletPreviewCopy}>
-            <Text style={styles.walletPreviewLabel}>Total disponivel nas carteiras</Text>
+            <Text style={styles.walletPreviewLabel}>
+              Total disponivel nas carteiras
+            </Text>
             <Text style={styles.walletPreviewValue}>
-              {isLoading ? "Atualizando..." : formatarDinheiro(summary.availableCents)}
+              {isLoading
+                ? "Atualizando..."
+                : formatarDinheiro(summary.availableCents)}
             </Text>
           </View>
           <Ionicons color={colors.card} name="chevron-forward" size={20} />
@@ -809,7 +820,9 @@ function WalletPreview({ isLoading, onOpen, summary, wallets = [] }) {
                 <Ionicons color={item.accent} name="arrow-forward" size={14} />
               </View>
               <Text style={styles.walletCompositionLabel}>{item.label}</Text>
-              <Text style={styles.walletCompositionValue}>{formatarDinheiro(availableCents)}</Text>
+              <Text style={styles.walletCompositionValue}>
+                {formatarDinheiro(availableCents)}
+              </Text>
               <Text numberOfLines={1} style={styles.walletCompositionMeta}>
                 {pendingCents > 0
                   ? `${formatarDinheiro(pendingCents)} pendente`
@@ -833,7 +846,14 @@ function DetailRow({ icon, label, value }) {
   );
 }
 
-function StatusItem({ icon, label, notify = false, onPress, tone = "default", value }) {
+function StatusItem({
+  icon,
+  label,
+  notify = false,
+  onPress,
+  tone = "default",
+  value,
+}) {
   return (
     <Pressable
       disabled={!onPress}
@@ -843,11 +863,13 @@ function StatusItem({ icon, label, notify = false, onPress, tone = "default", va
         onPress && pressed && styles.statusItemPressed,
       ]}
     >
-      <View style={[
-        styles.statusIconInline,
-        tone === "gold" && styles.statusIconGold,
-        tone === "silver" && styles.statusIconSilver,
-      ]}>
+      <View
+        style={[
+          styles.statusIconInline,
+          tone === "gold" && styles.statusIconGold,
+          tone === "silver" && styles.statusIconSilver,
+        ]}
+      >
         <Ionicons
           color={tone === "gold" ? "#A16207" : colors.primaryDark}
           name={icon}
@@ -933,6 +955,7 @@ const styles = StyleSheet.create({
   content: {
     gap: spacing.xl,
     paddingBottom: spacing.xxxl,
+    paddingTop: spacing.sm,
   },
   detailLabel: {
     color: colors.textSecondary,
@@ -1038,10 +1061,11 @@ const styles = StyleSheet.create({
   },
   profileHero: {
     backgroundColor: colors.card,
-    borderBottomColor: colors.border,
-    borderBottomWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    borderWidth: 1,
     gap: spacing.lg,
-    paddingBottom: spacing.lg,
+    padding: spacing.lg,
   },
   profileHeroTopline: {
     alignItems: "center",
@@ -1052,6 +1076,33 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flexDirection: "row",
     gap: spacing.md,
+  },
+  profilePageCopy: { flex: 1, gap: 2, minWidth: 0 },
+  profilePageHeading: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.md,
+    minHeight: 48,
+  },
+  profilePageIcon: {
+    alignItems: "center",
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primaryLight,
+    borderRadius: radius.round,
+    borderWidth: 1,
+    height: 46,
+    justifyContent: "center",
+    width: 46,
+  },
+  profilePageSubtitle: {
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    fontSize: typography.caption,
+  },
+  profilePageTitle: {
+    color: colors.textPrimary,
+    fontFamily: fonts.extraBold,
+    fontSize: typography.h2,
   },
   profileCopy: {
     flex: 1,

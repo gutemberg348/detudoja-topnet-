@@ -1,20 +1,71 @@
 # Front Mobile
 
+## Amigos e conversas pessoais (2026-08-31)
+
+- A Home foi simplificada: pesquisa no topo, atalhos `Pagar` e `Receber` logo
+  abaixo e `Ultimas conversas` na sequencia. A logo e o texto promocional
+  intermediario foram removidos dessa tela.
+- A Home possui uma bolha flutuante de chat com badge de mensagens pessoais e
+  convites recebidos.
+- O bloco `Conversas` mistura cronologicamente pedidos, lojas e pessoas, mas
+  cada item preserva sua rota e seu contrato.
+- `PersonalChatsInboxScreen` mostra o ID publico, copiar, compartilhar, QR,
+  entrada manual, scanner, convites e amigos ativos. A entrada manual e o QR
+  primeiro localizam e exibem nome, foto, ID e estado do vinculo; o convite so
+  e enviado depois da confirmacao.
+- O QR usa `react-native-qrcode-svg`; a leitura reutiliza `expo-camera` e aceita
+  apenas payload `DTJ:FRIEND:*` ou deep link conhecido.
+- `PersonalConversationScreen` usa `KeyboardAvoidingView`, lista flexivel e
+  `ChatComposer`, mantendo o campo visivel quando o teclado do iPhone abre.
+- O nome salvo pode ser editado diretamente na lista ou no chat. Ele e
+  particular de quem o salvou; o nome e o ID originais continuam visiveis para
+  evitar confusao de identidade.
+- Contatos com amizade ativa abrem o chat; convite recebido oferece aceitar e
+  conversar; convite enviado mostra espera, sem gerar erro generico.
+- Fotos de perfil sao usadas quando existem, com iniciais como fallback.
+- API mobile em `services/personal-chats.api.js`; atualizacao em tempo real por
+  `personal-chat.created`, `personal-chat.message.created` e
+  `personal-chat.updated`.
+
 Documento do front mobile do app DeTudoJa. Ele registra o que foi feito na
 entrada inicial, autenticacao, Home, Buscar, Vender, Minha Rede, Carteira e
 Perfil.
 
-## Home com conversas recentes (2026-07-30)
+## Zoom persistente na rede (2026-08-28)
 
-A Home continua branca e minimalista, mas a marca, a busca e a frase foram
-subidas para aproveitar melhor a primeira dobra. Abaixo delas aparece
-`Conversas recentes` somente quando o cliente possui pedidos ou atendimentos.
-O bloco mostra no maximo tres itens e nao renderiza estado vazio.
+- O mapa da matriz agora permite reduzir o zoom ate 25%, em passos de 10%.
+- Arrastar ou tocar na arvore preserva o zoom escolhido; o gesto nao recria
+  mais o controlador com uma escala antiga.
+- O pinch com dois dedos comeca no zoom atual e nao provoca salto ao iniciar
+  ou ao remover um dos dedos.
+- O zoom so volta a 100% quando o usuario toca explicitamente em centralizar
+  ou muda a quantidade de niveis exibida.
+- Nao houve alteracao de API, banco ou migration. Export web Expo aprovado.
+
+## Loja vinculada a conta (2026-08-28)
+
+- O marketplace informa `isManagedByViewer` sem expor o ID do dono da loja.
+  O valor e verdadeiro para o lojista ou operador ativo vinculado.
+- Ao abrir a propria loja, a tela mostra `Esta e sua loja` e oferece atalho
+  para a Central de Vendas.
+- O botao de conversa com a propria loja vira `Conversas dos clientes`; a
+  conta nao tenta mais criar um chat consigo mesma.
+- O backend mantem a protecao e retorna mensagem explicita caso uma versao
+  antiga do app tente abrir essa conversa.
+- Nao houve mudanca de schema ou migration.
+
+## Home com ultimas conversas
+
+A Home continua branca e minimalista, agora sem logo e sem frase promocional.
+A barra de pesquisa ocupa o topo; abaixo ficam `Pagar` e `Receber`; na
+sequencia aparece `Ultimas conversas` somente quando existem pedidos, conversas
+de loja ou conversas pessoais. O bloco mostra no maximo tres itens e nao
+renderiza estado vazio. A bolha flutuante abre a area de amigos.
 
 Arquivos:
 
-- `app/home/useHomeConversations.js`: carrega pedidos e atendimentos, combina,
-  ordena e acompanha Socket.IO enquanto a Home esta em foco;
+- `app/home/useHomeConversations.js`: carrega pedidos, lojas e conversas
+  pessoais, combina, ordena e acompanha Socket.IO enquanto a Home esta em foco;
 - `app/home/RecentConversations.jsx`: lista compacta com loja/prestador,
   resumo, horario, mensagem nao lida e navegacao;
 - `HomeScreen.jsx`: posiciona o bloco e abre `CustomerOrderDetails` ou
@@ -165,7 +216,7 @@ npm exec -w apps/api -- prisma migrate dev --name servico_chat_propostas_pagamen
 | `apps/mobile/src/app/LoginScreen.jsx` | Login real em `/api/app/auth/login`. |
 | `apps/mobile/src/app/RegisterScreen.jsx` | Cadastro real em `/api/app/auth/register`. |
 | `apps/mobile/src/components/CpfRequirementModal.jsx` | Confirmacao contextual de CPF antes da primeira compra ou operacao comercial em `/api/app/auth/complete-cpf`. |
-| `apps/mobile/src/app/KycVerificationScreen.jsx` | Verificacao inicial fake de documento em `/api/app/kyc/verify`. |
+| `apps/mobile/src/app/KycVerificationScreen.jsx` | Captura RG/CNH/RNE e selfie somente pela camera, envia ao KYC privado e mostra a decisao automatica. |
 | `apps/mobile/src/app/HomeScreen.jsx` | Home limpa com logo, busca e frase principal. |
 | `apps/mobile/src/app/StoresScreen.jsx` | Buscar/Lojas com marketplace real do banco. |
 | `apps/mobile/src/app/CustomerOrdersScreen.jsx` | Central do cliente: pedidos ativos/historico e aba `Chats` para atendimentos de servico persistidos, todos com avisos de mensagens novas em tempo real. |
@@ -224,9 +275,11 @@ quando o usuario tenta a primeira compra/pagamento ou inicia venda, loja ou
 servico. Se `cpfRequired` ja for `false`, essa etapa nao aparece novamente.
 
 Depois de informar o CPF, o Perfil exibe KYC pendente com alerta no menu inferior. O card
-`Verificacao KYC` leva para `KycVerificationScreen`. Por enquanto, o botao
-`Verificar agora` chama `POST /api/app/kyc/verify` e aprova o KYC sem upload de
-documentos; a integracao real de documentos fica para a proxima etapa.
+`Verificacao KYC` leva para `KycVerificationScreen`. A tela escolhe RG, CNH ou
+RNE, captura documento/selfie somente pela camera e envia `multipart/form-data`
+para `POST /api/app/kyc/submissions`. OCR, comparacao facial e prova de vida
+passiva retornam `APROVADO` ou `REPROVADO`; uma recusa mostra o motivo e libera
+novas fotos. `EM_ANALISE` permanece apenas para registros legados/contingencia.
 
 Google e Apple aparecem no login/cadastro, mas o toque nao executa OAuth nesta
 etapa.
@@ -293,6 +346,17 @@ O autocomplete funciona assim:
 - busca livre continua abrindo `Buscar` com o termo digitado;
 - ao digitar uma busca livre, o filtro de categoria volta para `Todas`, para
   uma loja de outra categoria nao sumir por causa de um filtro antigo.
+
+O seletor `Lojas | Produtos | Servicos` continua com a opcao escolhida em
+verde durante uma busca. Ele filtra o tipo mostrado sem apagar o texto digitado.
+Quando um tipo nao possui resultado, a tela nao mostra um card vazio isolado;
+o aviso aparece somente se a busca inteira nao encontrar loja, produto nem
+servico.
+
+`SearchBar` e compartilhado entre Home e Buscar. As sugestoes usam uma grade
+compacta: icone fixo, nome em uma linha e etiqueta visual de `Categoria`,
+`Loja`, `Produto` ou `Servico`, seguida apenas pelo detalhe necessario. Isso
+mantem os itens alinhados e legiveis mesmo com o teclado do celular aberto.
 - o dropdown segura o fechamento por alguns milissegundos depois do blur e usa
   `onPress` no item, evitando o caso em que o input fecha a lista antes do toque
   selecionar a sugestao.
@@ -495,6 +559,14 @@ Saldo Pix, Cashback, Rede e Vendas. Todos os novos saldos comecam zerados.
 Depois de uma liquidacao, o Socket.IO emite `wallet.updated`; `useWalletStore`
 recarrega os saldos sem o usuario precisar atualizar a tela.
 
+O primeiro atalho da carteira e `Adicionar saldo Pix`. Ele abre
+`WalletDepositScreen`, onde a pessoa informa o valor, gera QR/copia-e-cola e
+ve o valor do Pix, a taxa fixa de R$ 0,99 e o saldo liquido. Ela pode tocar em
+`Ja paguei, atualizar saldo`. Essa consulta so e permitida para
+depositos pendentes e possui o mesmo limite de seguranca das cobrancas online.
+Quando Asaas confirma, a tela mostra a animacao verde de saldo adicionado e a
+carteira atualiza pelo evento `wallet.updated`.
+
 `ProfileScreen` chama `GET /api/app/users/me` e `PATCH /api/app/users/me`.
 Tambem mostra o total disponivel, pendente e bloqueado e uma grade compacta das
 quatro carteiras: Cashback, Saldo Pix, Vendas e Rede. Cada bloco exibe seu saldo
@@ -567,10 +639,11 @@ busca alteram somente a lista, nunca a estrutura da matriz.
 
 O quadro da arvore tambem possui navegacao propria: no navegador, o cursor vira
 uma mao para arrastar o mapa, com estados `grab` e `grabbing`. No aparelho, o
-arraste aceita somente um toque e preserva exatamente a escala escolhida. Os
-controles de zoom `-` e `+` aproximam ou afastam a matriz sem o primeiro toque
-restaurar 100%, e o icone de centralizar restaura escala e posicao. Trocar de 4
-para 8 ou 20 niveis tambem centraliza o mapa.
+arraste captura o gesto antes do scroll da pagina e o pinch de dois dedos muda
+a escala sem restaurar 100%. Os controles `-`, `+`, centralizar e expandir
+completam a navegacao; em tela cheia o canvas ocupa a area util inteira para
+explorar ramos maiores. Trocar de 4 para 8 ou 20 niveis tambem centraliza o
+mapa.
 
 ## Ganhos em QR presencial
 
@@ -581,6 +654,11 @@ retencao da empresa. A definicao vem do segmento financeiro ligado a categoria
 da loja no admin. QR de venda autonoma usa o segmento do vendedor. Nenhuma
 mudanca de tela e necessaria para o cliente: os saldos chegam por
 `wallet.updated` apos o pagamento.
+
+`ChargeQrScreen` e `ChargePaymentScreen` mostram a regra local calculada pela
+API. Se a comissao ainda nao cobrir os R$ 0,99, aparece um aviso de compra sem
+cashback e o valor minimo necessario. Depois da cobertura, o aviso mostra o
+cashback prioritario formado ate R$ 1,00 e quando o excedente passa ao pool.
 
 ## QR avulso de vendedor autonomo
 
@@ -593,6 +671,12 @@ avulsa e navega direto para a tela do QR. Esse mesmo segmento determina os
 ganhos no QR presencial e em um futuro pedido/link pelo app. A venda ativa e
 tocavel em `Ultimas vendas` para reabrir o mesmo QR; todas as cobrancas tambem
 permanecem em `Ultimas 5 cobrancas` e no historico.
+
+O modal compartilhado de chave Pix para repasse presencial e saque apresenta a
+chave atual somente mascarada, separa a troca em escolha do tipo e confirmacao
+dos dados, aplica mascara e validacao para CPF, CNPJ, telefone, e-mail e chave
+aleatoria e mantem a acao fixa no rodape. No iOS, o conteudo acompanha o teclado
+para que os campos e erros continuem visiveis durante a digitacao.
 
 Nivel de conta no Perfil:
 
@@ -1110,11 +1194,23 @@ abre apenas na primeira visita por usuario e continua acessivel pelo botao
 
 ## Experiencia do motoboy
 
+Na criacao e edicao da loja, o lojista configura a taxa de entrega. O formulario
+informa que esse valor entra integralmente na carteira `Vendas` e que eventual
+pagamento de motoboy pelo aplicativo e uma operacao separada.
+
 `ServiceDeskScreen` e o painel de disponibilidade do prestador. Tipos com
 `operationalType: ENTREGA_LOCAL` exibem a identificacao `Chamadas de lojas` e
 nao podem ficar online sem um perfil de motoboy ativo. O primeiro acionamento
 abre `service/CourierRegistrationModal.jsx`, com nome profissional, contato,
 CNH, placa, moto, cor, cidade, UF e raio de atendimento.
+
+Acima da disponibilidade existe `Cadastrar servico`. O modal recebe o trabalho
+em linguagem simples, detalhes opcionais e o estado inicial online. O servidor
+procura equivalencias no segmento antes de criar uma opcao: `Capinador de lote`
+e `Limpador de mato`, por exemplo, reutilizam a familia de limpeza externa.
+Quando nao encontra uma equivalencia, cria um tipo de negociacao por chat para
+que o novo servico ja possa aparecer na busca. Cadastro e ativacao exigem
+perfil comercial ativo com KYC aprovado.
 
 Com o perfil criado, a mesma tela mostra a `Central do entregador`. O motoboy
 define se recebe chamadas de `Toda a cidade` ou somente de `Minhas lojas`
@@ -1176,13 +1272,24 @@ Em bases existentes, o comando manual `npm run backfill:city-base` preenche
 Patos/PB somente para contas e lojas que ainda nao possuem endereco, permitindo
 que a busca volte a carregar o comercio local sem apagar dados ja cadastrados.
 
-### Origem da venda QR
+### Cobranca rapida presencial
 
-O atalho `Venda QR` da Central de vendas fica direto para quem nao possui
-lojas. Para quem possui, ele abre uma escolha compacta entre `Venda autonoma`
-e cada loja cadastrada. A escolha de loja abre a cobranca presencial vinculada;
-o caminho autonomo segue com a venda sem loja. O painel interno de cada loja
-mantem sua propria acao `Nova cobranca`.
+O atalho `Cobrar agora` da Central de vendas prioriza a loja. Uma unica loja
+abre diretamente o formulario vinculado a ela; com varias lojas, o usuario
+escolhe o estabelecimento. `Cobrar como autonomo` aparece separado e deve ser
+usado somente quando a venda nao pertence a uma loja. O painel interno de cada
+loja mantem sua propria acao `Nova cobranca`.
+
+O modo padrao pede somente o valor e mostra `Gerar QR para pagar`. Se nenhum
+detalhe for informado, a API grava `Compra em <nome da loja>`. O controle
+`Adicionar detalhes` abre, apenas quando necessario, produto ativo, cobranca
+paga recente, atalho do ramo, nome livre e observacao. Produto cadastrado nao e
+obrigatorio; valores reutilizados continuam editaveis antes do QR.
+
+No lado do cliente, a leitura do QR abre a conferencia do nome da loja e do
+valor. A explicacao duplicada das carteiras foi removida e a acao principal
+mostra o total, como `Pagar R$ 49,90`. A API continua fazendo o debito atomico e
+impedindo pagamento repetido da mesma cobranca.
 
 ### Entrega local
 
@@ -1191,13 +1298,25 @@ permanece separado para transporte negociado. O antigo tipo `Entregador` fica
 oculto, pois fazia a mesma funcao operacional de Motoboy; conversas antigas
 nao sao apagadas.
 
-### Seletor Lojas e Produtos
+### Abas Lojas, Produtos e Servicos
 
-`StoresScreen` mostra um controle segmentado `Lojas | Produtos` depois das
-categorias. A categoria e o termo de busca sao preservados ao alternar. O modo
-`Lojas` usa `StoreCard` com identidade, cashback, descricao, disponibilidade e
-acao clara. O modo `Produtos` usa `MarketplaceProductCard`, exibindo imagem,
-loja, resumo, preco/promocao e cashback; o toque abre `ProductDetails`.
+`StoresScreen` possui tres modos de primeiro nivel: `Lojas`, `Produtos` e
+`Servicos`. Servico nao e mais apresentado como uma categoria artificial de
+loja. Sem texto digitado, a aba escolhida controla a vitrine e categorias
+filtram apenas lojas ou produtos.
+
+Quando existe texto, a busca se torna global e apresenta blocos agrupados de
+servicos, lojas e produtos. As consultas completas de marketplace aguardam
+280 ms depois da digitacao, evitando uma requisicao por tecla; o autocomplete
+continua respondendo imediatamente.
+
+O modo `Lojas` usa `StoreCard` com identidade, cashback, descricao,
+disponibilidade e acao clara. `Produtos` usa `MarketplaceProductCard` em grade
+de duas colunas: imagem superior, loja, nome, resumo, preco/promocao e cashback
+ficam legiveis sem a altura excessiva da antiga lista horizontal. Os cards de
+servico possuem icone e cor funcional conforme a atividade, descricao em duas
+linhas, estado `Disponivel agora` ou `Indisponivel` e entrada para os
+prestadores.
 
 # Midia do marketplace (2026-08-07)
 
@@ -1233,10 +1352,31 @@ identificacao de chamada da plataforma ou da equipe. `Aceitar corrida` reserva
 a solicitacao no servidor e abre `ServiceConversation`. Se outro profissional
 aceitar primeiro, o card desaparece em tempo real e a API devolve conflito.
 
+Uma chamada geral criada pela loja tambem chega aos membros ativos de sua
+propria equipe. Assim, o motoboy credenciado pode aceitar pelo mesmo card e
+entrar no mesmo chat sem a loja precisar escolher seu nome. A chamada direta
+permanece disponivel quando a loja quiser acionar especificamente um membro.
+
 Os eventos `courier.request.created` e `courier.request.updated` tambem
 alimentam o badge da aba `Vender`. Nao existe polling para localizar aceite.
 Esta entrega exige a migration `chamadas_motoboy_aceite`, descrita em
 `docs/codex.md`.
+
+`MainTabs` mostra `IncomingServiceAlert` sobre qualquer aba quando chega uma
+corrida ou um chamado geral destinado ao usuario. O card flutuante vibra no
+aparelho, informa que ha um atendimento aguardando e abre `ServiceDeskScreen`
+para aceitar. Servicos que nao sao corrida tambem exigem aceite: enquanto a
+conversa estiver `ABERTA`, cliente e prestador nao enviam mensagens nem
+propostas; depois do aceite ela muda para `ACORDADA` e os dois negociam no
+chat.
+
+Enquanto aguarda, o prestador ve `Aceitar` e `Recusar`; o cliente ve
+`Cancelar`. Recusar ou cancelar encerra a conversa pendente e remove os badges
+em tempo real, evitando chamados presos quando o prestador nao puder atender.
+
+Essa notificacao depende da conexao Socket.IO ativa. Para avisar com o app
+completamente encerrado sera necessario cadastrar tokens por dispositivo e
+adicionar push nativo com Expo Notifications/FCM/APNs.
 
 ### Central operacional do motoboy (2026-08-24)
 
@@ -1291,6 +1431,17 @@ Dentro de `ServiceConversationScreen`, loja e motoboy veem `Cancelar corrida`
 enquanto a conversa esta aberta e ainda nao existe pagamento. A acao abre uma
 confirmacao explicando que conversa e cobranca nao paga serao encerradas. A API
 continua sendo a autoridade e recusa cancelamento depois de pagamento.
+
+Ao analisar uma proposta, a loja escolhe o canal de pagamento: `Pelo
+aplicativo` ou `No local`, que representa o QR presencial processado pela
+plataforma. A escolha da loja substitui o canal sugerido inicialmente pelo
+prestador e e enviada no aceite da proposta. Nos dois casos, quando a conversa
+e uma corrida de motoboy, o app informa que o ganho permanece pendente por 24
+horas antes de ficar disponivel para saque.
+
+O atalho comercial continua em `Vender > loja > Chamar entregador`. Pagamento
+em dinheiro diretamente ao motoboy fica fora da plataforma: nao cria saldo na
+carteira e, portanto, nao passa pelo saque nem pela retencao financeira.
 
 Cobranças de proposta no chat nao exibem mais aviso de vencimento. O QR mostra
 `Sem prazo para expirar`; cobrancas antigas expiradas sao recuperadas ao abrir
@@ -1386,3 +1537,134 @@ O app registra o scheme `detudoja://` e a rota
 de e-mail automaticamente, mostra que a origem da loja ja foi aplicada e envia
 `storeSlug` sem pedir outro convite. Quem recebeu somente o codigo pode digitar
 `LOJA-<id>` no campo `Codigo de convite ou da loja`.
+
+## Retencao online e repasse presencial (2026-08-27)
+
+Em pedidos e pagamentos online, ganhos de venda, cashback, indicacao e rede
+aparecem no saldo `Pendente` assim que a operacao comercial e calculada. Eles
+nao integram o saldo disponivel durante a janela de estorno.
+
+No extrato, o status `PENDENTE` aparece como `Libera em ate 24h`. O detalhe da
+movimentacao usa `Credito em retencao`, mostra a previsao e explica que o valor
+esta protegido. Depois da liberacao enviada por Socket.IO, a carteira recarrega
+e o movimento passa para `PROCESSADO`.
+
+QR presencial de loja, venda autonoma e servico marcado como
+`QR_PRESENCIAL` sao diferentes: os ganhos liberam no pagamento e o liquido
+segue para a chave Pix principal do dono. A Central de vendas mostra um cartao
+de recebimento; sem chave, tentar gerar QR abre `PayoutAccountModal` e continua
+a acao depois de salvar. Compras online continuam sem repasse imediato.
+O historico de cobrancas mostra `Pix em envio`, `Pix enviado` ou
+`Valor na carteira`. A Central recarrega esses estados por Socket.IO quando
+a cobranca ou a carteira muda.
+
+## Saque Pix pela carteira (2026-08-27)
+
+`WalletScreen` possui a acao `Sacar saldo`, que abre `WithdrawalScreen`. A
+tela carrega somente carteiras com saque permitido, mostra saldo disponivel,
+taxa fixa, limites e o valor liquido antes da confirmacao.
+
+O usuario pode cadastrar ou trocar a chave Pix no mesmo fluxo usando
+`PayoutAccountModal`. A conta e compartilhada com o recebimento presencial,
+mas as rotas da tela sao proprias: `GET/PUT /api/app/withdrawals/pix-account`.
+
+Ao solicitar, o app envia uma chave de idempotencia e a conserva em uma
+retentativa incerta. Depois de resposta confirmada, gera outra chave. O
+historico diferencia analise, processamento, reconciliacao, pagamento,
+recusa, cancelamento e falha. Saques ainda nao enviados podem ser cancelados.
+`wallet.updated` recarrega saldos e historico em tempo real.
+
+Carteiras disponiveis: Saldo Pix, Rede e Vendas. Cashback nao aparece porque
+permanece destinado a compras internas. A tela exige KYC aprovado e chave do
+mesmo titular da conta.
+
+### Experiencia de saque, perfil e motoboy (2026-08-28)
+
+- `WithdrawalScreen` permite selecionar uma ou mais carteiras elegiveis no
+  mesmo saque. Cada fonte informa o proprio valor; o total, a taxa fixa e o
+  liquido sao calculados antes do envio. O payload usa `walletSources`, cuja
+  soma e validada novamente pela API dentro da transacao de reserva.
+- `PayoutAccountModal` aplica mascara durante a digitacao: CPF, CNPJ e
+  telefone usam formato brasileiro; e-mail e chave aleatoria mantem seus
+  formatos proprios. O servidor segue normalizando e validando todos os dados.
+- O perfil usa avatar neutro de usuario, sem iniciais. `Editar dados` abre
+  `app/profile/ProfileEditModal.jsx`, explicando que contato e endereco sao
+  usados para seguranca, saques e comercio da cidade antes do formulario.
+- Em entrega local, a acao principal agora e o botao grande `Chamar motoboy`.
+  Enquanto a chamada esta pendente, a tela mostra pulso animado persistente
+  ate aceite ou cancelamento, sem revelar nomes ou quantidade de profissionais.
+
+## Realtime sem polling (2026-08-27)
+
+`services/realtime.js` abre Socket.IO com `transports: ["websocket"]`. Pedidos,
+mensagens, chamadas de motoboy, carteira e notificacoes usam conexao persistente
+e reconectam automaticamente entre 700 ms e 5 s se a rede cair.
+
+## Login e recuperacao de senha (2026-08-27)
+
+O onboarding, `LoginScreen` e `RegisterScreen` usam os mesmos botoes sociais.
+No iPhone, Apple continua sendo o botao nativo exigido pela plataforma, agora
+com estilo `WHITE_OUTLINE` e contorno igual ao campo Google. A navegacao de
+autenticacao nao mostra mais um cabecalho vazio.
+
+`Esqueci minha senha` abre `ForgotPasswordScreen`, que envia o e-mail para
+`POST /api/app/auth/password-reset/request`. A resposta e sempre generica para
+nao revelar se o e-mail tem conta. O link abre
+`detudoja://redefinir-senha?token=...` e `ResetPasswordScreen` envia a nova
+senha para `POST /api/app/auth/password-reset/confirm`.
+
+## Catalogo visivel
+
+A busca e as vitrines continuam mostrando toda loja ativa e visivel da cidade,
+com ou sem logo/banner. A limpeza pontual de 2026-08-27 removeu apenas tres
+lojas de carga sem midia que ja existiam como massa de teste; nao foi criado
+nenhum filtro visual por imagem. A categoria apresentada para alimentacao e
+`Restaurantes`, sem duplicar `Restaurante`.
+
+## Refinos mobile de conversa e descoberta (2026-08-28)
+
+- `StoreConversationScreen` ocupa toda a altura util e, no iOS, reserva
+  explicitamente a altura informada pelo teclado. O campo fica acima dele, a
+  conversa rola para a mensagem mais recente ao focar e o teclado pode ser
+  recolhido arrastando a lista.
+- A aba `Produtos` monta linhas explicitas com dois cards de mesma largura. O
+  ultimo item usa apenas um espaco reservado, sem esticar ou desalinha-lo.
+- Motoboy continua sendo despacho anonimo: a espera possui radar em duas
+  camadas, estado de chamada ativa e cancelamento secundario. Nenhum nome ou
+  quantidade aparece antes do aceite.
+- Outros servicos mantem o fluxo seletivo. A tela lista os profissionais online
+  e cada card abre uma conversa com a pessoa escolhida.
+- `ProfileScreen` ganhou cabecalho proprio dentro da safe area, card de
+  identidade delimitado e icones neutros de perfil e edicao.
+
+Nao houve mudanca de API, banco ou migration nesta etapa.
+
+## Entrega combinada pelo chat (2026-08-28)
+
+- O alerta de nova corrida permite aceitar sem navegar primeiro ate a central.
+  `Agora nao` fecha somente o alerta; a chamada ainda pode ser consultada na
+  Central do motoboy enquanto outro profissional nao aceitar.
+- Em chamada publica, o cliente e o motoboy veem `A combinar no chat` ate que o
+  cliente compartilhe o local. O cadastro residencial serve apenas para
+  descobrir a cidade do atendimento.
+- O icone de localizacao ao lado da camera abre `ShareAddressModal`. O CEP
+  preenche rua, bairro, cidade e UF; numero e os detalhes da entrega sao
+  confirmados antes do envio.
+- Enderecos compartilhados aparecem como cartoes distintos das mensagens de
+  texto, com tipo do local, rua, numero, bairro, cidade, CEP, complemento e
+  referencia.
+- Atualizacoes Socket.IO sao agrupadas em uma janela de 250 ms e cargas iguais
+  em andamento sao reutilizadas. Isso preserva o tempo real sem tempestade de
+  requests.
+
+## Taxa de servico online - 2026-09-01
+
+Pedidos com entrega ou retirada exibem uma taxa de servico separada no resumo
+e no pagamento. O valor vem da politica publicada junto da loja e o servidor
+grava um snapshot em `pedido_loja.taxa_servico_centavos`, portanto uma mudanca
+posterior no painel nao altera pedidos antigos. Em propostas negociadas, o
+valor final informado pela loja ja inclui essa taxa e o aplicativo deixa isso
+explicito antes do envio.
+
+A taxa nao entra na base da comissao nem no pool. O subtotal dos produtos
+continua sendo a base da porcentagem negociada do estabelecimento.

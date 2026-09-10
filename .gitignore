@@ -3,7 +3,10 @@ node_modules/
 dist/
 dist-web/
 dist-*-check/
+dist-*-validation/
+.build-*/
 storage/uploads/*
+storage/private/
 !storage/uploads/curated/
 !storage/uploads/curated/**
 .env

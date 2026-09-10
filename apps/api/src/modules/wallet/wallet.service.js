@@ -74,7 +74,19 @@ function serializePaymentReceipt(payment) {
 }
 
 function serializeMovement(movement, payment = null) {
+  const earningsOrigins = new Set([
+    "VENDA",
+    "CASHBACK",
+    "BONUS_INDICACAO",
+    "BONUS_VENDEDOR",
+    "BONUS_REDE",
+  ]);
+  const availableAt = movement.status === "PENDENTE" && earningsOrigins.has(movement.origem)
+    ? new Date(movement.criado_em.getTime() + (24 * 60 * 60 * 1000)).toISOString()
+    : null;
+
   return {
+    availableAt,
     balanceAfterCents: cents(movement.saldo_posterior_centavos),
     balanceBeforeCents: cents(movement.saldo_anterior_centavos),
     data: movement.criado_em.toISOString(),
@@ -124,6 +136,7 @@ export async function ensureUserWallets(userId, database) {
 }
 
 export async function creditUserWallet({
+  availableAt = null,
   database,
   description,
   origin,
@@ -149,6 +162,27 @@ export async function creditUserWallet({
 
   if (!wallet) {
     throw new AppError("Carteira ativa nao encontrada para o credito", 409);
+  }
+
+  const releaseAt = availableAt ? new Date(availableAt) : null;
+  const isPending = releaseAt && releaseAt.getTime() > Date.now();
+
+  if (isPending) {
+    const updatedWallet = await repository.incrementPendingBalance(wallet.id, amount);
+    const availableBalance = Number(updatedWallet.saldo_disponivel_centavos);
+
+    return repository.createMovement({
+      carteira_id: wallet.id,
+      descricao: description,
+      origem: origin,
+      origem_id: originId,
+      saldo_anterior_centavos: BigInt(availableBalance),
+      saldo_posterior_centavos: BigInt(availableBalance),
+      status: "PENDENTE",
+      tipo_lancamento: "CREDITO",
+      usuario_id: userId,
+      valor_centavos: BigInt(amount),
+    });
   }
 
   const updatedWallet = await repository.incrementAvailableBalance(wallet.id, amount);
@@ -216,6 +250,66 @@ export async function debitUserWallet({
     code: wallet.tipo_carteira.codigo,
     id: wallet.id,
   };
+}
+
+export async function adjustUserWallet({
+  adminId,
+  database,
+  description,
+  operation,
+  userId,
+  valueCents,
+  walletCode,
+}) {
+  const repository = database ? createWalletRepository(database) : walletRepository;
+  const amount = Number(valueCents ?? 0);
+
+  if (!Number.isSafeInteger(amount) || amount <= 0) {
+    throw new AppError("Valor do ajuste da carteira invalido", 400);
+  }
+
+  if (operation === "CREDIT") {
+    return creditUserWallet({
+      database,
+      description,
+      origin: "AJUSTE_ADMIN",
+      originId: adminId,
+      userId,
+      valueCents: amount,
+      walletCode,
+    });
+  }
+
+  if (operation !== "DEBIT") {
+    throw new AppError("Operacao de ajuste invalida", 400);
+  }
+
+  await ensureUserWallets(userId, database);
+  const wallet = await repository.findActiveWalletWithTypeByCode(userId, walletCode);
+
+  if (!wallet) {
+    throw new AppError("Carteira ativa nao encontrada para o ajuste", 404);
+  }
+
+  const updated = await repository.decrementAvailableBalance(wallet.id, amount);
+
+  if (updated.count !== 1) {
+    throw new AppError(`Saldo insuficiente na carteira ${wallet.tipo_carteira.nome}`, 409);
+  }
+
+  const balanceBeforeCents = Number(wallet.saldo_disponivel_centavos);
+  return repository.createMovement({
+    carteira_id: wallet.id,
+    descricao: description,
+    origem: "AJUSTE_ADMIN",
+    origem_id: adminId,
+    saldo_anterior_centavos: BigInt(balanceBeforeCents),
+    saldo_posterior_centavos: BigInt(balanceBeforeCents - amount),
+    status: "PROCESSADO",
+    tipo_lancamento: "DEBITO",
+    usuario_id: userId,
+    valor_centavos: BigInt(amount),
+  });
 }
 
 const purchaseWalletPriority = ["cashback", "saldo_pix", "rede", "vendas"];

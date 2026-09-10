@@ -1,10 +1,15 @@
-import { ChevronLeft, ChevronRight, Pencil, Plus, Search, UserRound, WalletCards, X } from "lucide-react";
+import { BriefcaseBusiness, ChevronLeft, ChevronRight, Minus, Pencil, Plus, Search, ShieldCheck, UserRound, WalletCards, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
   getAdminUser,
   getAdminUsers,
-  creditAdminUserWallet,
+  getAdminServiceTypes,
+  addAdminUserService,
+  adjustAdminUserWallet,
+  updateAdminCourierProfile,
+  updateAdminSellerProfile,
   updateAdminUser,
+  updateAdminUserService,
   updateAdminUserStatus,
 } from "../services/admin.api";
 import { PageError, PageLoading } from "../components/PageState";
@@ -16,6 +21,7 @@ const dateFormatter = new Intl.DateTimeFormat("pt-BR", { dateStyle: "medium", ti
 export function ParticipantsPage({
   accessToken,
   canManageParticipantData = false,
+  canManageProviderProfiles = false,
   canManageParticipantStatus = false,
   canManageWallet = false,
 }) {
@@ -26,7 +32,9 @@ export function ParticipantsPage({
   const [selectedUser, setSelectedUser] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [editForm, setEditForm] = useState({ cpf: "", email: "", name: "", phone: "" });
-  const [creditForm, setCreditForm] = useState({ description: "Credito manual do administrador", value: "", walletCode: "saldo_pix" });
+  const [creditForm, setCreditForm] = useState({ description: "Ajuste manual autorizado pelo administrador", operation: "CREDIT", value: "", walletCode: "saldo_pix" });
+  const [serviceTypes, setServiceTypes] = useState([]);
+  const [selectedServiceType, setSelectedServiceType] = useState("");
 
   const loadUsers = useCallback(async () => {
     setError("");
@@ -53,7 +61,12 @@ export function ParticipantsPage({
       const response = await getAdminUser(accessToken, userId);
       setSelectedUser(response.user);
       setEditForm({ cpf: response.user.cpfValue ?? "", email: response.user.email ?? "", name: response.user.name ?? "", phone: response.user.phone ?? "" });
-      setCreditForm({ description: "Credito manual do administrador", value: "", walletCode: "saldo_pix" });
+      setCreditForm({ description: "Ajuste manual autorizado pelo administrador", operation: "CREDIT", value: "", walletCode: "saldo_pix" });
+      setSelectedServiceType("");
+      if (canManageProviderProfiles) {
+        const services = await getAdminServiceTypes(accessToken);
+        setServiceTypes(services.serviceTypes?.filter((service) => service.status === "ATIVO") ?? []);
+      }
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -89,21 +102,22 @@ export function ParticipantsPage({
     }
   }
 
-  async function creditWallet(event) {
+  async function adjustWallet(event) {
     event.preventDefault();
     if (!selectedUser) return;
 
     const normalizedValue = creditForm.value.replace(/\./g, "").replace(",", ".");
     const valueCents = Math.round(Number(normalizedValue) * 100);
     if (!Number.isSafeInteger(valueCents) || valueCents <= 0) {
-      setError("Informe um valor de credito valido.");
+      setError("Informe um valor de ajuste valido.");
       return;
     }
 
     setDetailLoading(true);
     try {
-      const response = await creditAdminUserWallet(accessToken, selectedUser.id, {
+      const response = await adjustAdminUserWallet(accessToken, selectedUser.id, {
         description: creditForm.description,
+        operation: creditForm.operation,
         valueCents,
         walletCode: creditForm.walletCode,
       });
@@ -115,6 +129,45 @@ export function ParticipantsPage({
     } finally {
       setDetailLoading(false);
     }
+  }
+
+  async function updateProvider(work) {
+    if (!selectedUser) return;
+    setDetailLoading(true);
+    setError("");
+    try {
+      const response = await work();
+      setSelectedUser(response.user);
+      await loadUsers();
+    } catch (requestError) {
+      setError(requestError.message || "Nao foi possivel atualizar o perfil comercial.");
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  function changeSellerStatus(status) {
+    return updateProvider(() => updateAdminSellerProfile(accessToken, selectedUser.id, { status }));
+  }
+
+  function changeCourier(data) {
+    return updateProvider(() => updateAdminCourierProfile(accessToken, selectedUser.id, data));
+  }
+
+  function changeServiceStatus(sellerServiceId, status) {
+    return updateProvider(() => updateAdminUserService(accessToken, selectedUser.id, sellerServiceId, status));
+  }
+
+  function addService() {
+    if (!selectedServiceType) {
+      setError("Selecione um servico para liberar.");
+      return;
+    }
+    return updateProvider(async () => {
+      const response = await addAdminUserService(accessToken, selectedUser.id, Number(selectedServiceType));
+      setSelectedServiceType("");
+      return response;
+    });
   }
 
   return (
@@ -193,16 +246,49 @@ export function ParticipantsPage({
               <button className="button button--secondary" disabled={detailLoading} onClick={saveUser} type="button"><Pencil size={16} /> Salvar dados</button>
             </section> : null}
             {canManageWallet ? <section className="admin-edit-panel admin-edit-panel--credit">
-              <div className="admin-panel-heading"><div><p className="eyebrow">Financeiro</p><h3>Inserir saldo</h3></div><WalletCards size={17} /></div>
-              <form className="admin-edit-grid" onSubmit={creditWallet}>
+              <div className="admin-panel-heading"><div><p className="eyebrow">Financeiro auditado</p><h3>Ajustar saldo</h3></div><WalletCards size={17} /></div>
+              <div className="wallet-operation" role="group" aria-label="Tipo de ajuste">
+                <button className={creditForm.operation === "CREDIT" ? "active" : ""} onClick={() => setCreditForm((current) => ({ ...current, operation: "CREDIT" }))} type="button"><Plus size={15} /> Adicionar</button>
+                <button className={creditForm.operation === "DEBIT" ? "active wallet-operation__debit" : "wallet-operation__debit"} onClick={() => setCreditForm((current) => ({ ...current, operation: "DEBIT" }))} type="button"><Minus size={15} /> Diminuir</button>
+              </div>
+              <form className="admin-edit-grid" onSubmit={adjustWallet}>
                 <label>Carteira<select onChange={(event) => setCreditForm((current) => ({ ...current, walletCode: event.target.value }))} value={creditForm.walletCode}><option value="saldo_pix">Saldo Pix</option><option value="cashback">Cashback</option><option value="rede">Rede</option><option value="vendas">Vendas</option></select></label>
                 <label>Valor<input inputMode="decimal" onChange={(event) => setCreditForm((current) => ({ ...current, value: event.target.value }))} placeholder="0,00" value={creditForm.value} /></label>
                 <label className="admin-edit-grid__wide">Motivo<input onChange={(event) => setCreditForm((current) => ({ ...current, description: event.target.value }))} value={creditForm.description} /></label>
-                <button className="button button--primary admin-edit-grid__wide" disabled={detailLoading} type="submit"><Plus size={16} /> Creditar carteira</button>
+                <button className={`button admin-edit-grid__wide ${creditForm.operation === "DEBIT" ? "button--danger" : "button--primary"}`} disabled={detailLoading} type="submit">
+                  {creditForm.operation === "DEBIT" ? <Minus size={16} /> : <Plus size={16} />}
+                  {creditForm.operation === "DEBIT" ? "Debitar carteira" : "Creditar carteira"}
+                </button>
               </form>
               <div className="admin-wallet-list">
                 {(selectedUser.wallets ?? []).map((wallet) => <span key={wallet.code}><strong>{wallet.name}</strong>{moneyFormatter.format(wallet.availableCents / 100)}</span>)}
               </div>
+            </section> : null}
+            {canManageProviderProfiles ? <section className="admin-edit-panel">
+              <div className="admin-panel-heading"><div><p className="eyebrow">Operacao comercial</p><h3>Prestador, motoboy e servicos</h3></div><BriefcaseBusiness size={17} /></div>
+              <p className="table-secondary">KYC e decidido na fila de documentos. A liberacao aqui respeita conta ativa, KYC aprovado e regras de cada modalidade.</p>
+              {selectedUser.providerProfile ? <>
+                <div className="admin-edit-grid">
+                  <label>Status do prestador<select disabled={detailLoading} onChange={(event) => changeSellerStatus(event.target.value)} value={selectedUser.providerProfile.status}><option value="ATIVO">Ativo</option><option value="PAUSADO">Pausado</option><option value="BLOQUEADO">Bloqueado</option><option value="REPROVADO">Reprovado</option></select></label>
+                  <label>KYC comercial<input disabled value={selectedUser.providerProfile.kycStatus} /></label>
+                </div>
+                {selectedUser.providerProfile.courier ? <div className="admin-edit-grid">
+                  <label>Status do motoboy<select disabled={detailLoading} onChange={(event) => changeCourier({ status: event.target.value })} value={selectedUser.providerProfile.courier.status}><option value="ATIVO">Ativo</option><option value="PAUSADO">Pausado</option><option value="BLOQUEADO">Bloqueado</option></select></label>
+                  <label className="drawer-actions"><span>Recebe chamadas da plataforma</span><input checked={selectedUser.providerProfile.courier.acceptsPlatformCalls} disabled={detailLoading || selectedUser.providerProfile.courier.status !== "ATIVO"} onChange={(event) => changeCourier({ acceptsPlatformCalls: event.target.checked })} type="checkbox" /></label>
+                </div> : <div className="kyc-decision"><strong>Sem cadastro de motoboy</strong><p>CNH, placa e veiculo continuam cadastrados pelo proprio prestador e validados pela plataforma.</p></div>}
+              </> : <div className="kyc-decision"><strong>Sem perfil de prestador</strong><p>Liberar o primeiro servico cria o perfil apenas para conta ativa, CPF informado e KYC aprovado.</p></div>}
+              <div className="admin-edit-grid">
+                <label className="admin-edit-grid__wide">Adicionar servico<select disabled={detailLoading || !serviceTypes.length} onChange={(event) => setSelectedServiceType(event.target.value)} value={selectedServiceType}><option value="">Selecione no catalogo</option>{serviceTypes.map((service) => <option key={service.id} value={service.id}>{service.name}{service.operationalType === "ENTREGA_LOCAL" ? " - entrega local" : ""}</option>)}</select></label>
+                <button className="button button--secondary admin-edit-grid__wide" disabled={detailLoading || !selectedServiceType} onClick={addService} type="button"><Plus size={16} /> Liberar servico</button>
+              </div>
+              {selectedUser.providerProfile?.services?.length ? <div className="admin-edit-grid">
+                {selectedUser.providerProfile.services.map((service) => <label key={service.id}>{service.typeName}<select disabled={detailLoading} onChange={(event) => changeServiceStatus(service.id, event.target.value)} value={service.status}><option value="ATIVO">Ativo</option><option value="PAUSADO">Pausado</option><option value="INATIVO">Inativo</option></select><small>{service.operationalType === "ENTREGA_LOCAL" ? "Entrega local" : "Atendimento por servico"}{service.availableNow ? " - online agora" : " - offline"}</small></label>)}
+              </div> : null}
+              <div className="kyc-decision"><ShieldCheck size={16} /><div><strong>KYC do participante: {selectedUser.kycStatus}</strong><p>Aprovacao e reprovacao documental ficam em Compliance e sincronizam o prestador e motoboy automaticamente.</p></div></div>
+            </section> : null}
+            {canManageProviderProfiles && selectedUser.adminActions?.length ? <section className="admin-edit-panel">
+              <div className="admin-panel-heading"><div><p className="eyebrow">Rastreabilidade</p><h3>Ultimas acoes administrativas</h3></div><ShieldCheck size={17} /></div>
+              <div className="detail-list">{selectedUser.adminActions.map((action) => <div key={action.id}><dt>{action.action.replaceAll("_", " ")}</dt><dd>{action.adminName} - {dateFormatter.format(new Date(action.at))}</dd></div>)}</div>
             </section> : null}
             {canManageParticipantStatus ? <div className="drawer-actions"><label htmlFor="participant-status">Situação da conta</label><select disabled={detailLoading} id="participant-status" onChange={(event) => changeStatus(event.target.value)} value={selectedUser.status}><option value="ATIVO">Ativo</option><option value="PENDENTE">Pendente</option><option value="INATIVO">Inativo</option><option value="BLOQUEADO">Bloqueado</option></select></div> : null}
           </aside>

@@ -63,7 +63,17 @@ cria os segmentos base de venda.
 - Drawer com cadastro, CPF mascarado, ultimo acesso e situacao.
 - Alteracao de status entre ativo, pendente, inativo e bloqueado.
 - Edicao de nome, e-mail, telefone e CPF direto no drawer.
-- Credito manual em qualquer uma das quatro carteiras, com valor e motivo.
+- Ajuste manual de credito ou debito em qualquer carteira, com valor e motivo.
+- O debito nao permite saldo negativo; ambos ficam no extrato com ID do admin.
+
+### Carteiras
+
+- Pagina financeira propria com totais disponivel, pendente e bloqueado.
+- Um card por tipo mostra quantidade de contas e saldo consolidado.
+- `SUPER_ADMIN` e `FINANCEIRO` podem ligar/desligar saque por tipo; demais
+  papeis autorizados apenas consultam.
+- A politica vem de `tipos_carteira.permite_saque`, nao de lista fixa no front.
+- O atalho para Participantes leva ao ajuste individual auditado.
 
 ### Categorias
 
@@ -117,6 +127,13 @@ categorias de loja e nao transformam toda a area comercial em chat.
   KYC.
 - Diagnostico de usuarios sem indicacao e indicacoes sem alocacao.
 - Filtro de profundidade para testar 3, 5, 10 ou 20 niveis.
+- A tela explica as colunas reais `indicador_usuario_id`,
+  `alocado_sob_usuario_id` e `posicao_matriz`.
+- `SUPER_ADMIN` pode selecionar um no da arvore ou tabela e reposicionar sua
+  subarvore em um novo pai/lado. O modal deixa explicito que o patrocinador
+  direto nao muda.
+- A API recusa ciclo, vaga ocupada, raiz movida, destino desconectado e arvore
+  acima de 20 niveis.
 
 ### Configuracoes
 
@@ -345,8 +362,54 @@ ela aplica `roleMiddleware` antes de cada modulo.
 - `ADMIN`: operacao geral, sem credito manual, estorno ou mudanca de ganhos;
 - `OPERACOES`: participantes, lojas, categorias, segmentos, servicos e rede;
 - `FINANCEIRO`: pagamentos, estorno, credito de carteira e regras de ganhos;
-- `COMPLIANCE`/`KYC`: consulta de participantes e revisao de KYC;
+- `COMPLIANCE`/`KYC`: consulta de participantes e auditoria de KYC;
 - `SUPORTE`: somente configuracao do canal de suporte e painel inicial.
 
 Mesmo que alguem force uma URL ou chamada manual do navegador, a API responde
 `403` quando o cargo nao possuir a permissao.
+
+## Auditoria KYC documental - 2026-09-03
+
+O menu `KYC` lista solicitacoes por status e permite buscar por nome, e-mail ou
+CPF. O detalhe abre documento e selfie por chamadas autenticadas e apresenta
+OCR, nome, comparacao facial, antisspoof, liveness e motivos da decisao
+automatica. Os botoes manuais existem apenas para registros legados ainda em
+`EM_ANALISE`; arquivos nao possuem URL publica.
+
+## Saques Pix e tesouraria - 2026-08-27
+
+O grupo Financeiro ganhou `WithdrawalsPage.jsx`. A pagina lista referencia,
+usuario, carteira reservada, bruto, taxa, liquido, chave mascarada, estado e
+falha. `ADMIN` consulta; `SUPER_ADMIN` e `FINANCEIRO` aprovam, recusam e
+consultam uma transferencia em reconciliacao.
+
+Configuracoes > Saques controla a politica global: ativo, aprovacao manual,
+taxa fixa, minimo, maximo e limite diario por usuario. Os valores sao salvos em
+centavos na chave `finance.withdrawals` de `configuracoes_sistema`.
+
+Aprovacao nao credita a taxa imediatamente. Primeiro o backend reserva o bruto
+na carteira e envia apenas o liquido ao Asaas; a taxa entra na conta interna
+`TAXAS_PAGAMENTO` somente depois de `TRANSFER_DONE`. Recusa e falha devolvem a
+reserva inteira. Isso impede receita sem transferencia confirmada.
+
+## Politica financeira por canal - 2026-09-01
+
+Configuracoes > Ganhos possui tres valores globais salvos em
+`financial.payment_policy`: taxa de servico online, processamento local e
+limite do cashback prioritario local. Os padroes sao R$ 0,99, R$ 0,99 e
+R$ 1,00, respectivamente.
+
+Cada segmento possui os mesmos tres campos opcionais. Cada loja tambem possui
+os tres campos opcionais em sua edicao. A resolucao efetiva usa a ordem
+`LOJA > SEGMENTO > GLOBAL`; deixar um campo vazio significa herdar. A API
+devolve o valor aplicado e a origem de cada campo para o painel nao divergir do
+checkout ou da liquidacao.
+
+No online, a taxa de servico fica fora da comissao e a retencao percentual do
+segmento segue inteira para a divisao normal. No local, o processamento sai da
+comissao, o restante preenche primeiro o cashback prioritario e apenas o
+excedente entra no pool. Somente `SUPER_ADMIN` e `FINANCEIRO` alteram a regra;
+`ADMIN` pode consulta-la.
+
+A migration `20260901143000_politica_pagamento_segmento_loja` foi aplicada no
+banco local em 2026-09-01.

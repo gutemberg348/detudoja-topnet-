@@ -1,21 +1,23 @@
 {
   "expo": {
-    "name": "DeTudoJa",
+    "name": "Brasil Cashback",
     "slug": "detudoja",
     "scheme": "detudoja",
+    "icon": "./assets/brasil-cashback-logo.png",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
       "backgroundColor": "#F5FFF8",
-      "image": "./assets/detudoja-logo-smile.png",
+      "image": "./assets/brasil-cashback-logo.png",
       "resizeMode": "contain"
     },
     "android": {
       "package": "com.detudoja.mobile",
       "adaptiveIcon": {
-        "backgroundColor": "#F5FFF8"
+        "backgroundColor": "#F5FFF8",
+        "foregroundImage": "./assets/brasil-cashback-logo.png"
       }
     },
     "ios": {
@@ -24,24 +26,26 @@
       "supportsTablet": true
     },
     "web": {
-      "bundler": "metro"
+      "bundler": "metro",
+      "favicon": "./assets/brasil-cashback-logo.png"
     },
     "plugins": [
       "expo-secure-store",
       [
         "expo-camera",
         {
-          "cameraPermission": "O DeTudoJa usa a camera para ler cobrancas QR com seguranca."
+          "cameraPermission": "O Brasil Cashback usa a camera para ler cobrancas QR com seguranca."
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "O DeTudoJa acessa suas fotos para enviar logo, banner e imagens de produtos."
+          "photosPermission": "O Brasil Cashback acessa suas fotos para enviar logo, banner e imagens de produtos."
         }
       ],
       "expo-font",
       "expo-web-browser",
+      "expo-notifications",
       "expo-apple-authentication"
     ]
   }

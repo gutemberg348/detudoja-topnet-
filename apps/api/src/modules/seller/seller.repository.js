@@ -39,6 +39,7 @@ export function createSellerRepository(database = prisma) {
     requireUserCpf(userId) { return requireUserCpf(database, userId); },
     transaction(work) { return database.$transaction(work); },
     updateOrder(args) { return database.pedidoLoja.update(args); },
+    updateOrders(args) { return database.pedidoLoja.updateMany(args); },
     updateOrderMessages(args) { return database.pedidoLojaMensagem.updateMany(args); },
     updateProduct(args) { return database.produtoLoja.update(args); },
     updateProducts(args) { return database.produtoLoja.updateMany(args); },

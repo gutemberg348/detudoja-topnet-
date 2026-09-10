@@ -1,0 +1,101 @@
+import assert from "node:assert/strict";
+import { after, before, test } from "node:test";
+import { prisma } from "../src/config/prisma.js";
+import {
+  addAdminUserService,
+  updateAdminSellerProfile,
+  updateAdminUserService,
+} from "../src/modules/admin/admin-users.service.js";
+
+const marker = "admin-provider-operations-test";
+const state = {};
+
+async function cleanup() {
+  const user = await prisma.usuario.findFirst({ where: { email: `${marker}@local.test` } });
+  const admin = await prisma.administrador.findFirst({ where: { email: `${marker}@local.test` } });
+  const serviceType = await prisma.tipoServico.findFirst({ where: { slug: marker } });
+  const segment = await prisma.segmentoVenda.findFirst({ where: { slug: marker } });
+
+  await prisma.$transaction(async (database) => {
+    if (admin) await database.auditoriaAdministrativa.deleteMany({ where: { administrador_id: admin.id } });
+    if (user) {
+      await database.servicoVendedor.deleteMany({ where: { vendedor: { usuario_id: user.id } } });
+      await database.vendedor.deleteMany({ where: { usuario_id: user.id } });
+      await database.kycUsuario.deleteMany({ where: { usuario_id: user.id } });
+      await database.usuario.delete({ where: { id: user.id } });
+    }
+    if (serviceType) await database.tipoServico.delete({ where: { id: serviceType.id } });
+    if (segment) await database.segmentoVenda.delete({ where: { id: segment.id } });
+    await database.categoriaLoja.deleteMany({ where: { nome: marker } });
+    if (admin) await database.administrador.delete({ where: { id: admin.id } });
+  });
+}
+
+before(async () => {
+  await prisma.$connect();
+  await cleanup();
+  const category = await prisma.categoriaLoja.create({ data: { nome: marker, status: "ATIVA" } });
+  const segment = await prisma.segmentoVenda.create({
+    data: { categoria_loja_id: category.id, nome: marker, slug: marker, status: "ATIVO" },
+  });
+  const [admin, user, serviceType] = await Promise.all([
+    prisma.administrador.create({
+      data: { email: `${marker}@local.test`, nome: "Admin de Operacao", papel: "SUPER_ADMIN", senha_hash: "test", status: "ATIVO" },
+    }),
+    prisma.usuario.create({
+      data: { cpf: "39053344705", email: `${marker}@local.test`, nome: "Prestador Teste", senha_hash: "test", status: "ATIVO" },
+    }),
+    prisma.tipoServico.create({
+      data: { modo_atendimento: "NEGOCIACAO_CHAT", nome: marker, segmento_venda_id: segment.id, slug: marker, status: "ATIVO", tipo_operacao: "GERAL" },
+    }),
+  ]);
+  Object.assign(state, { admin, serviceType, user });
+});
+
+after(async () => {
+  await cleanup();
+  await prisma.$disconnect();
+});
+
+test("admin only releases a provider service after KYC and records every operation", async () => {
+  await assert.rejects(
+    addAdminUserService(state.admin.id, state.user.id, { serviceTypeId: state.serviceType.id }),
+    (error) => error.statusCode === 428,
+  );
+
+  await prisma.$transaction([
+    prisma.kycUsuario.create({
+      data: {
+        cpf: state.user.cpf,
+        nome_completo: state.user.nome,
+        status: "APROVADO",
+        tipo_pessoa: "FISICA",
+        usuario_id: state.user.id,
+        validado_em: new Date(),
+      },
+    }),
+    prisma.usuario.update({ data: { nivel_kyc: "TIER_2" }, where: { id: state.user.id } }),
+  ]);
+
+  const added = await addAdminUserService(state.admin.id, state.user.id, { serviceTypeId: state.serviceType.id });
+  const service = added.user.providerProfile.services[0];
+  assert.equal(added.user.providerProfile.status, "ATIVO");
+  assert.equal(service.status, "ATIVO");
+
+  const paused = await updateAdminUserService(state.admin.id, state.user.id, service.id, { status: "PAUSADO" });
+  assert.equal(paused.user.providerProfile.services[0].status, "PAUSADO");
+
+  const blocked = await updateAdminSellerProfile(state.admin.id, state.user.id, { status: "BLOQUEADO" });
+  assert.equal(blocked.user.providerProfile.status, "BLOQUEADO");
+  assert.equal(blocked.user.providerProfile.services[0].availableNow, false);
+
+  const audits = await prisma.auditoriaAdministrativa.findMany({
+    orderBy: { id: "asc" },
+    where: { administrador_id: state.admin.id, usuario_alvo_id: state.user.id },
+  });
+  assert.deepEqual(audits.map((audit) => audit.acao), [
+    "SERVICO_PRESTADOR_LIBERADO",
+    "SERVICO_PRESTADOR_ATUALIZADO",
+    "PERFIL_PRESTADOR_ATUALIZADO",
+  ]);
+});

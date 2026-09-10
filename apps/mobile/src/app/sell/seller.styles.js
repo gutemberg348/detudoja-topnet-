@@ -94,6 +94,10 @@ export const sellerStyles = StyleSheet.create({
     width: "100%",
     ...shadow,
   },
+  choiceCardSecondary: {
+    backgroundColor: "#F8FAFC",
+    shadowOpacity: 0,
+  },
   choiceArrow: {
     alignItems: "center",
     backgroundColor: colors.primarySoft,
@@ -147,6 +151,17 @@ export const sellerStyles = StyleSheet.create({
     fontFamily: fonts.semiBold,
     fontSize: typography.small,
     fontWeight: "600",
+  },
+  destinationDivider: {
+    backgroundColor: colors.border,
+    height: 1,
+    width: "100%",
+  },
+  destinationSectionLabel: {
+    color: colors.textMuted,
+    fontFamily: fonts.bold,
+    fontSize: 10,
+    fontWeight: "700",
   },
   disabledAction: {
     opacity: 0.55,
@@ -1152,6 +1167,41 @@ export const sellerStyles = StyleSheet.create({
     fontSize: typography.small,
     fontWeight: "800",
   },
+  optionalDetailsButton: {
+    alignItems: "center",
+    backgroundColor: "#F8FAFC",
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 60,
+    padding: spacing.md,
+  },
+  optionalDetailsCopy: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
+  optionalDetailsIcon: {
+    alignItems: "center",
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.round,
+    height: 36,
+    justifyContent: "center",
+    width: 36,
+  },
+  optionalDetailsText: {
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    fontSize: typography.caption,
+  },
+  optionalDetailsTitle: {
+    color: colors.textPrimary,
+    fontFamily: fonts.bold,
+    fontSize: typography.small,
+    fontWeight: "700",
+  },
   storeOrderRow: {
     backgroundColor: colors.card,
     borderColor: colors.border,
@@ -1565,6 +1615,65 @@ export const sellerStyles = StyleSheet.create({
     fontFamily: fonts.bold,
     fontSize: typography.small,
     fontWeight: "700",
+  },
+  quickChargeHeading: {
+    gap: 2,
+  },
+  quickChargeDetails: {
+    gap: spacing.lg,
+  },
+  quickChargeMeta: {
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    fontSize: typography.caption,
+  },
+  quickChargeOption: {
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radius.round,
+    borderWidth: 1,
+    gap: 2,
+    justifyContent: "center",
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  quickChargeOptionPrice: {
+    color: colors.primaryDark,
+    fontFamily: fonts.bold,
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  quickChargeOptionSelected: {
+    backgroundColor: colors.primaryDark,
+    borderColor: colors.primaryDark,
+  },
+  quickChargeOptionText: {
+    color: colors.textPrimary,
+    fontFamily: fonts.bold,
+    fontSize: typography.caption,
+    fontWeight: "700",
+  },
+  quickChargeOptionTextSelected: {
+    color: colors.card,
+  },
+  quickChargeOptions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  quickChargeSection: {
+    gap: spacing.sm,
+  },
+  quickChargeTitle: {
+    color: colors.textPrimary,
+    fontFamily: fonts.bold,
+    fontSize: typography.small,
+    fontWeight: "700",
+  },
+  quickChargeSubmit: {
+    minHeight: 58,
+    width: "100%",
   },
   saleAmount: {
     color: colors.textPrimary,

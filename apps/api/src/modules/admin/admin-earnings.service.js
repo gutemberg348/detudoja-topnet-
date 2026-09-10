@@ -10,19 +10,27 @@ import {
 import { adminEarningsRepository } from "./admin-earnings.repository.js";
 
 export async function getAdminEarningsSettings() {
-  const [categories, segments, distribution] = await Promise.all([
+  const [categories, segments, distribution, paymentPolicy] = await Promise.all([
     adminEarningsRepository.listCategories(),
     adminEarningsRepository.listSegments(),
     adminEarningsRepository.getDistribution(),
+    adminEarningsRepository.getPaymentPolicy(),
   ]);
 
   return {
     categories: categories.map(serializeCategory),
     distribution: distribution.public,
+    paymentPolicy,
     segments: segments.map((segment) => ({
-      ...serializeSalesSegment(segment),
+      ...serializeSalesSegment(segment, { globalPaymentPolicy: paymentPolicy }),
       commission: getSegmentCommissionDistribution(segment, distribution),
     })),
+  };
+}
+
+export async function updateAdminPaymentPolicy(adminId, data) {
+  return {
+    paymentPolicy: await adminEarningsRepository.updatePaymentPolicy(adminId, data),
   };
 }
 
@@ -61,11 +69,14 @@ export async function updateAdminSegmentFee(segmentId, data) {
     data,
   );
 
-  const distribution = await adminEarningsRepository.getDistribution();
+  const [distribution, paymentPolicy] = await Promise.all([
+    adminEarningsRepository.getDistribution(),
+    adminEarningsRepository.getPaymentPolicy(),
+  ]);
 
   return {
     segment: {
-      ...serializeSalesSegment(segment),
+      ...serializeSalesSegment(segment, { globalPaymentPolicy: paymentPolicy }),
       commission: getSegmentCommissionDistribution(segment, distribution),
     },
   };

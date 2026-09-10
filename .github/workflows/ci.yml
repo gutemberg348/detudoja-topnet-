@@ -1,0 +1,71 @@
+name: Verify
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Schema, migrations, tests and builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: meu_banco
+          POSTGRES_PASSWORD: adimin
+          POSTGRES_USER: admin
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U admin -d meu_banco"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      ASAAS_ENABLED: "false"
+      DATABASE_URL: postgresql://admin:adimin@localhost:5432/meu_banco?schema=public
+      NODE_ENV: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare safe local configuration for Compose validation
+        run: cp apps/api/.env.example apps/api/.env
+
+      - name: Validate Prisma schema
+        run: npm run prisma:validate
+
+      - name: Apply migrations to the temporary database
+        run: npm run prisma:deploy
+
+      - name: Run API tests
+        run: npm run test:api
+
+      - name: Build admin panel
+        run: npm run build:web
+
+      - name: Export mobile web bundle
+        run: npm exec -w apps/mobile -- expo export --platform web --output-dir dist-ci
+
+      - name: Validate Docker Compose
+        run: docker compose config --quiet
+
+      - name: Build deploy images
+        run: docker compose build api web-admin

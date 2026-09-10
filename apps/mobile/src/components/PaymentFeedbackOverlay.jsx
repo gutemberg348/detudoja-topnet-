@@ -189,7 +189,7 @@ export function PaymentFeedbackOverlay({
           </View>
 
           <View style={styles.copy}>
-            <Text style={[styles.eyebrow, { color: state.accent }]}>DETUDOJA PAY</Text>
+            <Text style={[styles.eyebrow, { color: state.accent }]}>BRASIL CASHBACK PAY</Text>
             <Text style={styles.title}>{title || state.title}</Text>
             <Text style={styles.message}>{message || state.message}</Text>
           </View>

@@ -4,6 +4,7 @@ import {
   emitOrderStatusUpdated,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
+import { isValidCnpj, normalizeCnpj } from "../../utils/cnpj.js";
 import { createSellerRepository, sellerRepository } from "./seller.repository.js";
 import { parsePositiveId } from "../../utils/ids.js";
 import { sameCity } from "../../utils/location.js";
@@ -75,6 +76,7 @@ function onlyDigits(value = "") {
 }
 
 function hasValidDocumentShape(documentDigits, type) {
+  if (type === "JURIDICA") return isValidCnpj(documentDigits);
   const expectedLength = type === "JURIDICA" ? 14 : 11;
 
   return (
@@ -124,13 +126,43 @@ async function assertCommercialDocumentAvailable(repository, {
   }
 }
 
-function commercialApprovalData(type) {
+function isCommercialIdentityApproved(user, type, documentDigits) {
+  if (type === "JURIDICA") {
+    return user?.status === "ATIVO" && isValidCnpj(documentDigits);
+  }
+
+  if (user?.nivel_kyc !== "TIER_2" || user.kyc?.status !== "APROVADO") {
+    return false;
+  }
+
+  return onlyDigits(user.cpf) === documentDigits;
+}
+
+function commercialApprovalData(type, identityApproved) {
   return {
     limite_faturamento_mensal_centavos:
       type === "FISICA" ? individualMerchantMonthlyLimitCents : null,
-    status: "ATIVO",
-    status_kyc: "APROVADO",
+    status: identityApproved ? "ATIVO" : "PENDENTE",
+    status_kyc: identityApproved ? "APROVADO" : "PENDENTE",
   };
+}
+
+function assertAutonomousSellerEligibility(user, seller) {
+  const commercialDocument = seller.tipo_pessoa === "JURIDICA"
+    ? normalizeCnpj(seller.cnpj)
+    : onlyDigits(seller.cpf);
+  if (!user || !isCommercialIdentityApproved(user, seller.tipo_pessoa, commercialDocument)) {
+    throw new AppError(
+      seller.tipo_pessoa === "JURIDICA"
+        ? "A verificacao de titularidade do CNPJ precisa ser aprovada antes de vender"
+        : "Conclua a verificacao de identidade antes de gerar uma venda autonoma",
+      428,
+    );
+  }
+
+  if (seller.status !== "ATIVO" || seller.status_kyc !== "APROVADO") {
+    throw new AppError("Seu cadastro comercial ainda esta em validacao", 428);
+  }
 }
 
 function slugify(value) {
@@ -172,7 +204,9 @@ function serializeSale(sale) {
           status: sale.cobranca.status,
         }
       : null,
-    paymentPath: `/vendas/${sale.link_slug}`,
+    // Autonomous QR is currently an in-person flow. A remote purchase link
+    // needs its own consumer, fiscal, cancellation and settlement rules.
+    paymentPath: null,
     segment: sale.segmento_venda ? serializeSegment(sale.segmento_venda) : null,
     slug: sale.link_slug,
     status: sale.status,
@@ -241,6 +275,7 @@ function serializeStore(store, merchant = store.lojista ?? null) {
     chargesCount: store._count?.cobrancas ?? 0,
     createdAt: store.criado_em.toISOString(),
     description: store.descricao,
+    deliveryFeeCents: cents(store.taxa_entrega_centavos),
     email: store.email,
     id: store.id,
     logoUrl: store.logo_url,
@@ -313,7 +348,7 @@ const statusMessageCopy = {
     title: "Pedido cancelado",
   },
   CONCLUIDO: {
-    message: "Pedido finalizado. Obrigado por comprar pelo DeTudoJa.",
+    message: "Pedido finalizado. Obrigado por comprar pelo Brasil Cashback.",
     title: "Pedido concluido",
   },
   PREPARANDO: {
@@ -324,10 +359,6 @@ const statusMessageCopy = {
     message: "Pedido pronto para retirada.",
     title: "Pronto para retirada",
   },
-  RECEBIDO: {
-    message: "Pedido reaberto para atendimento pela loja.",
-    title: "Pedido reaberto",
-  },
   SAIU_ENTREGA: {
     message: "Pedido saiu para entrega.",
     title: "Saiu para entrega",
@@ -336,17 +367,6 @@ const statusMessageCopy = {
 
 function statusTimestampData(status, currentOrder, now) {
   const existingOrNow = (field) => currentOrder[field] ?? now;
-
-  if (status === "RECEBIDO") {
-    return {
-      aceito_em: null,
-      cancelado_em: null,
-      concluido_em: null,
-      preparando_em: null,
-      pronto_retirada_em: null,
-      saiu_entrega_em: null,
-    };
-  }
 
   if (status === "ACEITO") {
     return {
@@ -541,15 +561,21 @@ export async function createSellerOnboarding(userId, data) {
   const documentDigits =
     data.type === "FISICA"
       ? onlyDigits(data.document || user.cpf || "")
-      : onlyDigits(data.document || "");
+      : normalizeCnpj(data.document || "");
 
   if (data.type === "FISICA" && !hasValidDocumentShape(documentDigits, data.type)) {
     throw new AppError("Seu CPF precisa estar completo para vender", 400);
   }
 
+  if (data.type === "FISICA" && documentDigits !== onlyDigits(user.cpf)) {
+    throw new AppError("Use o mesmo CPF vinculado a sua conta para vender como pessoa fisica", 409);
+  }
+
   if (data.type === "JURIDICA" && !hasValidDocumentShape(documentDigits, data.type)) {
     throw new AppError("Informe um CNPJ valido para vender", 400);
   }
+
+  const identityApproved = isCommercialIdentityApproved(user, data.type, documentDigits);
 
   try {
     const seller = await sellerRepository.transaction(async (database) => {
@@ -572,8 +598,7 @@ export async function createSellerOnboarding(userId, data) {
           data.type === "FISICA" ? individualMerchantMonthlyLimitCents : null,
         nome_publico: data.publicName || user.nome,
         segmento_venda_id: segment.id,
-        status: "ATIVO",
-        status_kyc: "APROVADO",
+        ...commercialApprovalData(data.type, identityApproved),
         tipo_pessoa: data.type,
         usuario_id: userId,
       },
@@ -587,8 +612,7 @@ export async function createSellerOnboarding(userId, data) {
           data.type === "FISICA" ? individualMerchantMonthlyLimitCents : null,
         nome_publico: data.publicName || user.nome,
         segmento_venda_id: segment.id,
-        status: "ATIVO",
-        status_kyc: "APROVADO",
+        ...commercialApprovalData(data.type, identityApproved),
         tipo_pessoa: data.type,
       },
       where: { usuario_id: userId },
@@ -608,15 +632,23 @@ export async function createSellerOnboarding(userId, data) {
 }
 
 export async function createAutonomousSale(userId, data) {
-  await sellerRepository.requireUserCpf(userId);
-  const seller = await sellerRepository.findFirstSeller({
+  const [user, seller] = await Promise.all([
+    sellerRepository.findUniqueUser({ include: { kyc: true }, where: { id: userId } }),
+    sellerRepository.findFirstSeller({
     include: { segmento_venda: true },
     where: { excluido_em: null, usuario_id: userId },
-  });
+    }),
+  ]);
+
+  if (!user?.cpf) {
+    throw new AppError("Informe seu CPF antes da primeira operacao de venda", 428);
+  }
 
   if (!seller) {
     throw new AppError("Complete o cadastro de vendedor antes da primeira venda", 428);
   }
+
+  assertAutonomousSellerEligibility(user, seller);
 
   if (!seller.segmento_venda_id || !seller.segmento_venda) {
     throw new AppError("Defina o segmento no cadastro de vendedor antes de gerar uma venda", 409);
@@ -817,6 +849,9 @@ export async function updateSellerStore(userId, storeId, data) {
       ...(category ? { categoria_id: category.id } : {}),
       ...(segment ? { segmento_venda_id: segment.id } : {}),
       ...(data.description !== undefined ? { descricao: data.description || null } : {}),
+      ...(data.deliveryFeeCents !== undefined
+        ? { taxa_entrega_centavos: BigInt(data.deliveryFeeCents) }
+        : {}),
       ...(data.email !== undefined ? { email: data.email || null } : {}),
       ...(data.name !== undefined ? { nome: data.name } : {}),
       ...(data.openForOrders !== undefined
@@ -970,8 +1005,45 @@ async function findStoreProductForUser(userId, storeId, productId) {
   return product;
 }
 
+function assertUpdatedProductState(currentProduct, data) {
+  const acceptsDelivery = data.acceptDelivery === undefined
+    ? currentProduct.aceita_entrega
+    : Boolean(data.acceptDelivery);
+  const acceptsPickup = data.acceptPickup === undefined
+    ? currentProduct.aceita_retirada
+    : Boolean(data.acceptPickup);
+  const priceCents = data.priceCents === undefined
+    ? Number(currentProduct.preco_centavos)
+    : Number(data.priceCents);
+  const promotionalPriceCents = data.promotionalPriceCents === undefined
+    ? (currentProduct.preco_promocional_centavos == null
+      ? null
+      : Number(currentProduct.preco_promocional_centavos))
+    : (data.promotionalPriceCents == null ? null : Number(data.promotionalPriceCents));
+  const stockControlled = data.stockControlled === undefined
+    ? currentProduct.estoque_controlado
+    : Boolean(data.stockControlled);
+  const stockQuantity = data.stockQuantity === undefined
+    ? (currentProduct.estoque_quantidade == null ? null : Number(currentProduct.estoque_quantidade))
+    : data.stockQuantity;
+
+  if (!acceptsDelivery && !acceptsPickup) {
+    throw new AppError("O produto precisa permitir entrega ou retirada", 400);
+  }
+  if (promotionalPriceCents != null && promotionalPriceCents >= priceCents) {
+    throw new AppError("O preco promocional precisa ser menor que o preco normal", 400);
+  }
+  if (stockControlled && stockQuantity == null) {
+    throw new AppError("Informe o estoque quando controlar quantidade", 400);
+  }
+  if (!stockControlled && data.stockQuantity !== undefined) {
+    throw new AppError("Ative o controle de estoque antes de informar quantidade", 400);
+  }
+}
+
 export async function updateStoreProduct(userId, storeId, productId, data, imageFile = null) {
   const currentProduct = await findStoreProductForUser(userId, storeId, productId);
+  assertUpdatedProductState(currentProduct, data);
   let imageUpload = null;
 
   try {
@@ -1011,12 +1083,18 @@ export async function updateStoreProduct(userId, storeId, productId, data, image
           ? { resumo_curto: data.shortDescription || null }
           : {}),
         ...(data.sku !== undefined ? { sku: data.sku || null } : {}),
-        ...(data.stockControlled !== undefined
-          ? { estoque_controlado: Boolean(data.stockControlled) }
-          : {}),
-        ...(data.stockQuantity !== undefined
-          ? { estoque_quantidade: data.stockQuantity ?? null }
-          : {}),
+        ...(data.stockControlled === false
+          ? { estoque_controlado: false, estoque_quantidade: null }
+          : data.stockControlled === true
+            ? {
+                estoque_controlado: true,
+                estoque_quantidade: data.stockQuantity === undefined
+                  ? currentProduct.estoque_quantidade
+                  : data.stockQuantity,
+              }
+            : data.stockQuantity !== undefined
+              ? { estoque_quantidade: data.stockQuantity ?? null }
+              : {}),
         ...(data.unit !== undefined ? { unidade_medida: data.unit || null } : {}),
       },
       where: { id: currentProduct.id },
@@ -1072,8 +1150,12 @@ export async function updateStoreOrderStatus(userId, storeId, orderId, status) {
     throw new AppError("Pedido deve ser concluido pelo cliente ou entregador", 409);
   }
 
-  if (currentOrder.status === "CONCLUIDO" && status !== "CONCLUIDO") {
-    throw new AppError("Pedido concluido nao pode voltar etapa", 409);
+  if (currentOrder.status === status) {
+    const order = await sellerRepository.findUniqueOrder({
+      include: sellerOrderInclude,
+      where: { id: parsedOrderId },
+    });
+    return { order: serializeOrder(order, { audience: "store" }) };
   }
 
   if (status === "CANCELADO") {
@@ -1094,12 +1176,38 @@ export async function updateStoreOrderStatus(userId, storeId, orderId, status) {
         409,
       );
     }
+  } else {
+    const nextStatus = currentOrder.status === "RECEBIDO"
+      ? "ACEITO"
+      : currentOrder.status === "ACEITO"
+        ? "PREPARANDO"
+        : currentOrder.status === "PREPARANDO"
+          ? currentOrder.tipo_entrega === "RETIRADA" ? "PRONTO_RETIRADA" : "SAIU_ENTREGA"
+          : null;
+
+    if (status !== nextStatus) {
+      throw new AppError(
+        "Esta etapa nao pode ser alterada agora. Siga a proxima etapa indicada no pedido.",
+        409,
+      );
+    }
   }
 
   const now = new Date();
-  const statusChanged = currentOrder.status !== status;
   const order = await sellerRepository.transaction(async (database) => {
     const repository = createSellerRepository(database);
+    const movedOrder = await repository.updateOrders({
+      data: {
+        status,
+        ...statusTimestampData(status, currentOrder, now),
+      },
+      where: { id: parsedOrderId, status: currentOrder.status },
+    });
+
+    if (movedOrder.count !== 1) {
+      throw new AppError("O pedido foi atualizado em outra sessao. Atualize a tela.", 409);
+    }
+
     if (status === "CANCELADO") {
       await repository.updateProposals({
         data: { status: "CANCELADA" },
@@ -1110,43 +1218,32 @@ export async function updateStoreOrderStatus(userId, storeId, orderId, status) {
       });
     }
 
-    const updatedOrder = await repository.updateOrder({
-      data: {
-        status,
-        ...statusTimestampData(status, currentOrder, now),
-      },
-      include: sellerOrderInclude,
-      where: { id: parsedOrderId },
-    });
-
     if (status === "CANCELADO") {
       await releaseReservedOrderStock(database, parsedOrderId);
     }
 
-    if (statusChanged) {
-      const copy = statusMessageCopy[status];
+    const copy = statusMessageCopy[status];
+    await repository.createOrderMessage({
+      data: {
+        autor_usuario_id: userId,
+        lido_loja_em: new Date(),
+        mensagem: copy?.message ?? `Status atualizado para ${status}.`,
+        metadata_json: { kind: "status", status },
+        origem: "LOJA",
+        pedido_id: parsedOrderId,
+        titulo: copy?.title ?? "Atualizacao do pedido",
+      },
+    });
 
-      await repository.createOrderMessage({
-        data: {
-          autor_usuario_id: userId,
-          lido_loja_em: new Date(),
-          mensagem: copy?.message ?? `Status atualizado para ${status}.`,
-          metadata_json: { kind: "status", status },
-          origem: "LOJA",
-          pedido_id: parsedOrderId,
-          titulo: copy?.title ?? "Atualizacao do pedido",
-        },
-      });
-    }
-
-    return updatedOrder;
+    return repository.findUniqueOrder({
+      include: sellerOrderInclude,
+      where: { id: parsedOrderId },
+    });
   });
 
   const serializedOrder = serializeOrder(order, { audience: "store" });
 
-  if (statusChanged) {
-    emitOrderStatusUpdated(serializedOrder);
-  }
+  emitOrderStatusUpdated(serializedOrder);
 
   return { order: serializedOrder };
 }
@@ -1348,15 +1445,21 @@ export async function createSellerStore(userId, data) {
   const documentDigits =
     data.type === "FISICA"
       ? onlyDigits(data.document || user.cpf || "")
-      : onlyDigits(data.document || "");
+      : normalizeCnpj(data.document || "");
 
   if (data.type === "FISICA" && !hasValidDocumentShape(documentDigits, data.type)) {
     throw new AppError("Seu CPF precisa estar completo para cadastrar loja", 400);
   }
 
+  if (data.type === "FISICA" && documentDigits !== onlyDigits(user.cpf)) {
+    throw new AppError("Use o mesmo CPF vinculado a sua conta para cadastrar loja como pessoa fisica", 409);
+  }
+
   if (data.type === "JURIDICA" && !hasValidDocumentShape(documentDigits, data.type)) {
     throw new AppError("Informe um CNPJ valido para cadastrar loja", 400);
   }
+
+  const identityApproved = isCommercialIdentityApproved(user, data.type, documentDigits);
 
   const baseSlug = slugify(data.name) || "loja";
   try {
@@ -1372,7 +1475,7 @@ export async function createSellerStore(userId, data) {
       create: {
         cnpj: data.type === "JURIDICA" ? documentDigits : null,
         cpf: data.type === "FISICA" ? documentDigits : null,
-        ...commercialApprovalData(data.type),
+        ...commercialApprovalData(data.type, identityApproved),
         nome_fantasia: data.name,
         razao_social: data.type === "JURIDICA" ? data.name : null,
         tipo_pessoa: data.type,
@@ -1381,7 +1484,7 @@ export async function createSellerStore(userId, data) {
       update: {
         cnpj: data.type === "JURIDICA" ? documentDigits : null,
         cpf: data.type === "FISICA" ? documentDigits : null,
-        ...commercialApprovalData(data.type),
+        ...commercialApprovalData(data.type, identityApproved),
         tipo_pessoa: data.type,
       },
       where: { usuario_id: userId },
@@ -1401,6 +1504,7 @@ export async function createSellerStore(userId, data) {
         horarios_funcionamento: data.openingHours ?? null,
         slug: `${baseSlug}-${randomUUID().slice(0, 8)}`,
         status: "ATIVA",
+        taxa_entrega_centavos: BigInt(data.deliveryFeeCents),
         telefone: onlyDigits(data.phone || "") || null,
         visivel_no_app: true,
         whatsapp: onlyDigits(data.whatsapp || "") || null,

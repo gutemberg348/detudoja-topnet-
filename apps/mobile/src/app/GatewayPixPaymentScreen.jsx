@@ -28,7 +28,7 @@ export function GatewayPixPaymentScreen({ navigation, route }) {
       <View style={styles.amountCard}>
         <Text style={styles.amountLabel}>Valor do Pix</Text>
         <Text style={styles.amount}>{formatarDinheiro(order?.payment?.pixCents ?? order?.totalCents ?? 0)}</Text>
-        <Text style={styles.orderCode}>{order?.code ?? "Pedido DeTudoJa"}</Text>
+        <Text style={styles.orderCode}>{order?.code ?? "Pedido Brasil Cashback"}</Text>
       </View>
 
       <View style={styles.qrCard}>

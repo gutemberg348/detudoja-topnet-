@@ -1,52 +1,69 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { LinearGradient } from "expo-linear-gradient";
-import { useEffect, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { AppButton } from "../components/AppButton";
+import { PageHeader } from "../components/PageHeader";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { getCurrentUser } from "../services/users.api";
-import { verifyKycDocument } from "../services/kyc.api";
+import { getKycStatus, submitKycDocuments } from "../services/kyc.api";
 import { useAuthStore } from "../stores/useAuthStore";
-import {
-  colors,
-  fonts,
-  radius,
-  shadow,
-  spacing,
-  typography,
-} from "../utils/theme";
+import { colors, fonts, radius, shadow, spacing, typography } from "../utils/theme";
 
-const kycStatusLabels = {
-  APROVADO: "Verificado",
-  BLOQUEADO: "Bloqueado",
-  EM_ANALISE: "Em analise",
-  PENDENTE: "Pendente",
-  REPROVADO: "Reprovado",
+const documentTypes = [
+  { label: "RG", value: "RG" },
+  { label: "CNH", value: "CNH" },
+  { label: "RNE", value: "RNE" },
+];
+
+const statusContent = {
+  APROVADO: { icon: "shield-checkmark", title: "Identidade verificada", text: "Documento, dados e selfie foram confirmados." },
+  BLOQUEADO: { icon: "alert-circle-outline", title: "Verificacao bloqueada", text: "Seu KYC foi revogado. Entre em contato com o suporte para regularizar a conta." },
+  EM_ANALISE: { icon: "hourglass-outline", title: "Verificacao em validacao", text: "Recebemos suas imagens. Enquanto a validacao adicional estiver aberta, saques e limites altos permanecem bloqueados." },
+  REPROVADO: { icon: "refresh-circle-outline", title: "Novo envio necessario", text: "Confira o motivo abaixo e envie fotos novas." },
 };
+
+function CaptureField({ image, label, onPress, optional = false }) {
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.capture, pressed && styles.pressed]}>
+      <View style={styles.capturePreview}>
+        {image?.uri ? <Image source={{ uri: image.uri }} style={styles.captureImage} /> : <Ionicons color={colors.primaryDark} name="camera-outline" size={24} />}
+      </View>
+      <View style={styles.captureCopy}>
+        <Text style={styles.captureLabel}>{label}</Text>
+        <Text style={styles.captureHint}>{image ? "Foto pronta para verificacao" : optional ? "Opcional para CNH" : "Toque para abrir a camera"}</Text>
+      </View>
+      <Ionicons color={image ? colors.success : colors.textSecondary} name={image ? "checkmark-circle" : "chevron-forward"} size={22} />
+    </Pressable>
+  );
+}
 
 export function KycVerificationScreen() {
   const { session, updateSessionUser } = useAuthStore();
+  const [documentType, setDocumentType] = useState("RG");
+  const [images, setImages] = useState({ documentBack: null, documentFront: null, selfie: null });
+  const [kyc, setKyc] = useState(null);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [profile, setProfile] = useState(null);
 
-  const isVerified = profile?.kycStatus === "APROVADO";
+  const canSubmit = useMemo(() => Boolean(
+    images.documentFront && images.selfie && (documentType === "CNH" || images.documentBack),
+  ), [documentType, images]);
+  const locked = ["APROVADO", "BLOQUEADO", "EM_ANALISE"].includes(kyc?.status);
+  const currentStatus = statusContent[kyc?.status];
 
-  async function loadProfile() {
-    if (!session?.accessToken) {
-      return;
-    }
-
+  async function load() {
+    if (!session?.accessToken) return;
     setError("");
-    setIsLoading(true);
-
     try {
-      const response = await getCurrentUser(session.accessToken);
-      setProfile(response.user);
+      const [kycResponse, profileResponse] = await Promise.all([
+        getKycStatus(session.accessToken),
+        getCurrentUser(session.accessToken),
+      ]);
+      setKyc(kycResponse.kyc);
       updateSessionUser({
-        kycLevel: response.user.kycLevel,
-        kycStatus: response.user.kycStatus,
+        kycLevel: profileResponse.user.kycLevel,
+        kycStatus: profileResponse.user.kycStatus,
       });
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel carregar a verificacao.");
@@ -55,204 +72,113 @@ export function KycVerificationScreen() {
     }
   }
 
-  useEffect(() => {
-    loadProfile();
-  }, [session?.accessToken]);
+  useEffect(() => { load(); }, [session?.accessToken]);
 
-  async function submitVerification() {
+  async function captureImage(field) {
+    const Picker = await import("expo-image-picker");
+    const permission = await Picker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      setError("Permita o uso da camera para tirar a foto.");
+      return;
+    }
+
+    const options = {
+      allowsEditing: false,
+      cameraType: field === "selfie" ? "front" : "back",
+      mediaTypes: Picker.MediaTypeOptions?.Images ?? ["images"],
+      quality: 0.9,
+    };
+    const result = await Picker.launchCameraAsync(options);
+    if (!result.canceled && result.assets?.[0]) {
+      setImages((current) => ({ ...current, [field]: result.assets[0] }));
+      setError("");
+    }
+  }
+
+  async function submit() {
+    if (!canSubmit || isSaving) return;
     setError("");
     setIsSaving(true);
-
     try {
-      const response = await verifyKycDocument(session.accessToken);
-      setProfile(response.user);
-      updateSessionUser({
-        kycLevel: response.user.kycLevel,
-        kycStatus: response.user.kycStatus,
-      });
+      const response = await submitKycDocuments(session.accessToken, { ...images, documentType });
+      setKyc(response.kyc);
+      updateSessionUser({ kycLevel: response.user.kycLevel, kycStatus: response.user.kycStatus });
+      setImages({ documentBack: null, documentFront: null, selfie: null });
     } catch (requestError) {
-      setError(requestError.message ?? "Nao foi possivel verificar agora.");
+      setError(requestError.message ?? "Nao foi possivel enviar os documentos.");
     } finally {
       setIsSaving(false);
     }
   }
 
-  if (isLoading && !profile) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator color={colors.primaryDark} size="large" />
-        <Text style={styles.loadingText}>Carregando verificacao...</Text>
-      </View>
-    );
-  }
-
   return (
     <ScreenContainer contentContainerStyle={styles.content} edges={["left", "right"]}>
-      <LinearGradient
-        colors={isVerified ? ["#ECFDF5", "#FFFFFF"] : ["#F8FAFC", "#FFFFFF"]}
-        style={styles.hero}
-      >
-        <View style={[styles.heroIcon, isVerified && styles.heroIconVerified]}>
-          <Ionicons
-            color={isVerified ? colors.primaryDark : colors.textSecondary}
-            name={isVerified ? "shield-checkmark" : "shield-outline"}
-            size={32}
-          />
-        </View>
-        <Text style={styles.title}>
-          {isVerified ? "Documento verificado" : "Verifique seu documento"}
-        </Text>
-        <Text style={styles.subtitle}>
-          {isVerified
-            ? "Sua conta ja passou pela verificacao inicial."
-            : "Por enquanto, esta etapa aprova a verificacao com um toque. Depois vamos plugar o envio real de documentos."}
-        </Text>
-      </LinearGradient>
+      <PageHeader eyebrow="Seguranca da conta" title="Verificar identidade" subtitle="Fotografe seu documento e rosto. A verificacao acontece automaticamente." />
 
-      <View style={styles.statusCard}>
-        <View style={styles.statusRow}>
-          <View style={styles.statusIcon}>
-            <Ionicons color={colors.primaryDark} name="person-outline" size={20} />
-          </View>
-          <View style={styles.statusCopy}>
-            <Text style={styles.statusLabel}>Titular</Text>
-            <Text style={styles.statusValue}>{profile?.name ?? session?.user?.name}</Text>
-          </View>
+      {isLoading ? <View style={styles.notice}><Text style={styles.noticeText}>Carregando situacao...</Text></View> : null}
+      {currentStatus ? (
+        <View style={[styles.status, ["BLOQUEADO", "REPROVADO"].includes(kyc.status) && styles.statusRejected]}>
+          <Ionicons color={["BLOQUEADO", "REPROVADO"].includes(kyc.status) ? colors.danger : colors.primaryDark} name={currentStatus.icon} size={28} />
+          <View style={styles.statusCopy}><Text style={styles.statusTitle}>{currentStatus.title}</Text><Text style={styles.statusText}>{currentStatus.text}</Text></View>
         </View>
-        <View style={styles.divider} />
-        <View style={styles.statusRow}>
-          <View style={styles.statusIcon}>
-            <Ionicons color={colors.primaryDark} name="ribbon-outline" size={20} />
-          </View>
-          <View style={styles.statusCopy}>
-            <Text style={styles.statusLabel}>Nivel da conta</Text>
-            <Text style={styles.statusValue}>{profile?.accountLevelLabel ?? "Prata"}</Text>
-          </View>
-        </View>
-        <View style={styles.divider} />
-        <View style={styles.statusRow}>
-          <View style={styles.statusIcon}>
-            <Ionicons color={colors.primaryDark} name="shield-checkmark-outline" size={20} />
-          </View>
-          <View style={styles.statusCopy}>
-            <Text style={styles.statusLabel}>KYC</Text>
-            <Text style={styles.statusValue}>
-              {kycStatusLabels[profile?.kycStatus] ?? profile?.kycStatus ?? "Pendente"}
-            </Text>
-          </View>
-        </View>
-      </View>
+      ) : null}
+      {kyc?.rejectionReason ? <View style={styles.rejection}><Text style={styles.rejectionLabel}>{kyc.status === "BLOQUEADO" ? "Motivo do bloqueio" : "Motivo da reprovação"}</Text><Text style={styles.rejectionText}>{kyc.rejectionReason}</Text></View> : null}
 
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-      <AppButton
-        disabled={isVerified}
-        icon={isVerified ? "checkmark-circle-outline" : "shield-checkmark-outline"}
-        loading={isSaving}
-        onPress={submitVerification}
-        title={isVerified ? "Ja verificado" : "Verificar agora"}
-      />
+      {!locked && !isLoading ? (
+        <>
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>1. Escolha o documento</Text>
+            <View style={styles.typeRow}>
+              {documentTypes.map((item) => (
+                <Pressable key={item.value} onPress={() => setDocumentType(item.value)} style={[styles.typeButton, documentType === item.value && styles.typeButtonActive]}>
+                  <Text style={[styles.typeText, documentType === item.value && styles.typeTextActive]}>{item.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>2. Fotografe sem cortar</Text>
+            <CaptureField image={images.documentFront} label={`Frente do ${documentType}`} onPress={() => captureImage("documentFront")} />
+            <CaptureField image={images.documentBack} label={`Verso do ${documentType}`} onPress={() => captureImage("documentBack")} optional={documentType === "CNH"} />
+            <CaptureField image={images.selfie} label="Selfie do titular" onPress={() => captureImage("selfie")} />
+          </View>
+          <View style={styles.privacy}><Ionicons color={colors.primaryDark} name="scan-outline" size={20} /><Text style={styles.privacyText}>OCR, comparacao facial e prova de vida passiva sao executados em servidor privado. Fotos da galeria nao sao aceitas.</Text></View>
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+          <AppButton disabled={!canSubmit} icon="shield-checkmark-outline" loading={isSaving} onPress={submit} title="Verificar identidade" />
+        </>
+      ) : null}
+      {locked && error ? <Text style={styles.error}>{error}</Text> : null}
     </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  centered: {
-    alignItems: "center",
-    backgroundColor: colors.background,
-    flex: 1,
-    gap: spacing.lg,
-    justifyContent: "center",
-    padding: spacing.xl,
-  },
-  content: {
-    gap: spacing.xl,
-    paddingBottom: spacing.xxxl,
-  },
-  divider: {
-    backgroundColor: colors.border,
-    height: 1,
-  },
-  errorText: {
-    color: colors.danger,
-    fontFamily: fonts.medium,
-    fontSize: typography.small,
-    textAlign: "center",
-  },
-  hero: {
-    alignItems: "center",
-    borderColor: colors.border,
-    borderRadius: 24,
-    borderWidth: 1,
-    gap: spacing.md,
-    padding: spacing.xl,
-    ...shadow,
-  },
-  heroIcon: {
-    alignItems: "center",
-    backgroundColor: "#F3F4F6",
-    borderRadius: radius.round,
-    height: 68,
-    justifyContent: "center",
-    width: 68,
-  },
-  heroIconVerified: {
-    backgroundColor: colors.primarySoft,
-  },
-  loadingText: {
-    color: colors.textSecondary,
-    fontFamily: fonts.medium,
-    fontSize: typography.small,
-  },
-  statusCard: {
-    backgroundColor: colors.card,
-    borderColor: colors.border,
-    borderRadius: 20,
-    borderWidth: 1,
-    padding: spacing.lg,
-    ...shadow,
-  },
-  statusCopy: {
-    flex: 1,
-    gap: spacing.xs,
-  },
-  statusIcon: {
-    alignItems: "center",
-    backgroundColor: colors.primarySoft,
-    borderRadius: radius.round,
-    height: 42,
-    justifyContent: "center",
-    width: 42,
-  },
-  statusLabel: {
-    color: colors.textSecondary,
-    fontFamily: fonts.regular,
-    fontSize: typography.caption,
-  },
-  statusRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: spacing.md,
-    minHeight: 62,
-  },
-  statusValue: {
-    color: colors.textPrimary,
-    fontFamily: fonts.bold,
-    fontSize: typography.label,
-    fontWeight: "700",
-  },
-  subtitle: {
-    color: colors.textSecondary,
-    fontFamily: fonts.regular,
-    fontSize: typography.body,
-    lineHeight: 22,
-    textAlign: "center",
-  },
-  title: {
-    color: colors.textPrimary,
-    fontFamily: fonts.extraBold,
-    fontSize: typography.h2,
-    fontWeight: "800",
-    textAlign: "center",
-  },
+  capture: { alignItems: "center", borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.md, minHeight: 82, padding: spacing.md },
+  captureCopy: { flex: 1, gap: 4, minWidth: 0 },
+  captureHint: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption },
+  captureImage: { height: "100%", width: "100%" },
+  captureLabel: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.label, fontWeight: "700" },
+  capturePreview: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, height: 54, justifyContent: "center", overflow: "hidden", width: 54 },
+  content: { gap: spacing.lg, paddingBottom: spacing.xxxl },
+  error: { color: colors.danger, fontFamily: fonts.medium, fontSize: typography.small, lineHeight: 20, textAlign: "center" },
+  notice: { borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, padding: spacing.lg },
+  noticeText: { color: colors.textSecondary, textAlign: "center" },
+  pressed: { opacity: 0.78 },
+  privacy: { alignItems: "flex-start", backgroundColor: colors.primarySoft, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.sm, padding: spacing.md },
+  privacyText: { color: colors.primaryDark, flex: 1, fontFamily: fonts.medium, fontSize: typography.small, lineHeight: 19 },
+  rejection: { backgroundColor: colors.dangerSoft ?? "#FFF1F1", borderColor: colors.danger, borderRadius: radius.lg, borderWidth: 1, gap: spacing.xs, padding: spacing.md },
+  rejectionLabel: { color: colors.danger, fontFamily: fonts.bold, fontSize: typography.caption, fontWeight: "700", textTransform: "uppercase" },
+  rejectionText: { color: colors.textPrimary, fontFamily: fonts.medium, fontSize: typography.small, lineHeight: 20 },
+  section: { backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, gap: spacing.md, padding: spacing.lg, ...shadow },
+  sectionTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.label, fontWeight: "800" },
+  status: { alignItems: "center", backgroundColor: colors.primarySoft, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.md, padding: spacing.lg },
+  statusCopy: { flex: 1, gap: spacing.xs },
+  statusRejected: { backgroundColor: colors.dangerSoft ?? "#FFF1F1", borderColor: colors.danger },
+  statusText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.small, lineHeight: 19 },
+  statusTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.label, fontWeight: "700" },
+  typeButton: { alignItems: "center", borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, flex: 1, minHeight: 46, justifyContent: "center" },
+  typeButtonActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  typeRow: { flexDirection: "row", gap: spacing.sm },
+  typeText: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small, fontWeight: "700" },
+  typeTextActive: { color: colors.card },
 });

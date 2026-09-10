@@ -29,6 +29,15 @@ const statusCopy = {
   PROCESSANDO: "Processando",
 };
 
+const payoutStatusCopy = {
+  CANCELADO: "Pix nao enviado · valor na carteira",
+  EM_RECONCILIACAO: "Confirmando repasse Pix",
+  FALHOU: "Pix nao enviado · valor na carteira",
+  PAGO: "Repasse Pix concluido",
+  PENDENTE: "Repasse Pix aguardando envio",
+  PROCESSANDO: "Repasse Pix em processamento",
+};
+
 export function GeneratedChargesHistoryScreen({ navigation, route }) {
   const { session } = useAuthStore();
   const [charges, setCharges] = useState([]);
@@ -238,6 +247,22 @@ function ChargeHistoryCard({ charge, loading, onPress }) {
         <Text numberOfLines={1} style={styles.customer}>
           {charge.customer ? `Cliente: ${charge.customer.name}` : isActive ? "Aguardando leitura do cliente" : "Sem cliente pagador"}
         </Text>
+        {charge.payout ? (
+          <View style={[
+            styles.payout,
+            charge.payout.status === "PAGO" && styles.payoutPaid,
+            ["FALHOU", "CANCELADO"].includes(charge.payout.status) && styles.payoutFailed,
+          ]}>
+            <Ionicons
+              color={charge.payout.status === "PAGO" ? colors.primaryDark : colors.textSecondary}
+              name={charge.payout.status === "PAGO" ? "checkmark-circle-outline" : "sync-outline"}
+              size={14}
+            />
+            <Text style={styles.payoutText}>
+              {payoutStatusCopy[charge.payout.status] ?? "Acompanhando repasse Pix"}
+            </Text>
+          </View>
+        ) : null}
         <View style={styles.chargeFooter}>
           <Text style={styles.amount}>{formatarDinheiro(charge.amountCents)}</Text>
           <Text style={styles.origin}>{charge.origin === "PRESENCIAL" ? "Local" : "Autonoma"}</Text>
@@ -282,6 +307,10 @@ const styles = StyleSheet.create({
   loadingText: { color: colors.textSecondary, fontFamily: fonts.medium, fontSize: typography.small },
   origin: { color: colors.textMuted, fontFamily: fonts.bold, fontSize: typography.caption, fontWeight: "700" },
   pressed: { opacity: 0.78 },
+  payout: { alignItems: "center", alignSelf: "flex-start", backgroundColor: colors.cardMuted, borderRadius: radius.round, flexDirection: "row", gap: 5, paddingHorizontal: spacing.sm, paddingVertical: 5 },
+  payoutFailed: { backgroundColor: "#FFFBEB" },
+  payoutPaid: { backgroundColor: colors.primarySoft },
+  payoutText: { color: colors.textSecondary, fontFamily: fonts.bold, fontSize: 10, fontWeight: "700" },
   qrAction: { alignItems: "center", backgroundColor: colors.primarySoft, borderColor: colors.primaryLight, borderRadius: radius.round, borderWidth: 1, justifyContent: "center", marginLeft: "auto", minHeight: 28, minWidth: 58, paddingHorizontal: spacing.sm },
   qrActionText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: typography.caption, fontWeight: "700" },
   refresh: { alignItems: "center", backgroundColor: colors.primarySoft, borderColor: colors.primaryLight, borderRadius: radius.round, borderWidth: 1, height: 36, justifyContent: "center", width: 36 },

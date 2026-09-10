@@ -1,4 +1,4 @@
-import { NavigationContainer } from "@react-navigation/native";
+import { createNavigationContainerRef, NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { CartScreen } from "../app/CartScreen";
@@ -10,9 +10,13 @@ import { ChargePaymentScreen } from "../app/ChargePaymentScreen";
 import { ChargeQrScreen } from "../app/ChargeQrScreen";
 import { ChargeScanScreen } from "../app/ChargeScanScreen";
 import { GeneratedChargesHistoryScreen } from "../app/GeneratedChargesHistoryScreen";
+import { ResetPasswordScreen } from "../app/ResetPasswordScreen";
 import { GatewayPixPaymentScreen } from "../app/GatewayPixPaymentScreen";
 import { KycVerificationScreen } from "../app/KycVerificationScreen";
 import { OnlineOrderSuccessScreen } from "../app/OnlineOrderSuccessScreen";
+import { PersonalChatsInboxScreen } from "../app/PersonalChatsInboxScreen";
+import { PersonalConversationScreen } from "../app/PersonalConversationScreen";
+import { FriendQrScanScreen } from "../app/FriendQrScanScreen";
 import { ProductDetailsScreen } from "../app/ProductDetailsScreen";
 import { SplashScreen } from "../app/SplashScreen";
 import { StoreDetailsScreen } from "../app/StoreDetailsScreen";
@@ -26,6 +30,8 @@ import { ServiceDeskScreen } from "../app/ServiceDeskScreen";
 import { ServiceInboxScreen } from "../app/ServiceInboxScreen";
 import { SupportScreen } from "../app/SupportScreen";
 import { WalletScreen } from "../app/WalletScreen";
+import { WalletDepositScreen } from "../app/WalletDepositScreen";
+import { WithdrawalScreen } from "../app/WithdrawalScreen";
 import { BackHeader } from "../components/BackHeader";
 import {
   AuthStoreProvider,
@@ -36,6 +42,7 @@ import { AuthNavigator } from "./AuthNavigator";
 import { MainTabs } from "./MainTabs";
 
 const Stack = createNativeStackNavigator();
+export const navigationRef = createNavigationContainerRef();
 
 function backHeaderOptions() {
   return ({ navigation }) => ({
@@ -72,6 +79,8 @@ const linking = {
   config: {
     screens: {
       Register: "cadastro/loja/:storeSlug",
+      ResetPassword: "redefinir-senha",
+      PersonalChatsInbox: "amigos",
     },
   },
   prefixes: ["detudoja://"],
@@ -105,8 +114,28 @@ function Routes() {
         options={{ headerShown: false }}
       />
       <Stack.Screen
+        component={ResetPasswordScreen}
+        name="ResetPassword"
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
         component={ServiceConversationScreen}
         name="ServiceConversation"
+        options={backHeaderOptions()}
+      />
+      <Stack.Screen
+        component={PersonalChatsInboxScreen}
+        name="PersonalChatsInbox"
+        options={backHeaderOptions()}
+      />
+      <Stack.Screen
+        component={PersonalConversationScreen}
+        name="PersonalConversation"
+        options={backHeaderOptions()}
+      />
+      <Stack.Screen
+        component={FriendQrScanScreen}
+        name="FriendQrScan"
         options={backHeaderOptions()}
       />
       <Stack.Screen
@@ -195,6 +224,16 @@ function Routes() {
         options={backHeaderOptions()}
       />
       <Stack.Screen
+        component={WalletDepositScreen}
+        name="WalletDeposit"
+        options={backHeaderOptions()}
+      />
+      <Stack.Screen
+        component={WithdrawalScreen}
+        name="Withdrawal"
+        options={backHeaderOptions()}
+      />
+      <Stack.Screen
         component={SupportScreen}
         name="Suporte"
         options={backHeaderOptions()}
@@ -232,7 +271,7 @@ export function AppNavigator() {
   return (
     <SafeAreaProvider>
       <AuthStoreProvider>
-        <NavigationContainer linking={linking} theme={navigationTheme}>
+        <NavigationContainer linking={linking} ref={navigationRef} theme={navigationTheme}>
           <Routes />
         </NavigationContainer>
       </AuthStoreProvider>

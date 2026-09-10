@@ -27,7 +27,7 @@ export function LoginPage({ onAuthenticated }) {
     <main className="auth-page">
       <section className="auth-intro">
         <Brand />
-        <div className="auth-intro__copy"><p className="eyebrow">Central de operação</p><h1>Decisões claras para uma operação em movimento.</h1><p>Gestão diária da base, da rede e da operação comercial DeTudoJá.</p></div>
+        <div className="auth-intro__copy"><p className="eyebrow">Central de operação</p><h1>Decisões claras para uma operação em movimento.</h1><p>Gestão diária da base, da rede e da operação comercial Brasil Cashback.</p></div>
         <small><ShieldCheck size={15} /> Acesso exclusivo para administradores autorizados</small>
       </section>
       <section className="auth-panel" aria-labelledby="login-title">

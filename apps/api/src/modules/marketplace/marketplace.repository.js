@@ -1,9 +1,20 @@
 import { prisma } from "../../config/prisma.js";
 import { cityAddressWhere, requireUserBaseAddress } from "../../utils/location.js";
-import { getOrderEarningsDistribution } from "../earnings/order-earnings.config.js";
+import {
+  getOrderEarningsDistribution,
+  getPaymentPolicy,
+} from "../earnings/order-earnings.config.js";
+import { availableServiceWhere } from "../service-chats/service-availability.js";
 
 const publicStoreWhere = {
   excluido_em: null,
+  lojista: {
+    is: {
+      status: "ATIVO",
+      status_kyc: "APROVADO",
+      usuario: { is: { excluido_em: null, status: "ATIVO" } },
+    },
+  },
   status: "ATIVA",
   visivel_no_app: true,
 };
@@ -35,11 +46,17 @@ export const marketplaceRepository = {
     return getOrderEarningsDistribution(prisma);
   },
 
+  getPaymentPolicy() {
+    return getPaymentPolicy(prisma);
+  },
+
   findStore(baseAddress, storeId) {
     return prisma.loja.findFirst({
       include: {
         categoria: { include: { segmento_venda: true } },
+        lojista: { select: { usuario_id: true } },
         segmento_venda: true,
+        usuarios: { select: { status: true, usuario_id: true } },
         produtos: {
           orderBy: [{ destaque: "desc" }, { ordem: "asc" }, { criado_em: "desc" }],
           where: { excluido_em: null, status: "ATIVO" },
@@ -78,7 +95,9 @@ export const marketplaceRepository = {
         loja: {
           include: {
             categoria: { include: { segmento_venda: true } },
+            lojista: { select: { usuario_id: true } },
             segmento_venda: true,
+            usuarios: { select: { status: true, usuario_id: true } },
           },
         },
       },
@@ -106,7 +125,9 @@ export const marketplaceRepository = {
           },
         },
         categoria: { include: { segmento_venda: true } },
+        lojista: { select: { usuario_id: true } },
         segmento_venda: true,
+        usuarios: { select: { status: true, usuario_id: true } },
         produtos: {
           orderBy: { preco_centavos: "asc" },
           select: {
@@ -172,12 +193,13 @@ export const marketplaceRepository = {
           status: "ATIVO",
           servicos_vendedor: {
             some: {
-              disponivel_agora: true,
+              ...availableServiceWhere(),
               excluido_em: null,
               status: "ATIVO",
               vendedor: {
                 excluido_em: null,
                 status: { in: publicSellerStatuses },
+                status_kyc: "APROVADO",
                 usuario: {
                   enderecos: {
                     some: cityAddressWhere(baseAddress, { userAddress: true }),

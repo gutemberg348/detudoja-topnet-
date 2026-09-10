@@ -177,6 +177,12 @@ export function CheckoutPaymentScreen({ navigation, route }) {
       </View>
 
       <View style={styles.summary}>
+        {Number(totals.serviceFeeCents ?? order?.serviceFeeCents ?? 0) > 0 ? (
+          <SummaryRow
+            label="Taxa de servico"
+            value={formatarDinheiro(totals.serviceFeeCents ?? order?.serviceFeeCents)}
+          />
+        ) : null}
         <SummaryRow label="Pago com saldo" value={formatarDinheiro(balanceUsedCents)} />
         <SummaryRow label="Complemento Pix" value={formatarDinheiro(pixComplementCents)} />
         <View style={styles.divider} />

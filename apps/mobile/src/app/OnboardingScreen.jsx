@@ -15,7 +15,7 @@ import {
   typography,
 } from "../utils/theme";
 
-export function OnboardingScreen() {
+export function OnboardingScreen({ navigation }) {
   const [mode, setMode] = useState("login");
   const [emailFormVisible, setEmailFormVisible] = useState(false);
 
@@ -28,7 +28,7 @@ export function OnboardingScreen() {
     <ScreenContainer contentContainerStyle={styles.content}>
       <View style={styles.logoArea}>
         <BrandLogo centered size="large" />
-        <Text style={styles.title}>Bem-vindo ao DeTudoJá</Text>
+        <Text style={styles.title}>Bem-vindo ao Brasil Cashback</Text>
       </View>
 
       <View style={styles.formCard}>
@@ -71,7 +71,11 @@ export function OnboardingScreen() {
         </View>
 
         {emailFormVisible ? (
-          <AuthCredentialsForm key={mode} mode={mode} />
+          <AuthCredentialsForm
+            key={mode}
+            mode={mode}
+            onForgotPassword={() => navigation.navigate("ForgotPassword")}
+          />
         ) : null}
       </View>
 
@@ -105,13 +109,8 @@ const styles = StyleSheet.create({
     paddingTop: spacing.xl,
   },
   formCard: {
-    backgroundColor: colors.card,
-    borderColor: colors.border,
-    borderRadius: 24,
-    borderWidth: 1,
     gap: spacing.lg,
-    padding: spacing.lg,
-    ...shadow,
+    paddingHorizontal: spacing.xs,
   },
   logoArea: {
     alignItems: "center",

@@ -7,7 +7,9 @@ export const activeCourierConversationStatuses = [
 export async function getBusyCourierSellerIds(database, sellerIds = []) {
   const repository = database?.findServiceConversations
     ? database
-    : createCourierRepository(database);
+    : database?.findConversations
+      ? { findServiceConversations: database.findConversations }
+      : createCourierRepository(database);
   const uniqueSellerIds = [...new Set(sellerIds.filter(Boolean))];
   if (!uniqueSellerIds.length) return new Set();
 
@@ -33,7 +35,9 @@ export async function getBusyCourierSellerIds(database, sellerIds = []) {
 export async function isCourierSellerBusy(database, sellerId) {
   const repository = database?.findServiceConversation
     ? database
-    : createCourierRepository(database);
+    : database?.findConversation
+      ? { findServiceConversation: database.findConversation }
+      : createCourierRepository(database);
   if (!sellerId) return false;
 
   const conversation = await repository.findServiceConversation({

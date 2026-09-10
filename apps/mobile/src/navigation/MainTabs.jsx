@@ -1,20 +1,21 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useFocusEffect } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform, StyleSheet, Vibration, View } from "react-native";
 import { HomeScreen } from "../app/HomeScreen";
 import { NetworkScreen } from "../app/NetworkScreen";
 import { ProfileScreen } from "../app/ProfileScreen";
 import { SellScreen } from "../app/SellScreen";
 import { StoresScreen } from "../app/StoresScreen";
+import { IncomingServiceAlert } from "../components/IncomingServiceAlert";
 import { countNewStoreOrders } from "../app/sell/seller.utils";
 import { useRealtimeOrders } from "../hooks/useRealtimeOrders";
 import { getCustomerOrders } from "../services/orders.api";
-import { getCourierRequests } from "../services/courier.api";
+import { acceptCourierRequest, getCourierRequests } from "../services/courier.api";
 import { getSellerProfile } from "../services/seller.api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
-import { getServiceConversations } from "../services/service-chats.api";
+import { acceptServiceConversation, getServiceConversations } from "../services/service-chats.api";
 import {
   getStoreConversations,
   subscribeStoreConversationRead,
@@ -68,8 +69,13 @@ function countSellerStoreNotifications(stores = []) {
   );
 }
 
-export function MainTabs() {
+export function MainTabs({ navigation }) {
   const { session } = useAuthStore();
+  const alertTimerRef = useRef(null);
+  const serviceNotificationRequestRef = useRef(null);
+  const serviceRefreshTimerRef = useRef(null);
+  const [incomingServiceAlert, setIncomingServiceAlert] = useState(null);
+  const [incomingAlertLoading, setIncomingAlertLoading] = useState(false);
   const [activeOrderCount, setActiveOrderCount] = useState(0);
   const [unreadCustomerMessageCount, setUnreadCustomerMessageCount] = useState(0);
   const [sellerNewOrderCount, setSellerNewOrderCount] = useState(0);
@@ -102,6 +108,26 @@ export function MainTabs() {
   const hasSellerConversationNotification =
     sellerServiceNotificationCount > 0
     || sellerStoreChatNotificationCount > 0;
+
+  const showIncomingServiceAlert = useCallback((alert) => {
+    if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
+    setIncomingServiceAlert(alert);
+    alertTimerRef.current = setTimeout(() => {
+      setIncomingServiceAlert(null);
+      alertTimerRef.current = null;
+    }, 12000);
+  }, []);
+
+  const closeIncomingServiceAlert = useCallback(() => {
+    if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
+    alertTimerRef.current = null;
+    setIncomingServiceAlert(null);
+  }, []);
+
+  useEffect(() => () => {
+    if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
+    if (serviceRefreshTimerRef.current) clearTimeout(serviceRefreshTimerRef.current);
+  }, []);
 
   const loadActiveOrders = useCallback(async () => {
     if (!session?.accessToken) {
@@ -148,36 +174,59 @@ export function MainTabs() {
       return;
     }
 
-    try {
-      const [response, courierResponse] = await Promise.all([
-        getServiceConversations(session.accessToken),
-        getCourierRequests(session.accessToken),
-      ]);
-      const conversations = response.conversations ?? [];
-      const pendingCourierRequests = (courierResponse.requests ?? []).filter((request) => (
-        request.status === "PENDENTE"
-        && new Date(request.expiresAt).getTime() > Date.now()
-      ));
+    if (serviceNotificationRequestRef.current) {
+      return serviceNotificationRequestRef.current;
+    }
 
-      setSellerServiceNotificationCount(
-        conversations.filter(
-          (conversation) =>
-            conversation.isSeller
-            && activeServiceConversationStatuses.has(conversation.status)
-            && (conversation.isNewForSeller || Number(conversation.unreadCount ?? 0) > 0),
-        ).length + pendingCourierRequests.length,
-      );
-      setCustomerServiceNotificationCount(
-        conversations.filter(
-          (conversation) =>
-            !conversation.isSeller && Number(conversation.unreadCount ?? 0) > 0,
-        ).length,
-      );
-    } catch {
-      setSellerServiceNotificationCount(0);
-      setCustomerServiceNotificationCount(0);
+    const request = (async () => {
+      try {
+        const [response, courierResponse] = await Promise.all([
+          getServiceConversations(session.accessToken),
+          getCourierRequests(session.accessToken),
+        ]);
+        const conversations = response.conversations ?? [];
+        const pendingCourierRequests = (courierResponse.requests ?? []).filter((requestItem) => (
+          requestItem.status === "PENDENTE"
+          && new Date(requestItem.expiresAt).getTime() > Date.now()
+        ));
+
+        setSellerServiceNotificationCount(
+          conversations.filter(
+            (conversation) =>
+              conversation.isSeller
+              && activeServiceConversationStatuses.has(conversation.status)
+              && (conversation.isNewForSeller || Number(conversation.unreadCount ?? 0) > 0),
+          ).length + pendingCourierRequests.length,
+        );
+        setCustomerServiceNotificationCount(
+          conversations.filter(
+            (conversation) =>
+              !conversation.isSeller && Number(conversation.unreadCount ?? 0) > 0,
+          ).length,
+        );
+      } catch {
+        setSellerServiceNotificationCount(0);
+        setCustomerServiceNotificationCount(0);
+      }
+    })();
+    serviceNotificationRequestRef.current = request;
+
+    try {
+      return await request;
+    } finally {
+      if (serviceNotificationRequestRef.current === request) {
+        serviceNotificationRequestRef.current = null;
+      }
     }
   }, [session?.accessToken]);
+
+  const scheduleServiceNotificationLoad = useCallback(() => {
+    if (serviceRefreshTimerRef.current) clearTimeout(serviceRefreshTimerRef.current);
+    serviceRefreshTimerRef.current = setTimeout(() => {
+      serviceRefreshTimerRef.current = null;
+      loadServiceNotifications();
+    }, 250);
+  }, [loadServiceNotifications]);
 
   const loadStoreChatNotifications = useCallback(async () => {
     if (!session?.accessToken) {
@@ -242,26 +291,80 @@ export function MainTabs() {
   useEffect(() => {
     if (!session?.accessToken) return undefined;
     const socket = getRealtimeSocket(session.accessToken);
-    const refreshServices = () => loadServiceNotifications();
-    const notifyCourierRequest = () => {
+    const refreshServices = () => scheduleServiceNotificationLoad();
+    const notifyCourierRequest = ({ request } = {}) => {
       if (Platform.OS !== "web") Vibration.vibrate([0, 180, 100, 240]);
-      loadServiceNotifications();
+      if (request?.status === "PENDENTE") {
+        showIncomingServiceAlert({
+          id: request.id,
+          kind: "courier",
+          subtitle: request.type === "EQUIPE"
+            ? "Chamada direta de uma loja da sua equipe. Aceite para abrir o chat."
+            : "Uma entrega da sua cidade esta aguardando o primeiro aceite.",
+          title: request.store?.name ?? "Cliente solicitando entrega",
+        });
+      }
+      scheduleServiceNotificationLoad();
+    };
+    const notifyServiceChat = ({ conversation } = {}) => {
+      const isSellerTarget = Number(conversation?.seller?.userId) === Number(session.user?.id);
+      if (isSellerTarget && conversation?.status === "ABERTA") {
+        if (Platform.OS !== "web") Vibration.vibrate([0, 140, 80, 180]);
+        showIncomingServiceAlert({
+          id: conversation.id,
+          kind: "service",
+          subtitle: "Confira os detalhes e aceite para liberar a negociacao no chat.",
+          title: conversation.serviceType?.name ?? conversation.segment?.name ?? "Novo servico",
+        });
+      }
+      scheduleServiceNotificationLoad();
     };
 
-    socket?.on(realtimeEvents.serviceChatCreated, refreshServices);
+    socket?.on(realtimeEvents.serviceChatCreated, notifyServiceChat);
     socket?.on(realtimeEvents.serviceChatMessageCreated, refreshServices);
     socket?.on(realtimeEvents.serviceChatUpdated, refreshServices);
     socket?.on(realtimeEvents.courierRequestCreated, notifyCourierRequest);
     socket?.on(realtimeEvents.courierRequestUpdated, refreshServices);
 
     return () => {
-      socket?.off(realtimeEvents.serviceChatCreated, refreshServices);
+      socket?.off(realtimeEvents.serviceChatCreated, notifyServiceChat);
       socket?.off(realtimeEvents.serviceChatMessageCreated, refreshServices);
       socket?.off(realtimeEvents.serviceChatUpdated, refreshServices);
       socket?.off(realtimeEvents.courierRequestCreated, notifyCourierRequest);
       socket?.off(realtimeEvents.courierRequestUpdated, refreshServices);
     };
-  }, [loadServiceNotifications, session?.accessToken]);
+  }, [scheduleServiceNotificationLoad, session?.accessToken, session?.user?.id, showIncomingServiceAlert]);
+
+  const acceptIncomingAlert = useCallback(async () => {
+    if (!incomingServiceAlert || !session?.accessToken || incomingAlertLoading) return;
+    setIncomingAlertLoading(true);
+
+    try {
+      const response = incomingServiceAlert.kind === "courier"
+        ? await acceptCourierRequest(session.accessToken, incomingServiceAlert.id)
+        : await acceptServiceConversation(session.accessToken, incomingServiceAlert.id);
+      closeIncomingServiceAlert();
+      if (response?.conversation) {
+        navigation.navigate("ServiceConversation", { conversation: response.conversation });
+      } else {
+        navigation.navigate("ServiceDesk");
+      }
+      scheduleServiceNotificationLoad();
+    } catch {
+      closeIncomingServiceAlert();
+      navigation.navigate("ServiceDesk");
+      scheduleServiceNotificationLoad();
+    } finally {
+      setIncomingAlertLoading(false);
+    }
+  }, [
+    closeIncomingServiceAlert,
+    incomingAlertLoading,
+    incomingServiceAlert,
+    navigation,
+    scheduleServiceNotificationLoad,
+    session?.accessToken,
+  ]);
 
   useEffect(() => {
     if (!session?.accessToken) return undefined;
@@ -285,7 +388,8 @@ export function MainTabs() {
   );
 
   return (
-    <Tab.Navigator
+    <View style={styles.root}>
+      <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarBadge:
@@ -364,7 +468,18 @@ export function MainTabs() {
       <Tab.Screen component={SellScreen} name="Vender" />
       <Tab.Screen component={NetworkScreen} name="Rede" />
       <Tab.Screen component={ProfileScreen} name="Perfil" />
-    </Tab.Navigator>
+      </Tab.Navigator>
+      <IncomingServiceAlert
+        alert={incomingServiceAlert}
+        loading={incomingAlertLoading}
+        onAccept={acceptIncomingAlert}
+        onClose={closeIncomingServiceAlert}
+        onPress={() => {
+          closeIncomingServiceAlert();
+          navigation.navigate("ServiceDesk");
+        }}
+      />
+    </View>
   );
 }
 
@@ -382,5 +497,8 @@ const styles = StyleSheet.create({
     height: 30,
     justifyContent: "center",
     width: 44,
+  },
+  root: {
+    flex: 1,
   },
 });

@@ -1,6 +1,6 @@
-# DeTudoJa
+# Brasil Cashback
 
-Monorepo inicial do projeto DeTudoJa.
+Monorepo do projeto Brasil Cashback.
 
 ## Scripts
 
@@ -27,8 +27,15 @@ O usuário temporário da autenticação fica em `apps/api/.env`.
 
 ## Documentacao
 
+- [Indice e regra de atualizacao](docs/README.md)
 - [Base do projeto](docs/base.md)
 - [Sistema, arquitetura e estado atual](docs/sistema.md)
+- [Apresentacao da empresa](docs/apresentacao-empresa.md)
+- [Docker, Redis e painel](docs/docker-redis.md)
+- [Backups internos](docs/backups.md)
+- [Monitoramento e CI](docs/monitoramento-ci.md)
+- [Prontidao para producao](docs/prontidao-producao.md)
+- [Melhorias para alta escala](docs/melhorias-alta-escala.md)
 
 ## Estrutura
 

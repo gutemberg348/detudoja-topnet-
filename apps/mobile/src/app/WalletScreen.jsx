@@ -92,6 +92,20 @@ export function WalletScreen({ navigation }) {
 
       <View style={styles.actions}>
         <Pressable
+          onPress={() => navigation.navigate("WalletDeposit")}
+          style={({ pressed }) => [styles.depositAction, pressed && styles.pressed]}
+        >
+          <View style={styles.depositIcon}>
+            <Ionicons color={colors.card} name="add-outline" size={25} />
+          </View>
+          <View style={styles.actionCopy}>
+            <Text style={styles.depositTitle}>Adicionar saldo Pix</Text>
+            <Text style={styles.depositText}>Gere um Pix para usar saldo nas compras do app.</Text>
+          </View>
+          <Ionicons color={colors.card} name="arrow-forward" size={21} />
+        </Pressable>
+
+        <Pressable
           onPress={() => navigation.navigate("ChargeScan")}
           style={({ pressed }) => [styles.payAction, pressed && styles.pressed]}
         >
@@ -100,9 +114,23 @@ export function WalletScreen({ navigation }) {
           </View>
           <View style={styles.actionCopy}>
             <Text style={styles.payTitle}>Pagar via QR</Text>
-            <Text style={styles.payText}>Leia uma cobranca DeTudoJa e confirme o valor.</Text>
+            <Text style={styles.payText}>Leia uma cobranca Brasil Cashback e confirme o valor.</Text>
           </View>
           <Ionicons color={colors.card} name="arrow-forward" size={21} />
+        </Pressable>
+
+        <Pressable
+          onPress={() => navigation.navigate("Withdrawal")}
+          style={({ pressed }) => [styles.withdrawAction, pressed && styles.pressed]}
+        >
+          <View style={styles.withdrawIcon}>
+            <Ionicons color={colors.primaryDark} name="arrow-up-outline" size={22} />
+          </View>
+          <View style={styles.actionCopy}>
+            <Text style={styles.withdrawTitle}>Sacar saldo</Text>
+            <Text style={styles.withdrawText}>Envie saldos permitidos para sua chave Pix.</Text>
+          </View>
+          <Ionicons color={colors.primaryDark} name="chevron-forward" size={20} />
         </Pressable>
 
         <View style={styles.securityLine}>
@@ -148,6 +176,7 @@ export function WalletScreen({ navigation }) {
           {wallet.movements.length > 0 ? (
             wallet.movements.map((item) => {
               const isPayment = item.tipo === "DEBITO" && item.origem === "PAGAMENTO";
+              const isWalletDeposit = item.tipo === "CREDITO" && item.origem === "DEPOSITO_PIX";
               const isQrPayment = isPayment && Boolean(item.payment?.charge);
               const isOrderPayment = isPayment && Boolean(item.payment?.orderCode);
               const recipient = item.payment?.recipient?.name;
@@ -168,6 +197,8 @@ export function WalletScreen({ navigation }) {
                         ? "Pagamento de pedido"
                         : isPayment
                           ? "Pagamento"
+                        : isWalletDeposit
+                          ? "Deposito via Pix"
                       : `${movementLabels[item.tipo] ?? item.tipo} - ${item.walletName}`,
                     summary: isPayment && recipient ? `Para ${recipient}` : item.descricao,
                   }}
@@ -342,6 +373,10 @@ const styles = StyleSheet.create({
   balanceValue: { color: colors.card, fontFamily: fonts.extraBold, fontSize: 32, fontWeight: "800", marginTop: spacing.sm },
   centered: { alignItems: "center", backgroundColor: colors.background, flex: 1, gap: spacing.lg, justifyContent: "center", padding: spacing.xl },
   content: { gap: spacing.xl, paddingBottom: spacing.xxxl },
+  depositAction: { alignItems: "center", backgroundColor: colors.success, borderRadius: radius.lg, flexDirection: "row", gap: spacing.md, minHeight: 76, padding: spacing.lg },
+  depositIcon: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.16)", borderRadius: radius.round, height: 46, justifyContent: "center", width: 46 },
+  depositText: { color: "#D9FBE6", fontFamily: fonts.regular, fontSize: typography.caption, lineHeight: 17 },
+  depositTitle: { color: colors.card, fontFamily: fonts.extraBold, fontSize: typography.h3, fontWeight: "800" },
   emptyCopy: { flex: 1, gap: 3, minWidth: 0 },
   emptyIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 44, justifyContent: "center", width: 44 },
   emptyState: { alignItems: "center", flexDirection: "row", gap: spacing.md, padding: spacing.lg },
@@ -394,4 +429,8 @@ const styles = StyleSheet.create({
   walletStatusPill: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.74)", borderRadius: radius.round, flexDirection: "row", gap: 5, paddingHorizontal: spacing.sm, paddingVertical: 5 },
   walletStatusPillText: { fontFamily: fonts.bold, fontSize: 9, fontWeight: "700" },
   walletValue: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: 26, fontWeight: "800", minHeight: 31 },
+  withdrawAction: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.md, minHeight: 72, padding: spacing.lg },
+  withdrawIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 44, justifyContent: "center", width: 44 },
+  withdrawText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption, lineHeight: 17 },
+  withdrawTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.label, fontWeight: "800" },
 });

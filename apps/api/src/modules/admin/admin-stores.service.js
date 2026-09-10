@@ -95,9 +95,10 @@ async function ensureUniqueOwnerContact({ email, phone, userId }) {
 export async function listAdminStores(query = {}) {
   const { page, perPage } = getPagination(query);
   const where = buildStoreWhere(query);
-  const [stores, total] = await Promise.all([
+  const [stores, total, paymentPolicy] = await Promise.all([
     adminStoresRepository.list({ page, perPage, where }),
     adminStoresRepository.count(where),
+    adminStoresRepository.getPaymentPolicy(),
   ]);
 
   return {
@@ -107,7 +108,9 @@ export async function listAdminStores(query = {}) {
       perPage,
       total,
     },
-    stores: stores.map(serializeAdminStore),
+    stores: stores.map((store) => serializeAdminStore(store, {
+      globalPaymentPolicy: paymentPolicy,
+    })),
   };
 }
 
@@ -119,7 +122,11 @@ export async function getAdminStore(storeId) {
     throw new AppError("Loja nao encontrada", 404);
   }
 
-  return { store: serializeAdminStore(store) };
+  const paymentPolicy = await adminStoresRepository.getPaymentPolicy();
+
+  return {
+    store: serializeAdminStore(store, { globalPaymentPolicy: paymentPolicy }),
+  };
 }
 
 export async function updateAdminStore(adminId, storeId, data) {
@@ -203,6 +210,30 @@ export async function updateAdminStore(adminId, storeId, data) {
         ...(data.status ? { status: data.status } : {}),
         ...(data.visibleInApp !== undefined ? { visivel_no_app: data.visibleInApp } : {}),
         ...(data.whatsapp !== undefined ? { whatsapp: onlyDigits(data.whatsapp) || null } : {}),
+        ...(data.localPriorityCashbackLimitCents !== undefined
+          ? {
+              limite_cashback_prioritario_centavos:
+                data.localPriorityCashbackLimitCents == null
+                  ? null
+                  : BigInt(data.localPriorityCashbackLimitCents),
+            }
+          : {}),
+        ...(data.localProcessingFeeCents !== undefined
+          ? {
+              taxa_processamento_local_centavos:
+                data.localProcessingFeeCents == null
+                  ? null
+                  : BigInt(data.localProcessingFeeCents),
+            }
+          : {}),
+        ...(data.onlineServiceFeeCents !== undefined
+          ? {
+              taxa_servico_online_centavos:
+                data.onlineServiceFeeCents == null
+                  ? null
+                  : BigInt(data.onlineServiceFeeCents),
+            }
+          : {}),
         ...(data.customFeePercent !== undefined
           ? {
               taxa_plataforma_alterada_em:
@@ -215,7 +246,11 @@ export async function updateAdminStore(adminId, storeId, data) {
     });
   });
 
-  return { store: serializeAdminStore(result) };
+  const paymentPolicy = await adminStoresRepository.getPaymentPolicy();
+
+  return {
+    store: serializeAdminStore(result, { globalPaymentPolicy: paymentPolicy }),
+  };
 }
 
 export async function deleteAdminStore(storeId) {

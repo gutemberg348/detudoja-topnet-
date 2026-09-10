@@ -268,7 +268,10 @@ export async function openStoreConversation(userId, storeIdValue) {
     store.lojista.usuario_id === userId
     || store.usuarios.some((member) => member.usuario_id === userId)
   ) {
-    throw new AppError("Use o painel da loja para responder clientes", 409);
+    throw new AppError(
+      "Esta loja esta vinculada a sua conta. Use a Central de Vendas para atender os clientes.",
+      409,
+    );
   }
 
   const existing = await storeChatsRepository.findConversationByPair(userId, storeId);

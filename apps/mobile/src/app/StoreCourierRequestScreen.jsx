@@ -42,6 +42,13 @@ export function StoreCourierRequestScreen({ navigation, route }) {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
+    const current = dispatch.currentRequest;
+    if (!session?.accessToken || current?.status !== "ACEITA" || !current.conversationId) return;
+    getServiceConversation(session.accessToken, current.conversationId)
+      .then((response) => navigation.replace("ServiceConversation", { conversation: response.conversation }))
+      .catch(() => setError("A corrida foi aceita, mas nao foi possivel abrir o chat agora."));
+  }, [dispatch.currentRequest, navigation, session?.accessToken]);
+  useEffect(() => {
     if (!session?.accessToken) return undefined;
     const socket = getRealtimeSocket(session.accessToken);
     const handleUpdate = async ({ request } = {}) => {

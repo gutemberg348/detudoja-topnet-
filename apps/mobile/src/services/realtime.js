@@ -9,6 +9,9 @@ export const realtimeEvents = {
   orderCreated: "order.created",
   orderMessageCreated: "order.message.created",
   orderStatusUpdated: "order.status.updated",
+  personalChatCreated: "personal-chat.created",
+  personalChatMessageCreated: "personal-chat.message.created",
+  personalChatUpdated: "personal-chat.updated",
   serviceAvailabilityUpdated: "service.availability.updated",
   serviceChatCreated: "service-chat.created",
   serviceChatMessageCreated: "service-chat.message.created",
@@ -49,6 +52,8 @@ export function getRealtimeSocket(accessToken) {
     reconnectionDelay: 700,
     reconnectionDelayMax: 5000,
     timeout: 7000,
+    // O app usa conexao persistente. Impede o fallback inicial para long-polling.
+    transports: ["websocket"],
   });
 
   return socket;

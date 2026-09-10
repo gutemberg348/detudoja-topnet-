@@ -1,27 +1,35 @@
 import {
   AlertTriangle,
+  ArrowLeftRight,
+  Database,
   GitBranch,
+  LockKeyhole,
   RefreshCw,
   Search,
   ShieldCheck,
   UserRound,
   UsersRound,
+  X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageError, PageLoading } from "../components/PageState";
 import { StatusBadge } from "../components/StatusBadge";
-import { getAdminNetwork } from "../services/admin.api";
+import { getAdminNetwork, moveAdminNetworkPlacement } from "../services/admin.api";
 
 const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
   dateStyle: "short",
   timeStyle: "short",
 });
 
-export function NetworkPage({ accessToken }) {
+export function NetworkPage({ accessToken, canManageNetwork = false }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [maxDepth, setMaxDepth] = useState(20);
   const [search, setSearch] = useState("");
+  const [moveTarget, setMoveTarget] = useState(null);
+  const [moveForm, setMoveForm] = useState({ parentUserId: "", position: "1", reason: "" });
+  const [moving, setMoving] = useState(false);
+  const [moveError, setMoveError] = useState("");
 
   const loadNetwork = useCallback(async () => {
     setError("");
@@ -72,6 +80,42 @@ export function NetworkPage({ accessToken }) {
         .some((value) => normalize(value).includes(term)),
     );
   }, [data, search]);
+
+  const destinationPeople = useMemo(() => {
+    if (!data?.root || !moveTarget) return [];
+    const blocked = collectDescendantIds(moveTarget.id, data.people);
+    return [data.root, ...data.people].filter((person) => !blocked.has(person.id));
+  }, [data, moveTarget]);
+
+  function openMove(person) {
+    setMoveError("");
+    setMoveTarget(person);
+    setMoveForm({
+      parentUserId: person.parentId ? String(person.parentId) : "",
+      position: String(person.position || 1),
+      reason: "",
+    });
+  }
+
+  async function submitMove(event) {
+    event.preventDefault();
+    if (!moveTarget) return;
+    setMoving(true);
+    setMoveError("");
+    try {
+      const response = await moveAdminNetworkPlacement(accessToken, moveTarget.id, {
+        parentUserId: Number(moveForm.parentUserId),
+        position: Number(moveForm.position),
+        reason: moveForm.reason,
+      });
+      setData(response);
+      setMoveTarget(null);
+    } catch (requestError) {
+      setMoveError(requestError.message || "Nao foi possivel reposicionar o participante.");
+    } finally {
+      setMoving(false);
+    }
+  }
 
   if (!data && !error) {
     return <PageLoading label="Carregando rede" />;
@@ -194,7 +238,7 @@ export function NetworkPage({ accessToken }) {
         {tree ? (
           <div className="network-tree-scroll">
             <div className="network-tree">
-              <TreeNode node={tree} root />
+              <TreeNode canMove={canManageNetwork} node={tree} onMove={openMove} root />
             </div>
           </div>
         ) : (
@@ -203,6 +247,19 @@ export function NetworkPage({ accessToken }) {
             <p>Raiz da empresa ainda nao existe. Rode o seed ou cadastre alguem sem codigo.</p>
           </div>
         )}
+      </section>
+
+      <section className="network-rules" aria-label="Como a rede funciona">
+        <div className="section-heading">
+          <div><h2>Como a matriz funciona no banco</h2><p>Duas ligacoes independentes evitam confundir indicacao com derramamento.</p></div>
+          <Database size={20} />
+        </div>
+        <div className="network-rules__grid">
+          <article><span>1</span><strong>Patrocinador direto</strong><p><code>indicador_usuario_id</code> nunca muda ao reposicionar. Ele define a indicacao e o bonus direto.</p></article>
+          <article><span>2</span><strong>Pai da matriz</strong><p><code>alocado_sob_usuario_id</code> liga a pessoa ao pai real; <code>posicao_matriz</code> guarda esquerda ou direita.</p></article>
+          <article><span>3</span><strong>Derramamento 2x20</strong><p>Cada pai possui duas vagas. A arvore percorre as ligacoes reais por ate 20 niveis.</p></article>
+          <article><span>4</span><strong>Ganhos futuros</strong><p>Mover preserva patrocinador e subarvore. Somente os ancestrais da rede futura mudam; valores pagos nao sao reescritos.</p></article>
+        </div>
       </section>
 
       <section className="data-section data-section--flush">
@@ -222,6 +279,7 @@ export function NetworkPage({ accessToken }) {
                 <th>Status</th>
                 <th>KYC</th>
                 <th>Entrada</th>
+                {canManageNetwork ? <th></th> : null}
               </tr>
             </thead>
             <tbody>
@@ -253,6 +311,7 @@ export function NetworkPage({ accessToken }) {
                   <td><StatusBadge status={person.status} /></td>
                   <td><StatusBadge status={person.kycStatus} /></td>
                   <td>{dateFormatter.format(new Date(person.createdAt))}</td>
+                  {canManageNetwork ? <td><button className="button button--secondary" onClick={() => openMove(person)} type="button"><ArrowLeftRight size={15} /> Mover</button></td> : null}
                 </tr>
               ))}
             </tbody>
@@ -268,6 +327,36 @@ export function NetworkPage({ accessToken }) {
           </div>
         ) : null}
       </section>
+
+      {moveTarget ? (
+        <div className="modal-backdrop" onMouseDown={() => !moving && setMoveTarget(null)}>
+          <section className="modal network-move-modal" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="modal__header">
+              <div><p className="eyebrow">Posicao matricial</p><h2>Mover {moveTarget.name}</h2></div>
+              <button className="icon-button" disabled={moving} onClick={() => setMoveTarget(null)} title="Fechar" type="button"><X size={18} /></button>
+            </div>
+            <div className="network-move-warning"><LockKeyhole size={19} /><p>O patrocinador direto permanece <strong>{moveTarget.directSponsorName || "inalterado"}</strong>. A subarvore acompanha a pessoa movida.</p></div>
+            {moveError ? <div className="inline-error" role="alert">{moveError}</div> : null}
+            <form className="category-form" onSubmit={submitMove}>
+              <label>Novo pai na matriz
+                <select required onChange={(event) => setMoveForm((current) => ({ ...current, parentUserId: event.target.value }))} value={moveForm.parentUserId}>
+                  <option value="">Selecione o destino</option>
+                  {destinationPeople.map((person) => <option key={person.id} value={person.id}>{person.name} - ID {person.id}{person.level === 0 ? " (raiz)" : ` - nivel ${person.level}`}</option>)}
+                </select>
+              </label>
+              <label>Lado
+                <select onChange={(event) => setMoveForm((current) => ({ ...current, position: event.target.value }))} value={moveForm.position}>
+                  <option value="1">Esquerda - posicao 1</option><option value="2">Direita - posicao 2</option>
+                </select>
+              </label>
+              <label>Motivo da alteracao
+                <textarea minLength={8} onChange={(event) => setMoveForm((current) => ({ ...current, reason: event.target.value }))} placeholder="Ex.: correcao de alocacao autorizada" required rows={3} value={moveForm.reason} />
+              </label>
+              <div className="modal__actions"><button className="button button--secondary" disabled={moving} onClick={() => setMoveTarget(null)} type="button">Cancelar</button><button className="button button--primary" disabled={moving} type="submit"><ArrowLeftRight size={16} /> Confirmar mudanca</button></div>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -291,12 +380,12 @@ function DiagnosticCard({ count, items, title }) {
   );
 }
 
-function TreeNode({ node, root = false }) {
+function TreeNode({ canMove, node, onMove, root = false }) {
   const hasChildren = node.children.length > 0;
 
   return (
     <div className="network-node-wrap">
-      <div className={`network-node ${root ? "network-node--root" : ""}`}>
+      <button className={`network-node ${root ? "network-node--root" : ""}`} disabled={root || !canMove} onClick={() => onMove(node.person)} title={root ? "Raiz da empresa" : canMove ? "Reposicionar participante" : "Participante da matriz"} type="button">
         <span>{initials(node.person.name)}</span>
         <strong>{node.person.name}</strong>
         <small>{root ? "Raiz" : `N${node.person.level} ${node.person.parentSide || ""}`}</small>
@@ -311,7 +400,7 @@ function TreeNode({ node, root = false }) {
             {formatConnection(node.person.parentConnectionType)}
           </em>
         ) : null}
-      </div>
+      </button>
       {hasChildren ? (
         <div
           className={`network-node-children ${
@@ -319,7 +408,7 @@ function TreeNode({ node, root = false }) {
           }`}
         >
           {node.children.map((child) => (
-            <TreeNode key={child.person.id} node={child} />
+            <TreeNode canMove={canMove} key={child.person.id} node={child} onMove={onMove} />
           ))}
         </div>
       ) : null}
@@ -396,4 +485,24 @@ function normalize(value = "") {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
+}
+
+function collectDescendantIds(userId, people) {
+  const childrenByParent = new Map();
+  people.forEach((person) => {
+    const children = childrenByParent.get(person.parentId) ?? [];
+    children.push(person.id);
+    childrenByParent.set(person.parentId, children);
+  });
+  const blocked = new Set([userId]);
+  const queue = [userId];
+  while (queue.length) {
+    const parentId = queue.shift();
+    for (const childId of childrenByParent.get(parentId) ?? []) {
+      if (blocked.has(childId)) continue;
+      blocked.add(childId);
+      queue.push(childId);
+    }
+  }
+  return blocked;
 }

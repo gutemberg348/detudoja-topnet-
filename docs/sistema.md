@@ -1,5 +1,109 @@
 # Sistema DeTudoJa
 
+## Atualizacao 2026-09-04: controle operacional de participantes no admin
+
+O detalhe de cada participante no painel administrativo passou a concentrar
+cadastro, carteiras e perfil comercial. Os comandos sao separados por papel:
+
+- `SUPER_ADMIN` e `FINANCEIRO` podem creditar ou debitar `Saldo Pix`,
+  `Cashback`, `Rede` e `Vendas`. Valor positivo, operacao explicita e motivo
+  de no minimo oito caracteres sao obrigatorios. O debito usa condicao no
+  saldo disponivel e nunca cria saldo negativo; ambos os movimentos ficam no
+  extrato com origem `AJUSTE_ADMIN` e identificador do administrador.
+- `SUPER_ADMIN`, `ADMIN` e `OPERACOES` podem pausar, bloquear ou reativar
+  prestador, motoboy e cada servico do participante. Bloquear ou pausar a conta
+  remove disponibilidade e chamadas de plataforma imediatamente.
+- Liberar um servico exige conta ativa, CPF e KYC `APROVADO`. Servico de
+  entrega local exige tambem perfil de motoboy ativo. A liberacao nao coloca o
+  profissional online: ele ainda precisa enviar heartbeat pelo app.
+- KYC continua decidido exclusivamente na fila `Compliance / KYC`, com os
+  documentos, justificativa e administrador responsavel. A decisao sincroniza
+  o status KYC de lojista e vendedor; ela nao pode ser substituida por um
+  simples botao operacional.
+
+A tabela `auditorias_administrativas` registra alteracoes de conta, prestador,
+motoboy e servicos com administrador, participante, acao, dados e data. A
+migration `20260904190000_auditoria_operacao_comercial` foi aplicada no banco
+local.
+
+## Atualizacao 2026-09-04: prazos, disputa e KYC de servicos
+
+Servico pago nao permanece mais sem prazo operacional. O worker
+`service-timeout` inicia com a API e roda a cada minuto, sempre com transicoes
+condicionais para que duas execucoes nao processem o mesmo atendimento.
+
+- Atendimento pago em `ACORDADA` que nao for marcado como realizado ate
+  `SERVICE_UNATTENDED_TIMEOUT_MINUTES` (padrao: 1.440 minutos / 24 horas) e
+  cancelado. Pagamento por carteira volta para as carteiras de origem; Pix
+  Asaas recebe pedido de estorno e continua acompanhado pelo fluxo do gateway.
+- Quando o prestador marca como realizado, a conversa vai para
+  `AGUARDANDO_CONFIRMACAO`. O cliente pode contestar por
+  `POST /api/app/service-chats/:conversationId/dispute`. Sem confirmacao ate
+  `SERVICE_CONFIRMATION_TIMEOUT_MINUTES` (padrao: 2.880 minutos / 48 horas),
+  o worker move o atendimento para `EM_DISPUTA`: o dinheiro fica em custodia e
+  o suporte decide, sem credito automatico ao prestador.
+- O prestador e revalidado como vendedor `ATIVO`, nao excluido e com KYC
+  `APROVADO` ao aceitar chamado, enviar proposta, marcar execucao, enviar
+  mensagem ou compartilhar localizacao. Perder KYC ou ser desativado bloqueia
+  essas acoes mesmo em conversas abertas antes da alteracao.
+- A edicao parcial de produto agora calcula o estado final antes de salvar.
+  Ela nao permite desligar entrega e retirada simultaneamente, deixar promocao
+  igual/maior que o preco normal, nem ativar estoque controlado sem quantidade.
+
+A migration `20260904180000_prazos_disputa_servicos` adiciona
+`EM_DISPUTA` ao enum de conversa de servico e foi aplicada no banco local.
+
+## Atualizacao 2026-09-04: reconciliacao de Pix Asaas
+
+Uma falha de rede depois de enviar uma criacao ao Asaas nao cancela mais um
+pedido ou deposito automaticamente. `Pagamento` passa para
+`EM_RECONCILIACAO` e conserva a referencia deterministica
+`DTJ:PAYMENT:<pagamentoId>`. O worker `asaas-payment-reconciliation`, iniciado
+com a API e repetido a cada 15 segundos, pesquisa `GET /payments` por essa
+referencia, grava o ID remoto encontrado e processa o estado como webhook.
+
+- O proprio webhook tambem reconhece `payment.externalReference`; portanto ele
+  consegue vincular e liquidar a cobranca mesmo se chegar antes do worker.
+- O botao de atualizar pedido ou deposito participa da mesma reconciliacao e
+  so consulta o estado remoto enquanto ele estiver pendente.
+- Sem cobranca localizada, o sistema espera
+  `ASAAS_RECONCILIATION_GRACE_SECONDS` (padrao de 300 segundos; minimo 60,
+  maximo 1.800) antes de marcar falha e cancelar/liberar a reserva local.
+- `RepassePix` em `EM_RECONCILIACAO` sem
+  `gateway_transferencia_id` consulta a lista de transferencias Asaas pelo
+  seu `referencia_externa`. O webhook `TRANSFER_*` tambem faz essa busca; ao
+  encontrar, grava o ID e confirma ou devolve a reserva uma unica vez.
+
+## Atualizacao 2026-09-03: deposito na carteira Saldo Pix
+
+`Saldo Pix` agora pode receber recarga real por QR/copia-e-cola Asaas. O fluxo
+nao reutiliza cobranca comercial: `depositos_carteira` liga uma carteira, um
+pagamento Asaas e uma chave de idempotencia por usuario.
+
+- `POST /api/app/wallets/deposits` cria a tentativa pendente e retorna o QR.
+- `GET /api/app/wallets/deposits/:depositId` recupera uma tentativa do proprio
+  usuario.
+- `POST /api/app/wallets/deposits/:depositId/refresh` consulta o gateway apenas
+  quando o deposito ainda esta pendente; sao cinco consultas por minuto.
+- O webhook Asaas e a consulta manual usam o mesmo processador. Ao receber
+  confirmacao, a transicao condicional `PENDENTE -> CONFIRMADO` cria exatamente
+  um lancamento `DEPOSITO_PIX` e emite `wallet.updated`.
+- Cada tentativa guarda o bruto, a taxa Pix fixa de R$ 0,99 e o liquido. O QR
+  cobra o bruto e a carteira recebe somente `bruto - R$ 0,99`; essa taxa nao
+  entra no cashback, na rede, em indicacoes ou no pool.
+- Criacao tem limite de cinco QR por usuario a cada dez minutos. Um Pix
+  estornado depois do credito vira `EM_REVISAO`, sem debitar saldo por conta
+  propria; isso exige analise financeira.
+
+No mobile, `WalletScreen` ganhou `Adicionar saldo Pix` e a tela
+`WalletDepositScreen`. Ela gera o QR, oferece copia-e-cola, botao para atualizar
+o status, mostra bruto/taxa/liquido e anima o valor liquido quando o saldo entra.
+
+O saque permanece gratuito no lancamento porque a conta Asaas operacional
+possui gratuidade para esse fluxo. A configuracao `finance.withdrawals`
+continua com `fixedFeeCents = 0` e pode ser alterada no painel se a tarifa da
+conta mudar.
+
 ## Atualizacao 2026-07-15: area comercial mobile
 
 A aba Vender e uma central operacional. `SellerDashboard.jsx` apresenta lojas,
@@ -285,7 +389,8 @@ Na tela Vender, o fluxo foi separado em dois caminhos:
   visivel na busca. Logo, banner e produtos completam a vitrine, mas nao
   bloqueiam a listagem. O
   registro em `lojistas` fica `ATIVO` e `status_kyc = APROVADO` quando o CPF ou
-  CNPJ tiver formato valido. Loja por CPF recebe limite mensal inicial de
+  CNPJ passar pela validacao dos digitos verificadores. CNPJs numericos e
+  alfanumericos sao aceitos. Loja por CPF recebe limite mensal inicial de
   R$ 5.000,00 em `limite_faturamento_mensal_centavos`; loja por CNPJ fica sem
   limite travado nesta etapa.
 - `Vendedor autonomo`: cria/atualiza o registro em `Vendedor` e vendas autonomas avulsas,
@@ -487,11 +592,11 @@ Estado geral:
 | Painel web | Implementado | login, restauração de sessão e logout funcionando |
 | Aplicativo mobile | Implementado | autenticação, Carteira, Perfil, Rede e marketplace reais; pagamento ainda mockado |
 | Banco de dados | Implementado | PostgreSQL 16 no Docker com tabelas da aplicacao, IDs inteiros autoincrementais e historico Prisma |
-| Prisma | Implementado | schema valido com 39 models e singleton conectado a API |
-| Redis e filas | Planejado | ainda não configurados |
+| Prisma | Implementado | schema valido com 61 models e singleton conectado a API |
+| Redis e filas | Parcial | Redis centraliza cache, rate limit e Socket.IO; faltam filas duraveis |
 | Autenticação | Implementado | usuários app no PostgreSQL, admin no `.env`, JWT access/refresh e papéis |
 | Carteiras | Implementado | quatro carteiras zeradas por usuário, resumo e extrato consultáveis |
-| KYC inicial | Parcial | CPF obrigatório e verificação fake por botão; provedor real fica para depois |
+| KYC inicial | Implementado automatico | documento/selfie privados, OCR local, comparacao facial e antisspoof/liveness passivos; painel audita decisoes |
 | Telas finais | Planejado | serão construídas depois da base funcional |
 | Testes automatizados | Implementado | cobertura inicial da autenticação da API |
 
@@ -1042,14 +1147,19 @@ substituído por refresh tokens persistidos e revogáveis.
 
 | Arquivo | Responsabilidade e estado |
 | --- | --- |
-| `kyc.controller.js` | controller da verificação inicial fake de documento |
-| `kyc.service.js` | aprova KYC provisoriamente, atualiza `nivel_kyc`, ativa indicação recebida e sincroniza vendedor/lojista |
-| `kyc.validator.js` | schema Zod vazio |
-| `kyc.provider.js` | contrato provisório de provedor externo; informa `mock` e `planned` |
+| `kyc.controller.js` | envio/consulta do usuario e fila, arquivos e decisoes do admin |
+| `kyc.service.js` | regras de envio, estados, serializacao e decisao transacional |
+| `kyc.repository.js` | toda persistencia de KYC, solicitacoes, arquivos e sincronizacao |
+| `kyc-image.service.js` | assinatura, normalizacao, metricas, hash e storage privado |
+| `kyc-recognition.service.js` | OCR portugues, deteccao/comparacao facial, antisspoof, liveness e decisao automatica serializada |
+| `kyc.validator.js` | valida tipo documental, filtros e motivo da decisao |
 
 Após o cadastro, uma etapa bloqueante salva o CPF válido e cria/atualiza o KYC
-pendente. A rota `POST /api/app/kyc/verify` aprova provisoriamente o KYC por
-botão. Documentos e provedor externo ainda não estão integrados.
+pendente. `POST /api/app/kyc/submissions` recebe documento e selfie, executa
+Tesseract OCR e Human/TensorFlow.js WASM e grava `APROVADO` ou `REPROVADO` na
+mesma transacao. `EM_ANALISE` e o modo manual ficam reservados a legado e
+contingencia. O liveness passivo atual nao substitui prova ativa por video nem
+documentoscopia homologada.
 
 #### Módulo `merchant`
 
@@ -1615,7 +1725,7 @@ implementadas:
 - Verificação de e-mail e telefone.
 - Redis.
 - Filas e jobs.
-- Integração KYC.
+- Provedor KYC homologado com prova de vida ativa e documentoscopia para altos limites.
 - Debito real por Pix/cartao, transferencia, saque e conciliacao com gateway.
 - Gateway de pagamento.
 - Escritas administrativas da rede e distribuicao por nivel com percentuais
@@ -1628,7 +1738,7 @@ implementadas:
 - Fiscal e compliance.
 - CRUD de administradores no painel; a tabela e o login pelo banco já existem,
   mas o primeiro registro é criado pelo seed.
-- Módulos administrativos de KYC, pagamentos, carteira, rede financeira e fiscal.
+- Modulo fiscal administrativo completo.
 - Testes dos demais domínios e testes ponta a ponta do painel.
 
 ## 15. Ordem sugerida das próximas etapas
@@ -1642,7 +1752,7 @@ coerente é:
 4. Implementar o primeiro domínio de negócio escolhido.
 5. Substituir os mocks mobile conforme os endpoints de negócio forem concluídos.
 6. Adicionar testes para cada fluxo implementado.
-7. Integrar KYC quando regras e provedor forem decididos.
+7. Homologar provedor KYC externo antes de liberar altos limites financeiros.
 8. Adicionar Redis, filas e jobs quando houver uma necessidade concreta.
 
 ## 16. Regra de manutenção deste documento
@@ -1867,9 +1977,10 @@ resultado. Tambem remove caracteres invisiveis e pontuacao antes da busca.
 
 ## Composicao atual da descoberta mobile
 
-A Home preserva logo, busca e conversas recentes. As acoes financeiras `Pagar`
-e `Receber` ficam em uma barra unica e encaminham para o leitor de QR e para a
-Central de vendas. A aba `Buscar` usa logo e pesquisa no topo, seguida por
+A Home nao exibe mais a logo. A composicao atual comeca pela barra de pesquisa
+no topo, seguida pela barra unica com as acoes financeiras `Pagar` e `Receber`
+e pelo bloco `Ultimas conversas`. As acoes encaminham para o leitor de QR e
+para a Central de vendas. A aba `Buscar` continua independente, com pesquisa,
 categorias compactas, servicos negociados e lojas publicas. Esta alteracao e
 somente visual e nao modifica rotas, contratos da API ou banco de dados.
 
@@ -2017,6 +2128,12 @@ para abrir detalhes e iniciar a compra.
 O modo de lojas permanece em `/marketplace/stores`. A mudanca nao cria tabela
 nem migration; utiliza `produtos_loja`, `lojas` e os filtros existentes de
 cidade, visibilidade e status.
+
+No mobile, a navegacao da busca separa `Lojas`, `Produtos` e `Servicos` como
+dominios de primeiro nivel. Ao digitar um termo, a interface consulta lojas e
+produtos pelas rotas do marketplace e filtra `tipos_servico`, exibindo os tres
+grupos na mesma pagina. Sem texto, somente a aba ativa e carregada. A consulta
+de lista usa debounce de 280 ms para reduzir carga sem atrasar o autocomplete.
 # Midia curada do marketplace (2026-08-07)
 
 O repositorio possui assets oficiais comprimidos em `storage/uploads/curated` para categorias, banners de lojas e produtos. O script `apps/api/prisma/apply-curated-media.js` atualiza somente as URLs de registros existentes, por nome normalizado. Executar manualmente com `npm run media:curated`; nao exige migration. O inventario completo fica em `docs/visual-assets.md`.
@@ -2054,16 +2171,28 @@ criada. `TipoChamadaMotoboy` diferencia `PLATAFORMA` e `EQUIPE`;
 `StatusSolicitacaoMotoboy` controla `PENDENTE`, `ACEITA`, `CONCLUIDA`,
 `CANCELADA` e `EXPIRADA`.
 
-A chamada geral seleciona candidatos online da mesma cidade e exclui membros
-vinculados, pois estes possuem chamada direta. O servidor nao retorna a lista
-externa para a loja, apenas `platformAvailable`. O aceite e atomico: uma
-transacao muda de `PENDENTE` para `ACEITA`, grava o motoboy vencedor e cria a
-`ConversaServico`. O filtro condicional impede dois aceites simultaneos.
+A chamada geral seleciona candidatos online e livres da mesma cidade. Ela
+inclui profissionais publicos e membros ativos da propria equipe da loja; um
+motoboy restrito a equipes nao recebe chamadas de outras lojas. A chamada
+direta continua exclusiva do membro escolhido. O servidor nao retorna a lista
+externa para a loja, apenas `platformAvailable`.
+
+Criacao e aceite sao atomicos. Travas transacionais por loja/cliente impedem
+duas solicitacoes por clique duplo, enquanto a trava do motoboy e o `updateMany`
+condicional garantem um unico vencedor. O aceite muda `PENDENTE` para `ACEITA`,
+grava o motoboy e cria a `ConversaServico` ja em `ACORDADA`. Operadores
+autorizados compartilham a chamada ativa da loja e podem cancela-la.
 
 Socket.IO publica `courier.request.created` somente para os candidatos e
 `courier.request.updated` para loja, solicitante e profissionais envolvidos.
 As rotas ficam no modulo `courier`, com implementacao operacional em
 `courier-dispatch.service.js`.
+
+Servicos gerais negociados por chat usam uma etapa semelhante: a conversa
+nasce `ABERTA`, o prestador aceita por
+`POST /api/app/service-chats/:conversationId/accept` e somente entao o estado
+vira `ACORDADA`, liberando mensagens e propostas. O cliente nao pode aceitar
+em nome do prestador.
 
 Migration manual pendente:
 
@@ -2089,3 +2218,304 @@ Migration atual:
 ```powershell
 npm exec -w apps/api -- prisma migrate dev --name corrida_cancelamento_cobranca_sem_expiracao
 ```
+
+## Atualizacao 2026-08-27: retencao financeira de 24 horas
+
+Os ganhos de pedidos online concluidos nascem pendentes por 24 horas. O valor
+liquido do vendedor, cashback, indicacao direta, bonus de rede e receita da
+plataforma ficam protegidos nessa janela.
+
+QR presencial de loja, venda autonoma e proposta presencial comum liquidam
+imediatamente. A liquidacao cria `repasse_pix` no mesmo commit e reserva o
+liquido para transferencia Asaas ate a chave Pix principal do recebedor.
+
+Antes da distribuicao local, a comissao cobre ate R$ 0,99 de processamento.
+Somente o excedente forma cashback prioritario ate R$ 1,00; o pool completo
+recebe apenas o que passar desses dois valores. A API calcula tambem os valores
+minimos de compra conforme a porcentagem negociada e os entrega nas cobrancas
+presenciais para aviso ao vendedor e ao comprador.
+
+Corridas de motoboy sao excecao a liquidacao presencial imediata. Se a
+conversa possui `loja_solicitante_id` ou o tipo operacional do servico e
+`ENTREGA_LOCAL`, `shouldHoldServiceEarnings` mantem o ganho pendente por 24
+horas tanto para `ONLINE` quanto para `QR_PRESENCIAL`. A forma de pagamento
+continua definindo o canal e a composicao financeira, mas nao antecipa a
+disponibilidade para saque do entregador. O fluxo de confirmacao tambem nao
+cria nem envia `repasse_pix` imediato para essas corridas; depois da liberacao,
+o motoboy utiliza o saque normal da carteira.
+
+No aceite de uma proposta, o solicitante pode enviar `paymentMode` e escolher
+entre pagamento no aplicativo e QR presencial. A proposta e atualizada dentro
+da mesma transacao antes da criacao da cobranca. Dinheiro entregue fora da
+plataforma nao deve criar cobranca, recebivel, saldo ou saque no sistema.
+
+`earnings-release.service.js` libera a transacao inteira de forma atomica e
+idempotente. `earnings-release.worker.js` executa lotes a cada minuto e publica
+`wallet.updated`. Estorno dentro da janela desfaz todos os pendentes; Pix em
+processo de estorno fica `EM_DISPUTA` e nao e liberado. Depois de 24 horas, o
+fluxo automatico bloqueia a devolucao e encaminha para revisao financeira.
+
+Arquivos principais:
+
+- `modules/earnings/order-earnings.service.js`: calcula a divisao e registra a
+  retencao;
+- `modules/earnings/earnings-release.service.js`: libera todos os participantes;
+- `modules/earnings/earnings-release.repository.js`: Prisma e advisory lock;
+- `modules/earnings/earnings-release.worker.js`: ciclo automatico;
+- `modules/admin/admin-payments.service.js`: prazo e estorno integral;
+- `modules/wallet/wallet.service.js`: credito disponivel ou pendente.
+
+A migration `20260827184221_retencao_ganhos_24h` ja inclui a retencao,
+`repasses_pix` e a chave Pix unica, e esta aplicada no banco local. Nao criar
+uma segunda migration para essas mesmas colunas e nao usar `migrate reset`.
+O ajuste de corrida usa os campos existentes e nao exige nova migration.
+
+## Atualizacao 2026-08-27: saque manual com taxa e limites
+
+O saque manual usa saldos ja disponiveis das carteiras Saldo Pix, Rede e
+Vendas. Cashback nao e sacavel. O usuario precisa ter KYC aprovado e uma chave
+Pix principal cujo documento pertenca a conta.
+
+A solicitacao reserva o valor bruto atomicamente. Exemplo: com taxa fixa de
+R$ 3,00, um saque de R$ 100,00 bloqueia R$ 100,00 e envia R$ 97,00 ao Asaas.
+Quando `TRANSFER_DONE` chega, o bloqueado e consumido e R$ 3,00 viram receita
+de taxa. Se houver recusa, cancelamento ou falha final, os R$ 100,00 voltam ao
+disponivel.
+
+O backend usa `externalReference` e chave de idempotencia para nao enviar o
+mesmo Pix duas vezes. Resposta de rede incerta vai para `EM_RECONCILIACAO`; o
+worker consulta o Asaas em lotes e procura a referencia existente antes de
+qualquer nova criacao. O webhook usa a mesma maquina de estados.
+
+Rotas do aplicativo:
+
+- `GET /api/app/withdrawals`: regras, chave, carteiras e historico;
+- `GET/PUT /api/app/withdrawals/pix-account`: chave Pix principal;
+- `POST /api/app/withdrawals`: solicitar com idempotencia;
+- `POST /api/app/withdrawals/:id/cancel`: cancelar antes do envio.
+
+Rotas administrativas:
+
+- `GET /api/admin/withdrawals`;
+- `POST /api/admin/withdrawals/:id/approve`;
+- `POST /api/admin/withdrawals/:id/reject`;
+- `POST /api/admin/withdrawals/:id/refresh`;
+- `GET/PATCH /api/admin/settings/withdrawals`.
+
+`SUPER_ADMIN` e `FINANCEIRO` executam acoes financeiras; `ADMIN` consulta. O
+worker roda a cada 15 segundos sem manter servidor adicional.
+
+Migration pendente para o responsavel pelo banco:
+
+```powershell
+npm exec -w apps/api -- prisma migrate dev --name saques_pix_configuraveis
+```
+
+## Massa de carga e conexao em tempo real (2026-08-27)
+
+`npm run seed:load-scenario` cria a massa manual `carga-20260827` com 50
+contas, 10 motoboys online, 3 lojas de Patos/PB e 9 produtos. Ela nao cria
+pagamentos ficticios. O teste isolado `npm run test:load-scenario` simula
+chamadas, aceite concorrente, chat, cancelamento, QR e pagamento por carteira,
+apagando seus dados ao terminar.
+
+O aplicativo usa WebSocket direto no Socket.IO, sem long-polling inicial. Ao
+subir mais de uma API, instalar Redis adapter e configurar afinidade de sessao
+no proxy para as notificacoes continuarem em tempo real.
+
+## Recuperacao de senha
+
+O acesso por e-mail oferece recuperacao segura por link. O backend guarda o
+hash do token em `tokens_recuperacao_senha`, nunca o token puro. Cada link dura
+30 minutos, pode ser usado uma vez e e invalidado quando outro e solicitado.
+Depois de salvar a nova senha, todas as sessoes anteriores do usuario sao
+revogadas. Em desenvolvimento sem SMTP, o link aparece somente no terminal da
+API; com SMTP configurado ele e enviado por e-mail.
+
+## Catalogo de teste
+
+Em 2026-08-27 foram excluidas logicamente tres lojas de carga sem imagem e os
+respectivos produtos. A duplicidade de categorias `Restaurante` e
+`Restaurantes` foi corrigida desativando a primeira; a loja de roupas que estava
+associada a ela foi movida para `Moda`. Nao existe regra para ocultar lojas
+novas sem imagem: visibilidade continua definida por status e
+`visivel_no_app`.
+
+## Vitrine de produtos em grade
+
+Na aba `Produtos` do marketplace mobile, `MarketplaceProductCard` e exibido em
+duas colunas. O componente continua reutilizavel e recebe a variante `grid`,
+mantendo os dados atuais de imagem, loja, preco e cashback sem alterar rotas ou
+schema.
+
+## Atualizacao 2026-08-28: despacho e compartilhamento de local
+
+O despacho anonimo continua selecionando somente motoboys livres e online da
+mesma cidade. Para chamadas feitas por clientes, o backend nao usa mais o
+endereco principal como origem: ele consulta cidade/UF para encontrar os
+candidatos e publica retirada/destino como `A combinar no chat`.
+
+Depois do primeiro aceite atomico, ambos entram em `ConversaServico`. O cliente
+pode enviar um local validado por
+`POST /api/app/service-chats/:conversationId/locations`. O payload possui tipo
+do local, CEP, rua, numero, bairro, cidade, UF, complemento e referencia. A
+mensagem e serializada para o aplicativo como `location`, sem mudanca de schema.
+
+O carregamento de notificacoes de servico foi coalescido e recebe debounce de
+250 ms nos eventos Socket.IO. A leitura da conversa somente grava e publica
+`service-chat.updated` quando havia mensagem nao lida ou primeira visualizacao
+do vendedor. O limite geral e 360 requisicoes por minuto por cliente; rotas
+sensíveis continuam com seus limitadores dedicados.
+## Amigos e conversas pessoais (2026-08-31)
+
+- Todo usuario recebe um identificador publico unico baseado no nome. Ele pode
+  ser compartilhado como texto ou QR sem expor dados cadastrais.
+- Adicionar amigo cria um convite pendente; apenas o destinatario pode aceitar
+  ou recusar e o chat so abre depois do aceite.
+- A amizade e armazenada uma unica vez para o par de usuarios. Apelidos e
+  contadores de nao lidas pertencem a cada lado da conversa.
+- Mensagens pessoais usam Socket.IO e aparecem junto das conversas comerciais
+  recentes na Home, mantendo bancos e regras de negocio separados.
+
+### Revisao de contatos pessoais (2026-09-03)
+
+- `GET /api/app/personal-chats/lookup?publicId=` localiza um perfil antes do
+  convite e devolve somente nome, foto, ID publico e estado do vinculo. E-mail,
+  telefone, CPF e endereco nao sao expostos.
+- O ID aceita `@`, payload `DTJ:FRIEND:` e deep link conhecido. A coluna
+  `usuarios.identificador_publico` possui unicidade no PostgreSQL; a auditoria
+  local encontrou 70 usuarios, nenhum ID nulo e nenhuma duplicidade.
+- Aceite e recusa usam `updateMany` condicionado a convite `PENDENTE`,
+  participante destinatario e solicitante diferente. Duas respostas
+  concorrentes nao conseguem sobrescrever uma a outra.
+- O apelido continua separado em `apelido_usuario_a/b` e a atualizacao emite
+  evento apenas para quem salvou o nome.
+- Busca, convite e envio de mensagem possuem limitadores independentes. Um
+  terceiro continua recebendo `404` ao tentar acessar a conversa.
+- Nao houve mudanca de schema nem migration nesta revisao.
+
+## Politica de processamento e cashback (2026-09-01)
+
+A configuracao `financial.payment_policy` possui:
+
+- `onlineServiceFeeCents`: taxa adicionada a pedidos online de entrega ou
+  retirada, padrao 99;
+- `localProcessingFeeCents`: primeira parte da comissao local reservada para
+  processamento, padrao 99;
+- `localPriorityCashbackLimitCents`: cashback preenchido antes do pool local,
+  padrao 100.
+
+No pedido online, `total = subtotal + entrega + taxa de servico`; a comissao e
+calculada somente sobre o subtotal e segue integralmente para a divisao normal
+do segmento. Na venda local, `comissao = bruto x percentual`; primeiro sai o
+processamento, depois ate R$ 1,00 vai para cashback e o excedente e dividido
+pelo pool configurado. O cashback final pode ser maior que R$ 1,00 porque o
+comprador tambem participa da parcela de cashback do pool.
+
+`transacoes_comerciais` guarda separadamente processamento e cashback
+prioritario. Lancamentos de processamento usam a conta
+`TAXAS_PAGAMENTO`, enquanto o lucro continua em `RECEITA_EMPRESA`. A migration
+`20260901120000_politica_taxa_servico_cashback` adiciona os snapshots e foi
+aplicada no banco local. Os testes cobrem as fronteiras de 99, 115, 140, 199,
+200 e 250 centavos de comissao.
+
+### Entrega da loja e pagamento do motoboy
+
+`lojas.taxa_entrega_centavos` permite que cada comercio configure sua entrega,
+com R$ 7,90 como valor inicial. Retirada sempre grava taxa zero. Ao concluir um
+pedido online, a API calcula comissao e pool exclusivamente sobre
+`pedido.subtotal_centavos`; a entrega e somada integralmente ao recebivel e ao
+credito pendente da carteira `Vendas` do lojista.
+
+`transacoes_comerciais.base_comissao_centavos` e
+`valor_entrega_lojista_centavos` preservam essa separacao para auditoria. Se a
+loja pagar um motoboy pelo app, a proposta da corrida constitui outra transacao:
+aplica a comissao do segmento de entrega, padrao 10%, e mantem o liquido retido
+por 24 horas depois da confirmacao do cliente. A migration
+`20260908143000_entrega_integral_lojista` esta aplicada no banco local.
+
+## Servicos: KYC e custodia (2026-09-04)
+
+Prestador e motoboy sao elegiveis somente quando o vendedor comercial esta
+`ATIVO` e com KYC `APROVADO`. A regra e validada ao cadastrar perfil de
+motoboy, ativar/listar servico, disponibilizar-se, entrar em equipe e aceitar
+uma corrida.
+
+O pagamento de uma proposta de servico nao distribui ganho. Depois de o
+prestador marcar a execucao, a confirmacao do cliente conclui a proposta e
+cria os creditos pendentes; a retencao de 24 horas conta desse instante. O
+worker revalida a conclusao antes de qualquer liberacao. QR presencial comum
+de loja e venda autonoma continua imediato; QR presencial de servico espera a
+conclusao e a retencao antes do repasse idempotente.
+
+## Chave Pix validada por titularidade (2026-09-04)
+
+O cadastro de destino de saque e repasse chama a consulta externa de chave Pix
+do Asaas antes de gravar `ATIVA`. Documento e nome retornados precisam coincidir
+com a identidade local; a chave e bloqueada em caso de indisponibilidade,
+divergencia ou resposta insuficiente. As rotas usam limitador por usuario e
+limitador global Redis para respeitar o Token Bucket do gateway.
+
+A migration `20260904103000_validacao_chave_pix` adiciona
+`contas_bancarias.validado_em` e `provedor_validacao`, e deixa pendentes as
+chaves antigas sem prova de titularidade. O usuario precisa valida-las de novo
+antes de gerar QR presencial ou solicitar saque.
+
+`UsuarioLoja` ja armazena os cargos de funcionario, mas a interface atual cria
+somente `DONO`. Convites, aceite, RBAC por endpoint e auditoria de equipe ficam
+registrados como evolucao futura; cargos nunca devem ser liberados apenas pela
+existencia do registro no banco.
+
+## Fluxo operacional de pedido (2026-09-04)
+
+`PAGO` e o estado financeiro da cobranca; ele nao aceita a venda em nome da
+loja. Quando carteira ou webhook Asaas confirmam o pagamento, o pedido fica
+`RECEBIDO` e `aceito_em` permanece vazio. A loja escolhe explicitamente:
+
+```text
+RECEBIDO -> ACEITO -> PREPARANDO -> SAIU_ENTREGA | PRONTO_RETIRADA
+```
+
+O encerramento e feito pelo cliente/entregador. A atualizacao condicional pelo
+status anterior no PostgreSQL garante que apenas uma acao concorrente vence;
+salto, retorno e reabertura de pedido cancelado sao recusados. Nao ha migration
+nesta mudanca.
+
+## Prazo de atendimento e autocompra (2026-09-04)
+
+`ORDER_UNATTENDED_TIMEOUT_MINUTES` controla o prazo operacional do pedido pago
+antes de a loja iniciar o preparo; o padrao e 60 minutos, com minimo de 15.
+O worker `order-timeout` executa a cada minuto e trata `RECEBIDO` e `ACEITO`
+sem `preparando_em`. Ele cancela condicionalmente, devolve pagamento interno
+para as mesmas carteiras, libera estoque e registra uma mensagem de sistema.
+No Asaas, solicita o estorno e acompanha `EM_DISPUTA` como redundancia ao
+webhook. Depois de `PREPARANDO`, o pedido nao entra no estorno automatico.
+
+Pedido criado em checkout ou negociacao tambem verifica o vinculo comercial da
+loja: dono (`lojas.lojista -> lojistas.usuario_id`) e membro ativo
+(`usuarios_loja`) nao podem comprar dela. Isso protege as regras de cashback,
+rede e faturamento contra volume artificial.
+
+## Modalidade, horarios e servicos ativos (2026-09-04)
+
+O servidor passou a validar a modalidade de cada item antes de criar pedido ou
+reservar estoque. Produto marcado apenas para retirada rejeita `delivery`, e
+produto apenas para entrega rejeita retirada, inclusive quando a chamada vem
+diretamente da API. A loja tambem precisa estar com `aberta_para_pedidos` e,
+quando configurou `horarios_funcionamento`, dentro da janela semanal no fuso
+`America/Sao_Paulo`. Loja que ainda nao configurou horarios preserva o
+comportamento legado: a chave manual de abertura decide.
+
+Prestadores e motoboys nao ficam mais online para sempre. O app envia
+`POST /api/app/service-chats/seller-services/heartbeat` somente em primeiro
+plano, ao abrir e a cada 45 segundos. A disponibilidade expira depois de
+`SERVICE_AVAILABILITY_TIMEOUT_SECONDS` (padrao: 120 segundos); busca,
+chamada, aceite e listas ignoram presenca vencida. O endpoint possui limite
+proprio por usuario.
+
+Criar atendimento direto agora usa lock consultivo PostgreSQL e indice unico
+parcial para uma conversa ativa por cliente e servico. Dois cliques ou duas
+telas abertas recebem a mesma conversa, sem gerar duas cobrancas. Ao encerrar
+o atendimento, somente o cliente pode registrar uma avaliacao de 1 a 5 e um
+comentario opcional; existe uma avaliacao por conversa e a media e recalculada
+para o prestador ou motoboy.

@@ -21,7 +21,7 @@ import {
 import { sellerStyles as styles } from "./seller.styles";
 import { StoreScheduleEditor } from "./StoreScheduleEditor";
 import { hasValidStoreOpeningHours } from "./storeSchedule";
-import { formatCep, formatCnpj, formatPhone, parseMoneyToCents } from "./seller.utils";
+import { formatCep, formatCnpj, formatPhone, isValidCnpj, parseMoneyToCents } from "./seller.utils";
 import { fetchCepAddress } from "../../services/cep.api";
 import { resolveMediaUrl } from "../../utils/media";
 import { formatarDinheiro } from "../../utils/money";
@@ -158,7 +158,7 @@ export function OnboardingModal({
             {form.type === "JURIDICA" ? (
               <AppInput
                 icon="document-text-outline"
-                keyboardType="number-pad"
+                autoCapitalize="characters"
                 label="CNPJ"
                 maxLength={18}
                 onChangeText={(value) =>
@@ -225,7 +225,7 @@ export function OnboardingModal({
             <View style={styles.modalActions}>
               <AppButton onPress={onClose} title="Depois" variant="neutral" />
               <AppButton
-                disabled={!form.segmentId || !form.publicName.trim()}
+                disabled={!form.segmentId || !form.publicName.trim() || (form.type === "JURIDICA" && !isValidCnpj(form.document))}
                 loading={isSaving}
                 onPress={onSubmit}
                 title="Continuar"
@@ -339,7 +339,7 @@ export function StoreModal({
             {isCompany ? (
               <AppInput
                 icon="document-text-outline"
-                keyboardType="number-pad"
+                autoCapitalize="characters"
                 label="CNPJ"
                 maxLength={18}
                 onChangeText={(value) =>
@@ -497,6 +497,23 @@ export function StoreModal({
               value={form.description}
             />
 
+            <AppInput
+              icon="bicycle-outline"
+              keyboardType="decimal-pad"
+              label="Taxa de entrega da loja"
+              onChangeText={(value) =>
+                onChange((current) => ({ ...current, deliveryFee: value }))
+              }
+              placeholder="Ex.: 7,90"
+              value={form.deliveryFee}
+            />
+            <View style={styles.documentHint}>
+              <Ionicons color={colors.primaryDark} name="wallet-outline" size={19} />
+              <Text style={styles.documentHintText}>
+                A entrega vai integralmente para sua carteira Vendas. A comissao incide somente sobre os produtos.
+              </Text>
+            </View>
+
             <StoreScheduleEditor
               hours={form.openingHours}
               onChange={(openingHours) =>
@@ -514,7 +531,7 @@ export function StoreModal({
                   !hasValidStoreAddress(form.address) ||
                   !form.categoryId ||
                   !form.segmentId ||
-                  (isCompany && form.document.replace(/\D/g, "").length !== 14) ||
+                  (isCompany && !isValidCnpj(form.document)) ||
                   !hasValidStoreOpeningHours(form.openingHours)
                 }
                 loading={isSaving}
@@ -745,6 +762,23 @@ export function StoreEditModal({
               placeholder="O que essa loja vende?"
               value={form.description}
             />
+
+            <AppInput
+              icon="bicycle-outline"
+              keyboardType="decimal-pad"
+              label="Taxa de entrega da loja"
+              onChangeText={(value) =>
+                onChange((current) => ({ ...current, deliveryFee: value }))
+              }
+              placeholder="Ex.: 7,90"
+              value={form.deliveryFee}
+            />
+            <View style={styles.documentHint}>
+              <Ionicons color={colors.primaryDark} name="wallet-outline" size={19} />
+              <Text style={styles.documentHintText}>
+                A entrega vai integralmente para sua carteira Vendas. Se contratar um motoboy pelo app, o pagamento dele e feito separadamente.
+              </Text>
+            </View>
 
             <StoreScheduleEditor
               hours={form.openingHours}

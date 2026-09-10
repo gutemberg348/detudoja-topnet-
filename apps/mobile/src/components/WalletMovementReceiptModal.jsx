@@ -10,7 +10,7 @@ const methodLabels = {
   BONUS: "Saldo de bonus",
   CARTAO: "Cartao",
   CASHBACK: "Cashback",
-  MISTO: "Carteiras DeTudoJa",
+  MISTO: "Carteiras Brasil Cashback",
   PIX: "Pix",
   SALDO_PIX: "Saldo Pix",
 };
@@ -54,6 +54,7 @@ export function WalletMovementReceiptModal({ movement, onClose }) {
   }
 
   const isDebit = movement.tipo === "DEBITO";
+  const isPending = movement.status === "PENDENTE";
   const payment = movement.payment;
   const recipient = payment?.recipient?.name;
   const title = payment ? "Comprovante de pagamento" : "Detalhes da movimentacao";
@@ -84,13 +85,13 @@ export function WalletMovementReceiptModal({ movement, onClose }) {
               <View style={[styles.heroIcon, isDebit ? styles.heroIconDebit : styles.heroIconCredit]}>
                 <Ionicons
                   color={isDebit ? "#C2410C" : colors.primaryDark}
-                  name={isDebit ? "arrow-up" : "checkmark"}
+                  name={isDebit ? "arrow-up" : isPending ? "time-outline" : "checkmark"}
                   size={25}
                 />
               </View>
               <View style={styles.headerCopy}>
                 <Text style={styles.eyebrow}>
-                  {isDebit ? "SAIDA CONFIRMADA" : "ENTRADA CONFIRMADA"}
+                  {isDebit ? "SAIDA CONFIRMADA" : isPending ? "CREDITO EM RETENCAO" : "ENTRADA CONFIRMADA"}
                 </Text>
                 <Text style={styles.title}>{title}</Text>
               </View>
@@ -105,13 +106,13 @@ export function WalletMovementReceiptModal({ movement, onClose }) {
             </View>
 
             <View style={styles.amountBlock}>
-              <Text style={styles.amountLabel}>{isDebit ? "Valor pago" : "Valor recebido"}</Text>
+              <Text style={styles.amountLabel}>{isDebit ? "Valor pago" : isPending ? "Valor pendente" : "Valor recebido"}</Text>
               <Text style={[styles.amount, isDebit ? styles.amountDebit : styles.amountCredit]}>
                 {isDebit ? "-" : "+"}{formatarDinheiro(Math.abs(displayAmountCents))}
               </Text>
               <View style={styles.processedBadge}>
-                <Ionicons color={colors.primaryDark} name="checkmark-circle" size={15} />
-                <Text style={styles.processedText}>{movement.status}</Text>
+                <Ionicons color={colors.primaryDark} name={isPending ? "time" : "checkmark-circle"} size={15} />
+                <Text style={styles.processedText}>{isPending ? "Libera em ate 24h" : movement.status}</Text>
               </View>
             </View>
 
@@ -136,6 +137,7 @@ export function WalletMovementReceiptModal({ movement, onClose }) {
 
             <View style={styles.detailsCard}>
               <DetailRow label="Data e hora" value={formatDateTime(payment?.paidAt ?? movement.data)} />
+              <DetailRow label="Liberacao prevista" value={formatDateTime(movement.availableAt)} />
               <DetailRow label="Identificador" value={reference} />
               <DetailRow label="Forma de pagamento" value={methodLabels[payment?.method] ?? payment?.method} />
               <DetailRow label="Carteira utilizada" value={movement.walletName} />
@@ -153,7 +155,9 @@ export function WalletMovementReceiptModal({ movement, onClose }) {
             </View>
 
             <Text style={styles.securityText}>
-              Este registro foi processado pela DeTudoJa e permanece salvo no seu extrato.
+              {isPending
+                ? "Este valor esta protegido durante a janela de estorno e ainda nao pode ser usado ou sacado."
+                : "Este registro foi processado pelo Brasil Cashback e permanece salvo no seu extrato."}
             </Text>
             <AppButton icon="checkmark" onPress={onClose} title="Concluir" />
           </ScrollView>

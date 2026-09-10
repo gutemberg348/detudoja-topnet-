@@ -16,11 +16,13 @@ import {
   getServiceConversation,
   getSellerServices,
   getServiceConversations,
+  registerSellerService,
   updateSellerService,
 } from "../services/service-chats.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
 import { CourierRegistrationModal } from "./service/CourierRegistrationModal";
+import { RegisterServiceModal } from "./service/RegisterServiceModal";
 
 const serviceIconMap = {
   bicycle: "bicycle-outline",
@@ -55,6 +57,9 @@ export function ServiceDeskScreen({ navigation }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState(null);
+  const [registeringService, setRegisteringService] = useState(false);
+  const [registerServiceError, setRegisterServiceError] = useState("");
+  const [registerServiceOpen, setRegisterServiceOpen] = useState(false);
   const [pendingCourierService, setPendingCourierService] = useState(null);
   const [savingServiceId, setSavingServiceId] = useState(null);
   const [acceptingRequestId, setAcceptingRequestId] = useState(null);
@@ -181,6 +186,21 @@ export function ServiceDeskScreen({ navigation }) {
     }
   }
 
+  async function submitServiceRegistration(data) {
+    if (!session?.accessToken || registeringService) return;
+    setRegisteringService(true);
+    setRegisterServiceError("");
+    try {
+      await registerSellerService(session.accessToken, data);
+      setRegisterServiceOpen(false);
+      await load({ silent: true });
+    } catch (requestError) {
+      setRegisterServiceError(requestError.message ?? "Nao foi possivel cadastrar este servico.");
+    } finally {
+      setRegisteringService(false);
+    }
+  }
+
   async function submitCourierProfile(data) {
     if (!session?.accessToken || courierSaving) return;
     setCourierSaving(true);
@@ -277,6 +297,21 @@ export function ServiceDeskScreen({ navigation }) {
               </Text>
             </View>
           </View>
+
+          <Pressable
+            onPress={() => {
+              setRegisterServiceError("");
+              setRegisterServiceOpen(true);
+            }}
+            style={({ pressed }) => [styles.registerService, pressed && styles.pressed]}
+          >
+            <View style={styles.registerServiceIcon}><Ionicons color={colors.primaryDark} name="add-circle-outline" size={22} /></View>
+            <View style={styles.serviceCopy}>
+              <Text style={styles.registerServiceTitle}>Cadastrar servico</Text>
+              <Text style={styles.registerServiceText}>Informe o que voce faz para aparecer na busca certa.</Text>
+            </View>
+            <Ionicons color={colors.primaryDark} name="arrow-forward" size={20} />
+          </Pressable>
 
           {courierProfile ? (
             <>
@@ -402,6 +437,17 @@ export function ServiceDeskScreen({ navigation }) {
         onSubmit={submitCourierProfile}
         open={courierModalOpen}
         profile={courierProfile}
+      />
+      <RegisterServiceModal
+        error={registerServiceError}
+        loading={registeringService}
+        onClose={() => {
+          if (registeringService) return;
+          setRegisterServiceOpen(false);
+          setRegisterServiceError("");
+        }}
+        onSubmit={submitServiceRegistration}
+        open={registerServiceOpen}
       />
     </ScreenContainer>
   );
@@ -650,6 +696,10 @@ const styles = StyleSheet.create({
   routeDivider: { backgroundColor: colors.border, height: 1, marginLeft: 23 },
   routeRow: { alignItems: "flex-start", flexDirection: "row", gap: spacing.sm },
   routeText: { color: colors.textPrimary, flex: 1, fontFamily: fonts.medium, fontSize: 11, lineHeight: 16 },
+  registerService: { alignItems: "center", backgroundColor: colors.primarySoft, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.md, padding: spacing.md },
+  registerServiceIcon: { alignItems: "center", backgroundColor: colors.card, borderRadius: radius.round, height: 42, justifyContent: "center", width: 42 },
+  registerServiceText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
+  registerServiceTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.small },
   sectionCopy: { flex: 1, gap: 2, minWidth: 0 },
   sectionHeading: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.label },
   sectionIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 38, justifyContent: "center", width: 38 },

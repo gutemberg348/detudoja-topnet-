@@ -12,6 +12,7 @@ export function ScreenContainer({
   children,
   contentContainerStyle,
   edges = ["top", "left", "right"],
+  keyboardAvoiding = true,
   keyboardVerticalOffset = 0,
   onContentSizeChange,
   padded = true,
@@ -20,31 +21,36 @@ export function ScreenContainer({
   style,
 }) {
   const contentStyle = [styles.contentWidth, padded && styles.padded, contentContainerStyle];
+  const content = scroll ? (
+    <ScrollView
+      contentContainerStyle={styles.scrollContent}
+      keyboardShouldPersistTaps="handled"
+      onContentSizeChange={onContentSizeChange}
+      ref={scrollViewRef}
+      showsVerticalScrollIndicator={false}
+      style={styles.scroll}
+    >
+      <View style={contentStyle}>{children}</View>
+    </ScrollView>
+  ) : (
+    <View style={styles.staticShell}>
+      <View style={[...contentStyle, styles.staticContent]}>{children}</View>
+    </View>
+  );
 
   return (
     <SafeAreaView edges={edges} style={[styles.safeArea, style]}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={keyboardVerticalOffset}
-        style={styles.keyboard}
-      >
-        {scroll ? (
-          <ScrollView
-            contentContainerStyle={styles.scrollContent}
-            keyboardShouldPersistTaps="handled"
-            onContentSizeChange={onContentSizeChange}
-            ref={scrollViewRef}
-            showsVerticalScrollIndicator={false}
-            style={styles.scroll}
-          >
-            <View style={contentStyle}>{children}</View>
-          </ScrollView>
-        ) : (
-          <View style={styles.staticShell}>
-            <View style={[...contentStyle, styles.staticContent]}>{children}</View>
-          </View>
-        )}
-      </KeyboardAvoidingView>
+      {keyboardAvoiding ? (
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={keyboardVerticalOffset}
+          style={styles.keyboard}
+        >
+          {content}
+        </KeyboardAvoidingView>
+      ) : (
+        <View style={styles.keyboard}>{content}</View>
+      )}
     </SafeAreaView>
   );
 }

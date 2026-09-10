@@ -1,0 +1,15 @@
+.git
+.agents
+node_modules
+**/node_modules
+.expo
+**/.expo
+dist
+**/dist
+dist-*-check
+**/dist-*-check
+storage/uploads
+.env
+**/.env
+npm-debug.log*
+txt.txt

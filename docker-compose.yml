@@ -2,15 +2,138 @@ services:
   postgres:
     image: postgres:16
     container_name: meu_postgres
-    restart: always
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: adimin
-      POSTGRES_DB: meu_banco
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-adimin}
+      POSTGRES_DB: ${POSTGRES_DB:-meu_banco}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  postgres-backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    user: "0:0"
+    environment:
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+      PGDATABASE: ${POSTGRES_DB:-meu_banco}
+      PGHOST: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD:-adimin}
+      PGPORT: 5432
+      PGUSER: ${POSTGRES_USER:-admin}
+    command: ["/bin/sh", "/scripts/postgres-backup.sh"]
+    volumes:
+      - ./docker/postgres-backup.sh:/scripts/postgres-backup.sh:ro
+      - postgres_backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres-backup-offsite:
+    image: restic/restic:0.17.3
+    profiles: ["offsite-backup"]
+    restart: unless-stopped
+    environment:
+      OFFSITE_BACKUP_INTERVAL_SECONDS: ${OFFSITE_BACKUP_INTERVAL_SECONDS:-86400}
+      OFFSITE_BACKUP_KEEP_DAILY: ${OFFSITE_BACKUP_KEEP_DAILY:-14}
+      OFFSITE_BACKUP_KEEP_WEEKLY: ${OFFSITE_BACKUP_KEEP_WEEKLY:-8}
+      OFFSITE_BACKUP_KEEP_MONTHLY: ${OFFSITE_BACKUP_KEEP_MONTHLY:-12}
+      RESTIC_PASSWORD: ${RESTIC_PASSWORD:-}
+      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+    command: ["/bin/sh", "/scripts/restic-backup.sh"]
+    volumes:
+      - ./docker/restic-backup.sh:/scripts/restic-backup.sh:ro
+      - postgres_backups:/backups:ro
+      - uploads_data:/uploads:ro
+      - kyc_private_data:/kyc:ro
+    depends_on:
+      postgres-backup:
+        condition: service_started
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  api-migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment: &api_environment
+      NODE_ENV: production
+      PORT: 3333
+      DATABASE_URL: postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-adimin}@postgres:5432/${POSTGRES_DB:-meu_banco}?schema=public
+      REDIS_URL: redis://redis:6379
+      REDIS_REQUIRED: "true"
+    command: npm run prisma:deploy
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file:
+      # raw preserva o "$" inicial das chaves Asaas, sem interpolacao do Compose.
+      - path: apps/api/.env
+        format: raw
+    environment: *api_environment
+    ports:
+      - "3333:3333"
+    volumes:
+      - uploads_data:/app/storage/uploads
+      - kyc_private_data:/app/storage/private/kyc
+    depends_on:
+      api-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3333/health/ready').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 35s
+      retries: 3
+
+  web-admin:
+    build:
+      context: .
+      dockerfile: apps/web-admin/Dockerfile
+      args:
+        VITE_API_URL: ""
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   postgres_data:
+  postgres_backups:
+  redis_data:
+  uploads_data:
+  kyc_private_data:

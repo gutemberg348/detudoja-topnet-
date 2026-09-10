@@ -1,11 +1,11 @@
 import { Image, StyleSheet, View } from "react-native";
 
-const logoSource = require("../../assets/detudoja-logo-smile.png");
+const logoSource = require("../../assets/brasil-cashback-logo.png");
 
 const sizes = {
-  compact: { height: 68, width: 144 },
-  large: { height: 118, width: 250 },
-  regular: { height: 90, width: 190 },
+  compact: { height: 90, width: 180 },
+  large: { height: 220, width: 320 },
+  regular: { height: 150, width: 240 },
 };
 
 export function BrandLogo({ centered = false, iconOnly = false, size = "regular" }) {
@@ -13,7 +13,7 @@ export function BrandLogo({ centered = false, iconOnly = false, size = "regular"
 
   return (
     <View
-      accessibilityLabel="DeTudoJá"
+      accessibilityLabel="Brasil Cashback"
       style={[
         styles.frame,
         dimensions,
@@ -21,7 +21,7 @@ export function BrandLogo({ centered = false, iconOnly = false, size = "regular"
       ]}
     >
       <Image
-        resizeMode="cover"
+        resizeMode="contain"
         source={logoSource}
         style={styles.image}
       />
@@ -34,12 +34,12 @@ const styles = StyleSheet.create({
     alignSelf: "center",
   },
   frame: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "transparent",
     overflow: "hidden",
   },
   image: {
     height: "100%",
-    transform: [{ scale: 1.18 }],
+    transform: [{ scale: 1.35 }],
     width: "100%",
   },
 });

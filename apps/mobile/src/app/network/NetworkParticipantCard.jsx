@@ -96,7 +96,7 @@ function StatusItem({ active, label }) {
 function ParticipantDetails({ person }) {
   return (
     <View style={styles.details}>
-      <Detail icon="person-outline" label="Patrocinador direto" value={person.directSponsorName || "DeTudoJa"} />
+      <Detail icon="person-outline" label="Patrocinador direto" value={person.directSponsorName || "Brasil Cashback"} />
       <Detail
         icon="people-outline"
         label="Diretos qualificados"

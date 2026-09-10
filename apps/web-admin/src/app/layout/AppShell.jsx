@@ -11,12 +11,14 @@ import {
   Tags,
   Truck,
   UsersRound,
+  WalletCards,
   X,
 } from "lucide-react";
 import { useState } from "react";
 import { Brand } from "../../components/Brand";
 import { CategoriesPage } from "../../pages/CategoriesPage";
 import { DashboardPage } from "../../pages/DashboardPage";
+import { KycPage } from "../../pages/KycPage";
 import { NetworkPage } from "../../pages/NetworkPage";
 import { PaymentsPage } from "../../pages/PaymentsPage";
 import { ParticipantsPage } from "../../pages/ParticipantsPage";
@@ -24,26 +26,34 @@ import { SegmentsPage } from "../../pages/SegmentsPage";
 import { SettingsPage } from "../../pages/SettingsPage";
 import { StoresPage } from "../../pages/StoresPage";
 import { ServiceTypesPage } from "../../pages/ServiceTypesPage";
+import { WithdrawalsPage } from "../../pages/WithdrawalsPage";
+import { WalletsPage } from "../../pages/WalletsPage";
 import {
   canAccessAdminPage,
   canManageEarnings,
   canManageParticipantData,
+  canManageProviderProfiles,
   canManageParticipantStatus,
   canManageWallet,
+  canManageNetwork,
   canRefundPayments,
   canManageSupport,
+  canManageWithdrawals,
 } from "../../utils/admin-permissions";
 
 const pages = {
   categories: { component: CategoriesPage, context: "Comercial", icon: Tags, label: "Categorias" },
   payments: { component: PaymentsPage, context: "Financeiro", icon: ReceiptText, label: "Pagamentos" },
   dashboard: { component: DashboardPage, context: "Operação", icon: LayoutDashboard, label: "Visão geral" },
+  kyc: { component: KycPage, context: "Compliance", icon: ShieldCheck, label: "KYC" },
   network: { component: NetworkPage, context: "Operação", icon: GitBranch, label: "Rede" },
   participants: { component: ParticipantsPage, context: "Operação", icon: UsersRound, label: "Participantes" },
   segments: { component: SegmentsPage, context: "Comercial", icon: BriefcaseBusiness, label: "Segmentos" },
   serviceTypes: { component: ServiceTypesPage, context: "Comercial", icon: Truck, label: "Serviços" },
   settings: { component: SettingsPage, context: "Sistema", icon: Settings, label: "Configurações" },
   stores: { component: StoresPage, context: "Comercial", icon: Store, label: "Lojas" },
+  withdrawals: { component: WithdrawalsPage, context: "Financeiro", icon: WalletCards, label: "Saques" },
+  wallets: { component: WalletsPage, context: "Financeiro", icon: WalletCards, label: "Carteiras" },
 };
 
 const navigationGroups = [
@@ -52,6 +62,7 @@ const navigationGroups = [
     items: [
       { icon: LayoutDashboard, id: "dashboard", label: "Visão geral" },
       { icon: UsersRound, id: "participants", label: "Participantes" },
+      { icon: ShieldCheck, id: "kyc", label: "KYC" },
       { icon: GitBranch, id: "network", label: "Rede" },
     ],
   },
@@ -66,7 +77,11 @@ const navigationGroups = [
   },
   {
     label: "Financeiro",
-    items: [{ icon: ReceiptText, id: "payments", label: "Pagamentos" }],
+    items: [
+      { icon: ReceiptText, id: "payments", label: "Pagamentos" },
+      { icon: WalletCards, id: "wallets", label: "Carteiras" },
+      { icon: WalletCards, id: "withdrawals", label: "Saques" },
+    ],
   },
   {
     label: "Sistema",
@@ -167,7 +182,7 @@ export function AppShell({ onLogout, session }) {
           <div className="topbar__page">
             <span className="topbar__page-icon"><ActiveIcon size={18} /></span>
             <div>
-              <span>{activePageConfig.context} / DeTudoJa Admin</span>
+              <span>{activePageConfig.context} / Brasil Cashback Admin</span>
               <strong>{activePageConfig.label}</strong>
             </div>
           </div>
@@ -177,14 +192,17 @@ export function AppShell({ onLogout, session }) {
           </div>
         </header>
         <main>
-          <ActivePage
+      <ActivePage
             accessToken={session.accessToken}
             canManageWallet={canManageWallet(session.user.role)}
+            canManageNetwork={canManageNetwork(session.user.role)}
             canRefundPayments={canRefundPayments(session.user.role)}
             canManageEarnings={canManageEarnings(session.user.role)}
             canManageParticipantData={canManageParticipantData(session.user.role)}
+            canManageProviderProfiles={canManageProviderProfiles(session.user.role)}
             canManageParticipantStatus={canManageParticipantStatus(session.user.role)}
             canManageSupport={canManageSupport(session.user.role)}
+            canManageWithdrawals={canManageWithdrawals(session.user.role)}
             onNavigate={navigate}
           />
         </main>

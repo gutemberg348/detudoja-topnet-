@@ -18,6 +18,16 @@ function effectiveLimitCents(entity) {
   return Number(entity.limite_faturamento_mensal_centavos ?? individualMonthlyLimitCents);
 }
 
+function individualCpfPaymentWhere(userId, excludePaymentId = null) {
+  return {
+    ...(excludePaymentId ? { id: { not: Number(excludePaymentId) } } : {}),
+    OR: [
+      { loja: { lojista: { tipo_pessoa: "FISICA", usuario_id: userId } } },
+      { vendedor: { tipo_pessoa: "FISICA", usuario_id: userId } },
+    ],
+  };
+}
+
 async function assertLimit(repository, { amountCents, entity, paymentWhere, lockId }) {
   const limitCents = effectiveLimitCents(entity);
 
@@ -41,7 +51,12 @@ async function assertLimit(repository, { amountCents, entity, paymentWhere, lock
   }
 }
 
-export async function assertStoreMonthlyCpfLimit(database, storeId, amountCents) {
+export async function assertStoreMonthlyCpfLimit(
+  database,
+  storeId,
+  amountCents,
+  { excludePaymentId = null } = {},
+) {
   const repository = createCommercialLimitRepository(database);
   const store = await repository.findStore(storeId);
 
@@ -53,11 +68,16 @@ export async function assertStoreMonthlyCpfLimit(database, storeId, amountCents)
     amountCents,
     entity: store.lojista,
     lockId: store.lojista.id,
-    paymentWhere: { loja_id: store.id },
+    paymentWhere: individualCpfPaymentWhere(store.lojista.usuario_id, excludePaymentId),
   });
 }
 
-export async function assertSellerMonthlyCpfLimit(database, sellerId, amountCents) {
+export async function assertSellerMonthlyCpfLimit(
+  database,
+  sellerId,
+  amountCents,
+  { excludePaymentId = null } = {},
+) {
   const repository = createCommercialLimitRepository(database);
   const seller = await repository.findSeller(sellerId);
 
@@ -69,7 +89,7 @@ export async function assertSellerMonthlyCpfLimit(database, sellerId, amountCent
     amountCents,
     entity: seller,
     lockId: seller.id,
-    paymentWhere: { vendedor_id: seller.id },
+    paymentWhere: individualCpfPaymentWhere(seller.usuario_id, excludePaymentId),
   });
 }
 
@@ -82,11 +102,21 @@ export async function assertPaymentMonthlyCpfLimit(database, paymentId) {
   }
 
   if (payment.loja_id) {
-    await assertStoreMonthlyCpfLimit(database, payment.loja_id, payment.valor_total_centavos);
+    await assertStoreMonthlyCpfLimit(
+      database,
+      payment.loja_id,
+      payment.valor_total_centavos,
+      { excludePaymentId: payment.id },
+    );
     return;
   }
 
   if (payment.vendedor_id) {
-    await assertSellerMonthlyCpfLimit(database, payment.vendedor_id, payment.valor_total_centavos);
+    await assertSellerMonthlyCpfLimit(
+      database,
+      payment.vendedor_id,
+      payment.valor_total_centavos,
+      { excludePaymentId: payment.id },
+    );
   }
 }

@@ -36,6 +36,7 @@ import {
 import { sellerStyles as styles } from "./sell/seller.styles";
 import { SellerDashboard } from "./sell/SellerDashboard";
 import { SellerGuideModal } from "./sell/SellerGuideModal";
+import { PayoutAccountModal } from "./sell/PayoutAccountModal";
 import {
   SaleDestinationModal,
   SaleModal,
@@ -67,6 +68,7 @@ import {
   deleteStoreProduct,
   getGeneratedChargeQr,
   getGeneratedCharges,
+  getPayoutAccount,
   getSellerProfile,
   getSellerSegments,
   getSellerStoreCategories,
@@ -74,6 +76,7 @@ import {
   updateSellerStoreMedia,
   updateStoreOrderStatus,
   updateStoreProduct,
+  savePayoutAccount,
 } from "../services/seller.api";
 import { getSellerServices, getServiceConversations } from "../services/service-chats.api";
 import {
@@ -114,6 +117,15 @@ export function SellScreen() {
   const [productForm, setProductForm] = useState(initialProductForm);
   const [productOpen, setProductOpen] = useState(false);
   const [pendingCpfAction, setPendingCpfAction] = useState(null);
+  const [pendingPayoutAction, setPendingPayoutAction] = useState(null);
+  const [payoutAccount, setPayoutAccount] = useState(null);
+  const [payoutForm, setPayoutForm] = useState({
+    holderDocument: "",
+    holderName: "",
+    key: "",
+    keyType: "CPF",
+  });
+  const [payoutOpen, setPayoutOpen] = useState(false);
   const [profile, setProfile] = useState(null);
   const [saleForm, setSaleForm] = useState(initialSaleForm);
   const [saleDestinationOpen, setSaleDestinationOpen] = useState(false);
@@ -131,6 +143,7 @@ export function SellScreen() {
   const [storeConversations, setStoreConversations] = useState([]);
   const [editingProduct, setEditingProduct] = useState(null);
   const [selectedStore, setSelectedStore] = useState(null);
+  const hasActivePayoutAccount = payoutAccount?.status === "ATIVA";
   const guideCheckedUserRef = useRef(null);
 
   const autonomousSegment = useMemo(
@@ -163,7 +176,7 @@ export function SellScreen() {
     }
 
     try {
-      const [segmentsResponse, categoriesResponse, profileResponse, chargesResponse, servicesResponse, conversationsResponse, storeConversationsResponse] = await Promise.all([
+      const [segmentsResponse, categoriesResponse, profileResponse, chargesResponse, servicesResponse, conversationsResponse, storeConversationsResponse, payoutResponse] = await Promise.all([
         getSellerSegments(session.accessToken),
         getSellerStoreCategories(session.accessToken),
         getSellerProfile(session.accessToken),
@@ -171,6 +184,7 @@ export function SellScreen() {
         getSellerServices(session.accessToken),
         getServiceConversations(session.accessToken),
         getStoreConversations(session.accessToken, { scope: "seller" }),
+        getPayoutAccount(session.accessToken),
       ]);
       setSegments(segmentsResponse.segments ?? []);
       setStoreCategories(categoriesResponse.categories ?? []);
@@ -181,6 +195,7 @@ export function SellScreen() {
       setSellerServices(servicesResponse.services ?? []);
       setServiceConversations((conversationsResponse.conversations ?? []).filter((conversation) => conversation.isSeller));
       setStoreConversations(storeConversationsResponse.conversations ?? []);
+      setPayoutAccount(payoutResponse.account ?? null);
     } catch (requestError) {
       if (!silent) {
         setError(requestError.message ?? "Nao foi possivel carregar vendas.");
@@ -232,6 +247,8 @@ export function SellScreen() {
     socket?.on(realtimeEvents.storeChatCreated, refresh);
     socket?.on(realtimeEvents.storeChatMessageCreated, refresh);
     socket?.on(realtimeEvents.storeChatUpdated, refresh);
+    socket?.on(realtimeEvents.chargeUpdated, refresh);
+    socket?.on(realtimeEvents.walletUpdated, refresh);
     return () => {
       socket?.off(realtimeEvents.serviceChatCreated, refresh);
       socket?.off(realtimeEvents.serviceChatMessageCreated, refresh);
@@ -239,6 +256,8 @@ export function SellScreen() {
       socket?.off(realtimeEvents.storeChatCreated, refresh);
       socket?.off(realtimeEvents.storeChatMessageCreated, refresh);
       socket?.off(realtimeEvents.storeChatUpdated, refresh);
+      socket?.off(realtimeEvents.chargeUpdated, refresh);
+      socket?.off(realtimeEvents.walletUpdated, refresh);
     };
   }, [loadSeller, session?.accessToken]);
 
@@ -338,13 +357,71 @@ export function SellScreen() {
     runSellerAction(action);
   }
 
+  function openPayoutForm(action = null, sellerProfile = profile) {
+    setPayoutForm({
+      holderDocument: sellerProfile?.document ?? "",
+      holderName: sellerProfile?.publicName ?? session?.user?.name ?? "",
+      key: "",
+      keyType: payoutAccount?.keyType ?? "CPF",
+    });
+    setPendingPayoutAction(action);
+    setError("");
+    setPayoutOpen(true);
+  }
+
+  function continuePayoutAction(action) {
+    if (action?.type === "store-charge" && action.store) {
+      showStoreCharge(action.store);
+      return;
+    }
+    if (action?.type === "sale") {
+      if (stores.length) {
+        setSaleDestinationOpen(true);
+      } else {
+        showAutonomousSale();
+      }
+    }
+  }
+
+  async function submitPayoutAccount() {
+    setIsSaving(true);
+    setError("");
+
+    try {
+      const response = await savePayoutAccount(session.accessToken, payoutForm);
+      const nextAction = pendingPayoutAction;
+      setPayoutAccount(response.account);
+      setPendingPayoutAction(null);
+      setPayoutOpen(false);
+      if (response.account?.status === "ATIVA") {
+        continuePayoutAction(nextAction);
+      } else {
+        setError("A chave foi salva, mas ainda precisa ser validada antes de receber ou sacar.");
+      }
+    } catch (requestError) {
+      setError(requestError.message ?? "Nao foi possivel salvar a chave Pix.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   function openSale() {
     if (!profile) {
       openOnboarding("sale");
       return;
     }
 
-    if (stores.length) {
+    if (!hasActivePayoutAccount) {
+      openPayoutForm({ type: "sale" });
+      return;
+    }
+
+    if (stores.length === 1) {
+      openStoreCharge(stores[0]);
+      return;
+    }
+
+    if (stores.length > 1) {
       setError("");
       setSaleDestinationOpen(true);
       return;
@@ -354,6 +431,14 @@ export function SellScreen() {
   }
 
   function openAutonomousSale() {
+    if (!hasActivePayoutAccount) {
+      openPayoutForm({ type: "sale" });
+      return;
+    }
+    showAutonomousSale();
+  }
+
+  function showAutonomousSale() {
     setSaleForm(initialSaleForm);
     setError("");
     setSaleOpen(true);
@@ -396,6 +481,7 @@ export function SellScreen() {
       },
       categoryId: category?.id ?? "",
       description: store.description ?? "",
+      deliveryFee: centsToInput(store.deliveryFeeCents ?? 790),
       email: store.email ?? "",
       name: store.name ?? "",
       openForOrders: store.openForOrders !== false,
@@ -423,8 +509,11 @@ export function SellScreen() {
       setProfile(response.profile);
       setOnboardingOpen(false);
       if (onboardingFlow === "sale") {
-        setSaleForm(initialSaleForm);
-        setSaleOpen(true);
+        if (hasActivePayoutAccount) {
+          showAutonomousSale();
+        } else {
+          openPayoutForm({ type: "sale" }, response.profile);
+        }
       }
       if (onboardingFlow === "service") {
         navigation.navigate("ServiceDesk");
@@ -476,10 +565,18 @@ export function SellScreen() {
   }
 
   function openStoreCharge(store) {
+    if (!hasActivePayoutAccount) {
+      openPayoutForm({ store, type: "store-charge" });
+      return;
+    }
+    showStoreCharge(store);
+  }
+
+  function showStoreCharge(store) {
     setChargeForm({
       amount: "",
       description: "",
-      title: `Compra em ${store.name}`,
+      title: "",
     });
     setChargeStore(store);
     setError("");
@@ -552,7 +649,10 @@ export function SellScreen() {
     setError("");
 
     try {
-      const response = await createSellerStore(session.accessToken, storeForm);
+      const response = await createSellerStore(session.accessToken, {
+        ...storeForm,
+        deliveryFeeCents: parseMoneyToCents(storeForm.deliveryFee),
+      });
       setStores((current) => [response.store, ...current]);
       setSelectedStore(response.store);
       setStoreOpen(false);
@@ -576,7 +676,10 @@ export function SellScreen() {
       const response = await updateSellerStore(
         session.accessToken,
         selectedStore.id,
-        storeEditForm,
+        {
+          ...storeEditForm,
+          deliveryFeeCents: parseMoneyToCents(storeEditForm.deliveryFee),
+        },
       );
       setStores((current) =>
         current.map((store) => (store.id === response.store.id ? response.store : store)),
@@ -974,7 +1077,22 @@ export function SellScreen() {
         onClose={() => setStoreChargeOpen(false)}
         onSubmit={submitStoreCharge}
         open={storeChargeOpen}
+        quickOptions={buildStoreChargeOptions(chargeStore, generatedCharges)}
         store={chargeStore}
+      />
+
+      <PayoutAccountModal
+        error={error}
+        existingAccount={payoutAccount}
+        form={payoutForm}
+        isSaving={isSaving}
+        onChange={setPayoutForm}
+        onClose={() => {
+          setPayoutOpen(false);
+          setPendingPayoutAction(null);
+        }}
+        onSubmit={submitPayoutAccount}
+        open={payoutOpen}
       />
     </>
   );
@@ -1029,6 +1147,7 @@ export function SellScreen() {
     <ScreenContainer contentContainerStyle={styles.content}>
       <SellerDashboard
         charges={generatedCharges}
+        payoutAccount={payoutAccount}
         profile={profile}
         onCreateSale={() => requestSellerAction("sale")}
         onOpenServiceDesk={() => requestSellerAction("service")}
@@ -1037,6 +1156,7 @@ export function SellScreen() {
         onOpenCharge={reopenGeneratedCharge}
         onOpenChargeHistory={() => navigation.navigate("GeneratedChargesHistory")}
         onOpenGuide={() => setSellerGuideOpen(true)}
+        onOpenPayout={() => openPayoutForm()}
         onOpenStoreChats={() => navigation.navigate("StoreChatsInbox", { scope: "seller" })}
         onOpenStore={openStoreDetails}
         sales={sales}
@@ -1058,6 +1178,20 @@ export function SellScreen() {
         onCreateStore={() => requestSellerAction("store")}
         onOpenServices={() => requestSellerAction("service")}
         open={sellerGuideOpen}
+      />
+
+      <PayoutAccountModal
+        error={error}
+        existingAccount={payoutAccount}
+        form={payoutForm}
+        isSaving={isSaving}
+        onChange={setPayoutForm}
+        onClose={() => {
+          setPayoutOpen(false);
+          setPendingPayoutAction(null);
+        }}
+        onSubmit={submitPayoutAccount}
+        open={payoutOpen}
       />
 
       <CpfRequirementModal
@@ -1147,4 +1281,68 @@ function parseEstimatedTimeToMinutes(form) {
 
 function splitEstimatedTime(minutes) {
   return splitEstimatedTimeValue(minutes);
+}
+
+function normalizeSearchText(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function chargePresetLabels(store) {
+  const business = normalizeSearchText(
+    `${store?.category?.name ?? ""} ${store?.segment?.name ?? ""} ${store?.name ?? ""}`,
+  );
+
+  if (/(beleza|cabelo|cabele|barbear|salao|estetica)/.test(business)) {
+    return ["Corte", "Barba", "Escova", "Manicure", "Procedimento"];
+  }
+
+  if (/(restaurante|lanch|pizza|comida|bar|conveniencia)/.test(business)) {
+    return ["Consumo no local", "Pedido no balcao", "Bebidas", "Refeicao"];
+  }
+
+  if (/(oficina|auto|mecanica|veiculo)/.test(business)) {
+    return ["Servico realizado", "Mao de obra", "Pecas", "Revisao"];
+  }
+
+  return ["Venda no balcao", "Servico realizado", "Pedido presencial"];
+}
+
+function buildStoreChargeOptions(store, charges) {
+  if (!store?.id) return [];
+
+  const productOptions = (store.products ?? [])
+    .filter((product) => product.status === "ATIVO")
+    .slice(0, 4)
+    .map((product) => ({
+      amountCents: product.promotionalPriceCents ?? product.priceCents,
+      label: product.name,
+      source: "Produto",
+    }));
+  const recentOptions = (charges ?? [])
+    .filter((charge) => (
+      charge.origin === "PRESENCIAL"
+      && Number(charge.merchant?.id) === Number(store.id)
+      && charge.status === "PAGA"
+      && charge.title
+    ))
+    .slice(0, 4)
+    .map((charge) => ({
+      amountCents: charge.amountCents,
+      label: charge.title,
+      source: "Recente",
+    }));
+  const presetOptions = chargePresetLabels(store).map((label) => ({ label, source: "Atalho" }));
+  const seen = new Set();
+
+  return [...productOptions, ...recentOptions, ...presetOptions]
+    .filter((option) => {
+      const key = normalizeSearchText(option.label);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 8);
 }

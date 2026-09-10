@@ -4,17 +4,24 @@ import {
   getAdminSupportSettingsController,
   updateAdminCategoryFeeController,
   updateAdminOrderEarningsDistributionController,
+  updateAdminPaymentPolicyController,
   updateAdminSegmentFeeController,
   updateAdminSupportSettingsController,
 } from "../modules/admin/admin-settings.controller.js";
 import {
   updateAdminCategoryFeeSchema,
   updateAdminOrderEarningsDistributionSchema,
+  updateAdminPaymentPolicySchema,
   updateAdminSegmentFeeSchema,
   updateAdminSupportSettingsSchema,
 } from "../modules/admin/admin.validator.js";
 import { validate } from "../middlewares/validate.middleware.js";
 import { roleMiddleware } from "../middlewares/role.middleware.js";
+import {
+  getWithdrawalSettingsController,
+  updateWithdrawalSettingsController,
+} from "../modules/withdrawals/withdrawal.controller.js";
+import { updateWithdrawalSettingsSchema } from "../modules/withdrawals/withdrawal.validator.js";
 
 export const adminSettingsRoutes = Router();
 
@@ -30,6 +37,17 @@ adminSettingsRoutes.patch(
   updateAdminSupportSettingsController,
 );
 adminSettingsRoutes.get(
+  "/withdrawals",
+  roleMiddleware("super_admin", "admin", "financeiro"),
+  getWithdrawalSettingsController,
+);
+adminSettingsRoutes.patch(
+  "/withdrawals",
+  roleMiddleware("super_admin", "financeiro"),
+  validate(updateWithdrawalSettingsSchema),
+  updateWithdrawalSettingsController,
+);
+adminSettingsRoutes.get(
   "/earnings",
   roleMiddleware("super_admin", "admin", "financeiro"),
   getAdminEarningsSettingsController,
@@ -39,6 +57,12 @@ adminSettingsRoutes.patch(
   roleMiddleware("super_admin", "financeiro"),
   validate(updateAdminOrderEarningsDistributionSchema),
   updateAdminOrderEarningsDistributionController,
+);
+adminSettingsRoutes.patch(
+  "/earnings/payment-policy",
+  roleMiddleware("super_admin", "financeiro"),
+  validate(updateAdminPaymentPolicySchema),
+  updateAdminPaymentPolicyController,
 );
 adminSettingsRoutes.patch(
   "/earnings/categories/:categoryId",

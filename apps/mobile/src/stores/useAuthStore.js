@@ -20,6 +20,7 @@ import {
   refreshAppSession,
 } from "../services/auth.api";
 import { disconnectRealtimeSocket } from "../services/realtime";
+import { unregisterExpoPushToken } from "../services/notifications.api";
 
 const accessTokenKey = "detudoja.mobile.accessToken";
 const refreshTokenKey = "detudoja.mobile.refreshToken";
@@ -292,6 +293,11 @@ export function AuthStoreProvider({ children }) {
   async function logout() {
     try {
       if (session?.accessToken && session?.refreshToken) {
+        const pushToken = await getStorageItem("detudoja.mobile.expoPushToken");
+        if (pushToken) {
+          await unregisterExpoPushToken(session.accessToken, pushToken).catch(() => {});
+          await deleteStorageItem("detudoja.mobile.expoPushToken");
+        }
         await logoutApp(session.accessToken, session.refreshToken);
       }
     } catch {

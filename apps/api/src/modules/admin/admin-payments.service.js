@@ -1,10 +1,12 @@
 import {
   emitOrderStatusUpdated,
+  emitServiceChatUpdated,
   emitWalletUpdated,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
 import { parsePositiveId } from "../../utils/ids.js";
 import { reverseCommercialSettlement } from "../earnings/order-earnings.service.js";
+import { releaseReservedOrderStock } from "../orders/order-stock.service.js";
 import { serializeOrder } from "../orders/orders.serializer.js";
 import {
   refreshAsaasRefundPayment,
@@ -15,6 +17,7 @@ import {
 } from "./admin-payments.repository.js";
 
 const refundableStatuses = ["PAGO", "LIQUIDADO"];
+const REFUND_WINDOW_MS = 24 * 60 * 60 * 1000;
 const paymentStatuses = new Set([
   "PENDENTE",
   "AGUARDANDO_PAGAMENTO",
@@ -30,7 +33,14 @@ function cents(value) {
   return Number(value ?? 0);
 }
 
+function refundDeadline(payment) {
+  const start = payment.transacao_comercial?.validada_em ?? payment.pago_em;
+  return start ? new Date(start.getTime() + REFUND_WINDOW_MS) : null;
+}
+
 function serializePayment(payment) {
+  const deadline = refundDeadline(payment);
+
   return {
     createdAt: payment.criado_em.toISOString(),
     gateway: payment.gateway,
@@ -49,7 +59,11 @@ function serializePayment(payment) {
       : null,
     pixCents: cents(payment.valor_pago_pix_centavos),
     refundable:
-      refundableStatuses.includes(payment.status),
+      refundableStatuses.includes(payment.status)
+      && Boolean(deadline)
+      && deadline.getTime() > Date.now()
+      && payment.transacao_comercial?.status !== "LIQUIDADA",
+    refundDeadline: deadline?.toISOString() ?? null,
     refundDestination: payment.gateway === "ASAAS" ? "PIX_ORIGEM" : "CARTEIRAS_ORIGEM",
     settlementStatus: payment.transacao_comercial?.status ?? null,
     status: payment.status,
@@ -124,7 +138,7 @@ async function refundInternalPayment(repository, payment, adminId, reason) {
 
     await repository.createWalletMovement({
       carteira_id: composition.carteira_id,
-      descricao: `Estorno do pagamento ${payment.id}, autorizado pelo admin ${adminId}. ${reason}`,
+      descricao: `Estorno do pagamento ${payment.id}, autorizado por ${adminId ?? "sistema"}. ${reason}`,
       origem: "ESTORNO",
       origem_id: payment.id,
       saldo_anterior_centavos: BigInt(balanceAfter - amount),
@@ -150,10 +164,250 @@ async function cancelOrderAfterRefund(repository, payment, message, title) {
     metadata_json: { kind: "refund", paymentId: payment.id },
     origem: "ADMIN",
     pedido_id: order.id,
-    titulo,
+    titulo: title,
   });
 
   return order;
+}
+
+function canRefundUnattendedOrder(payment) {
+  const order = payment?.pedido_loja;
+
+  return Boolean(
+    order
+    && ["RECEBIDO", "ACEITO"].includes(order.status)
+    && !order.preparando_em
+    && refundableStatuses.includes(payment.status),
+  );
+}
+
+function serviceConversationForPayment(payment) {
+  return payment?.cobranca?.proposta_servico?.conversa_servico ?? null;
+}
+
+function canRefundUnattendedService(payment) {
+  const conversation = serviceConversationForPayment(payment);
+  const proposal = payment?.cobranca?.proposta_servico;
+
+  return Boolean(
+    conversation
+    && proposal?.status === "PAGA"
+    && conversation.status === "ACORDADA"
+    && refundableStatuses.includes(payment.status),
+  );
+}
+
+function emitServiceTimeoutUpdate(payment, reason) {
+  const conversation = serviceConversationForPayment(payment);
+  if (!conversation) return;
+
+  emitServiceChatUpdated({
+    conversationId: conversation.id,
+    customerUserId: conversation.cliente_usuario_id,
+    reason,
+    sellerUserId: conversation.vendedor?.usuario_id ?? null,
+  });
+}
+
+async function cancelUnattendedService(repository, payment, reason) {
+  const conversation = serviceConversationForPayment(payment);
+  const proposal = payment.cobranca.proposta_servico;
+  const canceled = await repository.cancelUnattendedServiceConversation(conversation.id);
+  if (canceled.count !== 1) return null;
+
+  await Promise.all([
+    repository.updateServiceProposals({
+      data: { status: "CANCELADA" },
+      where: { id: proposal.id, status: "PAGA" },
+    }),
+    repository.updateCharges({
+      data: { cancelada_em: new Date(), status: "CANCELADA" },
+      where: { id: payment.cobranca.id, pagamento_id: payment.id, status: "PAGA" },
+    }),
+    repository.createServiceMessage({
+      data: {
+        conversa_servico_id: conversation.id,
+        lido_cliente_em: new Date(),
+        lido_vendedor_em: new Date(),
+        mensagem: "O prestador nao confirmou o inicio dentro do prazo. O atendimento foi cancelado e o estorno sera feito na origem do pagamento.",
+        origem: "SISTEMA",
+      },
+    }),
+  ]);
+
+  return repository.findPayment(payment.id);
+}
+
+async function cancelUnattendedOrder(repository, payment, reason) {
+  const order = payment.pedido_loja;
+  const canceled = await repository.cancelUnattendedOrder(order.id, [order.status]);
+
+  if (canceled.count !== 1) {
+    return null;
+  }
+
+  await repository.createOrderMessage({
+    mensagem: "A loja nao iniciou o atendimento dentro do prazo. O pedido foi cancelado e o estorno sera feito na origem do pagamento.",
+    metadata_json: {
+      kind: "automatic-refund",
+      paymentId: payment.id,
+      reason,
+    },
+    origem: "SISTEMA",
+    pedido_id: order.id,
+    titulo: "Cancelamento automatico",
+  });
+
+  return repository.findPayment(payment.id);
+}
+
+export async function refundUnattendedOrderPayment(paymentId, {
+  reason = "Loja nao iniciou o atendimento dentro do prazo operacional.",
+} = {}) {
+  const parsedPaymentId = parsePositiveId(paymentId, "Pagamento invalido");
+  const payment = await adminPaymentsRepository.findPayment(parsedPaymentId);
+
+  if (!canRefundUnattendedOrder(payment)) {
+    return { processed: false, reason: "NOT_ELIGIBLE" };
+  }
+
+  if (payment.gateway === "ASAAS") {
+    const canceledPayment = await adminPaymentsRepository.transaction(async (repository) => {
+      const currentPayment = await repository.findPayment(parsedPaymentId);
+      if (!canRefundUnattendedOrder(currentPayment)) {
+        return null;
+      }
+
+      await repository.assertSettlementReversible(currentPayment.id);
+      return cancelUnattendedOrder(repository, currentPayment, reason);
+    });
+
+    if (!canceledPayment) {
+      return { processed: false, reason: "ORDER_CHANGED" };
+    }
+
+    try {
+      await requestAsaasPaymentRefund(canceledPayment.id, { reason });
+    } catch (error) {
+      await adminPaymentsRepository.restoreUnattendedOrder(
+        canceledPayment.pedido_loja.id,
+        payment.pedido_loja.status,
+      );
+      throw error;
+    }
+
+    await adminPaymentsRepository.transaction(async (_repository, database) => {
+      await releaseReservedOrderStock(database, canceledPayment.pedido_loja.id);
+    });
+
+    const updatedPayment = await adminPaymentsRepository.findPayment(canceledPayment.id);
+    emitOrderStatusUpdated(serializeOrder(updatedPayment.pedido_loja));
+
+    return {
+      processed: true,
+      payment: serializePayment(updatedPayment),
+      pendingGateway: true,
+    };
+  }
+
+  const result = await adminPaymentsRepository.transaction(async (repository, database) => {
+    const currentPayment = await repository.findPayment(parsedPaymentId);
+    if (!canRefundUnattendedOrder(currentPayment)) {
+      return null;
+    }
+
+    const canceledPayment = await cancelUnattendedOrder(repository, currentPayment, reason);
+    if (!canceledPayment) {
+      return null;
+    }
+
+    const reversal = await reverseCommercialSettlement(database, currentPayment.id, { reason });
+    await refundInternalPayment(repository, currentPayment, null, reason);
+    await releaseReservedOrderStock(database, currentPayment.pedido_loja.id);
+
+    return {
+      payment: await repository.findPayment(currentPayment.id),
+      reversal,
+    };
+  });
+
+  if (!result) {
+    return { processed: false, reason: "ORDER_CHANGED" };
+  }
+
+  emitWalletUpdated({
+    transactionId: result.reversal.transactionId ?? result.payment.id,
+    userIds: [...new Set([
+      result.payment.usuario_pagador_id,
+      ...result.reversal.walletUserIds,
+    ])],
+  });
+  emitOrderStatusUpdated(serializeOrder(result.payment.pedido_loja));
+
+  return {
+    processed: true,
+    payment: serializePayment(result.payment),
+    pendingGateway: false,
+  };
+}
+
+export async function refundUnattendedServicePayment(paymentId, {
+  reason = "Prestador nao confirmou a execucao do servico dentro do prazo operacional.",
+} = {}) {
+  const parsedPaymentId = parsePositiveId(paymentId, "Pagamento invalido");
+  const payment = await adminPaymentsRepository.findPayment(parsedPaymentId);
+  if (!canRefundUnattendedService(payment)) {
+    return { processed: false, reason: "NOT_ELIGIBLE" };
+  }
+
+  if (payment.gateway === "ASAAS") {
+    const canceledPayment = await adminPaymentsRepository.transaction(async (repository) => {
+      const currentPayment = await repository.findPayment(parsedPaymentId);
+      if (!canRefundUnattendedService(currentPayment)) return null;
+      await repository.assertSettlementReversible(currentPayment.id);
+      return cancelUnattendedService(repository, currentPayment, reason);
+    });
+    if (!canceledPayment) return { processed: false, reason: "SERVICE_CHANGED" };
+
+    try {
+      await requestAsaasPaymentRefund(canceledPayment.id, { reason });
+    } catch (error) {
+      const conversation = serviceConversationForPayment(canceledPayment);
+      await adminPaymentsRepository.transaction(async (repository) => {
+        await Promise.all([
+          repository.restoreUnattendedServiceConversation(conversation.id),
+          repository.updateServiceProposals({
+            data: { status: "PAGA" },
+            where: { id: canceledPayment.cobranca.proposta_servico.id, status: "CANCELADA" },
+          }),
+          repository.updateCharges({
+            data: { cancelada_em: null, status: "PAGA" },
+            where: { id: canceledPayment.cobranca.id, pagamento_id: canceledPayment.id, status: "CANCELADA" },
+          }),
+        ]);
+      });
+      throw error;
+    }
+
+    const updatedPayment = await adminPaymentsRepository.findPayment(canceledPayment.id);
+    emitServiceTimeoutUpdate(updatedPayment, "service-timeout-refund-requested");
+    return { processed: true, payment: serializePayment(updatedPayment), pendingGateway: true };
+  }
+
+  const result = await adminPaymentsRepository.transaction(async (repository) => {
+    const currentPayment = await repository.findPayment(parsedPaymentId);
+    if (!canRefundUnattendedService(currentPayment)) return null;
+    await repository.assertSettlementReversible(currentPayment.id);
+    const canceledPayment = await cancelUnattendedService(repository, currentPayment, reason);
+    if (!canceledPayment) return null;
+    await refundInternalPayment(repository, currentPayment, null, reason);
+    return repository.findPayment(currentPayment.id);
+  });
+  if (!result) return { processed: false, reason: "SERVICE_CHANGED" };
+
+  emitWalletUpdated({ transactionId: result.id, userIds: [result.usuario_pagador_id] });
+  emitServiceTimeoutUpdate(result, "service-timeout-refunded");
+  return { processed: true, payment: serializePayment(result), pendingGateway: false };
 }
 
 export async function refundAdminPayment(adminId, paymentId, { reason }) {
@@ -168,6 +422,15 @@ export async function refundAdminPayment(adminId, paymentId, { reason }) {
     throw new AppError("Pagamento ja cancelado, estornado ou sem confirmacao", 409);
   }
 
+  const deadline = refundDeadline(payment);
+
+  if (!deadline || Date.now() >= deadline.getTime()) {
+    throw new AppError(
+      "O prazo automatico de estorno de 24 horas terminou. Encaminhe o caso para revisao financeira.",
+      409,
+    );
+  }
+
   if (payment.gateway === "ASAAS") {
     await adminPaymentsRepository.assertSettlementReversible(payment.id);
     await requestAsaasPaymentRefund(payment.id, { reason });
@@ -179,6 +442,7 @@ export async function refundAdminPayment(adminId, paymentId, { reason }) {
   }
 
   const result = await adminPaymentsRepository.transaction(async (repository, database) => {
+    await repository.assertSettlementReversible(payment.id);
     const reversal = await reverseCommercialSettlement(database, payment.id, { reason });
     await refundInternalPayment(repository, payment, adminId, reason);
     const order = await cancelOrderAfterRefund(

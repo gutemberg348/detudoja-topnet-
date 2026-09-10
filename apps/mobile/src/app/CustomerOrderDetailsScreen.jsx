@@ -350,7 +350,10 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
       order: nextOrder,
       proposal,
       store: nextOrder.store,
-      totals: { totalCents: proposal.amountCents },
+      totals: {
+        serviceFeeCents: nextOrder.serviceFeeCents ?? 0,
+        totalCents: proposal.amountCents,
+      },
     });
   }
 
@@ -572,7 +575,7 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
               <Text style={styles.cancellationText}>
                 {canCancelDirectly
                   ? "Antes do pagamento, o cancelamento e imediato."
-                  : "Pedidos pagos ou em atendimento sao analisados pelo suporte."}
+                  : "Pedidos pagos ou em atendimento sao analisados pelo suporte. Se a loja nao iniciar o atendimento no prazo, o sistema cancela e estorna automaticamente."}
               </Text>
             </View>
             <AppButton

@@ -1,12 +1,13 @@
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
-import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import { env } from "./config/env.js";
 import { uploadsBasePath, uploadsRoot } from "./config/storage.js";
 import { router } from "./routes/index.routes.js";
 import { errorMiddleware } from "./middlewares/error.middleware.js";
+import { createRateLimiter } from "./middlewares/rate-limit.middleware.js";
+import { requestLoggerMiddleware } from "./middlewares/request-logger.middleware.js";
 
 export const app = express();
 
@@ -36,12 +37,18 @@ app.use(
 );
 app.use(express.json());
 app.use(cookieParser());
+app.use(requestLoggerMiddleware);
 app.use(
-  rateLimit({
+  createRateLimiter({
+    keyPrefix: "global",
     message: { message: "Muitas solicitacoes. Aguarde um minuto e tente novamente." },
     skip: (req) => env.nodeEnv === "test" || req.path === "/api/webhooks/asaas",
+    standardHeaders: true,
+    legacyHeaders: false,
     windowMs: 60 * 1000,
-    limit: 120,
+    // A navegacao autenticada carrega contadores independentes e recebe
+    // atualizacoes em tempo real. Operacoes sensiveis possuem limites proprios.
+    limit: 360,
   }),
 );
 

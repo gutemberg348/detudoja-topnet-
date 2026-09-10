@@ -66,6 +66,17 @@ export function createWalletRepository(database = prisma) {
       });
     },
 
+    findActiveWalletWithTypeByCode(userId, walletCode) {
+      return database.carteira.findFirst({
+        include: { tipo_carteira: true },
+        where: {
+          status: "ATIVA",
+          tipo_carteira: { codigo: walletCode, status: "ATIVO" },
+          usuario_id: userId,
+        },
+      });
+    },
+
     findMovements(userId) {
       return database.lancamentoCarteira.findMany({
         include: { carteira: { include: { tipo_carteira: true } } },
@@ -122,6 +133,17 @@ export function createWalletRepository(database = prisma) {
       });
     },
 
+    incrementPendingBalance(walletId, amount) {
+      return database.carteira.update({
+        data: { saldo_pendente_centavos: { increment: BigInt(amount) } },
+        select: {
+          saldo_disponivel_centavos: true,
+          saldo_pendente_centavos: true,
+        },
+        where: { id: walletId },
+      });
+    },
+
     upsertWalletType(definition) {
       return database.tipoCarteira.upsert({
         create: {
@@ -134,7 +156,6 @@ export function createWalletRepository(database = prisma) {
         update: {
           descricao: definition.description,
           nome: definition.name,
-          permite_saque: definition.permiteSaque,
           permite_uso_em_compra: definition.permiteUsoEmCompra,
           status: "ATIVO",
         },

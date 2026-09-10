@@ -13,7 +13,9 @@ export function LoginScreen({ navigation }) {
 
   return (
     <ScreenContainer contentContainerStyle={styles.content}>
-      <BrandLogo centered size="large" />
+      <View style={styles.logoArea}>
+        <BrandLogo centered size="large" />
+      </View>
 
       <View style={styles.heading}>
         <Text style={styles.eyebrow}>Bem-vindo de volta</Text>
@@ -39,7 +41,9 @@ export function LoginScreen({ navigation }) {
 
       {emailFormVisible ? (
         <View style={styles.credentials}>
-          <AuthCredentialsForm />
+          <AuthCredentialsForm
+            onForgotPassword={() => navigation.navigate("ForgotPassword")}
+          />
         </View>
       ) : null}
 
@@ -55,7 +59,8 @@ export function LoginScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   content: {
-    justifyContent: "center",
+    paddingBottom: spacing.xxxl,
+    paddingTop: spacing.xxl,
   },
   credentials: {
     marginTop: spacing.lg,
@@ -88,6 +93,9 @@ const styles = StyleSheet.create({
   },
   heading: {
     gap: spacing.sm,
+  },
+  logoArea: {
+    marginBottom: spacing.xl,
   },
   social: {
     gap: spacing.lg,

@@ -2,7 +2,7 @@ import { systemSettingsRepository } from "./system-settings.repository.js";
 
 const supportConfigKey = "support.whatsapp";
 const defaultSupportMessage =
-  "Ola, preciso de ajuda com minha conta no DeTudoJa.";
+  "Ola, preciso de ajuda com minha conta no Brasil Cashback.";
 
 function onlyDigits(value = "") {
   return String(value).replace(/\D/g, "");

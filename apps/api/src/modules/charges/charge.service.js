@@ -8,9 +8,18 @@ import {
 import { AppError } from "../../utils/errors.js";
 import { chargeRepository, createChargeRepository } from "./charge.repository.js";
 import {
+  getStoreCommissionDistribution,
   settlePaidAutonomousChargeEarnings,
   settlePaidStoreChargeEarnings,
 } from "../earnings/order-earnings.service.js";
+import {
+  calculateLocalPaymentPreview,
+  getOrderEarningsDistribution,
+  getPaymentPolicy,
+  getSegmentCommissionDistribution,
+  resolvePaymentPolicy,
+} from "../earnings/order-earnings.config.js";
+import { releaseCommercialSettlement } from "../earnings/earnings-release.service.js";
 import {
   assertSellerMonthlyCpfLimit,
   assertStoreMonthlyCpfLimit,
@@ -19,6 +28,11 @@ import {
   debitUserWallet,
   ensureUserWallets,
 } from "../wallet/wallet.service.js";
+import {
+  requireActivePayoutAccount,
+  reserveImmediatePixPayout,
+  submitPendingPayout,
+} from "../payouts/payout.service.js";
 
 const QR_EXPIRATION_MINUTES = 30;
 
@@ -26,10 +40,15 @@ const chargeInclude = {
   loja: {
     select: {
       aceita_qrcode: true,
+      categoria: { include: { segmento_venda: true } },
       id: true,
+      limite_cashback_prioritario_centavos: true,
       logo_url: true,
       nome: true,
+      segmento_venda: true,
       status: true,
+      taxa_plataforma_personalizada_percentual: true,
+      taxa_processamento_local_centavos: true,
     },
   },
   pagamento: {
@@ -38,6 +57,18 @@ const chargeInclude = {
       metodo_principal: true,
       pago_em: true,
       status: true,
+      transacao_comercial: {
+        select: {
+          repasse_pix: {
+            select: {
+              motivo_falha: true,
+              pago_em: true,
+              status: true,
+              valor_centavos: true,
+            },
+          },
+        },
+      },
       usuario_pagador: {
         select: {
           id: true,
@@ -57,7 +88,13 @@ const chargeInclude = {
         select: {
           cliente_usuario_id: true,
           id: true,
+          loja_solicitante_id: true,
           segmento_venda: { select: { nome: true } },
+          servico_vendedor: {
+            select: {
+              tipo_servico: { select: { tipo_operacao: true } },
+            },
+          },
         },
       },
     },
@@ -66,7 +103,7 @@ const chargeInclude = {
     select: {
       id: true,
       nome_publico: true,
-      segmento_venda: { select: { nome: true } },
+      segmento_venda: true,
       status: true,
       usuario_id: true,
     },
@@ -121,7 +158,8 @@ function primaryPaymentMethod(allocations) {
   return source === "CASHBACK" ? "CASHBACK" : source === "SALDO_PIX" ? "SALDO_PIX" : "BONUS";
 }
 
-function serializeCharge(charge, { includeQr = false } = {}) {
+function serializeCharge(charge, { includeQr = false, localRewardPolicy = undefined } = {}) {
+  const payout = charge.pagamento?.transacao_comercial?.repasse_pix;
   const merchant = charge.loja
     ? {
         id: charge.loja.id,
@@ -132,7 +170,7 @@ function serializeCharge(charge, { includeQr = false } = {}) {
     : {
         id: charge.vendedor?.id ?? null,
         logoUrl: null,
-        name: charge.vendedor?.nome_publico ?? "Vendedor DeTudoJa",
+        name: charge.vendedor?.nome_publico ?? "Vendedor Brasil Cashback",
         segment:
           charge.proposta_servico?.conversa_servico?.segmento_venda?.nome
           ?? charge.venda_autonoma?.segmento_venda?.nome
@@ -148,6 +186,7 @@ function serializeCharge(charge, { includeQr = false } = {}) {
     description: charge.descricao,
     expiresAt: charge.expira_em?.toISOString() ?? null,
     id: charge.id,
+    localRewardPolicy,
     merchant,
     origin: charge.origem,
     paidAt: charge.paga_em?.toISOString() ?? null,
@@ -158,6 +197,14 @@ function serializeCharge(charge, { includeQr = false } = {}) {
           paidAt: charge.pagamento.pago_em?.toISOString() ?? null,
           status: charge.pagamento.status,
           walletCents: cents(charge.pagamento.valor_pago_saldo_centavos),
+        }
+      : null,
+    payout: payout
+      ? {
+          failureReason: payout.motivo_falha,
+          paidAt: payout.pago_em?.toISOString() ?? null,
+          status: payout.status,
+          valueCents: cents(payout.valor_centavos),
         }
       : null,
     qrPayload: includeQr ? qrPayload(charge.codigo_publico) : undefined,
@@ -197,9 +244,43 @@ async function createQrDataUrl(code) {
 
 export async function serializeChargeWithQr(charge) {
   return {
-    charge: serializeCharge(charge, { includeQr: true }),
+    charge: serializeCharge(charge, {
+      includeQr: true,
+      localRewardPolicy: await getChargeLocalRewardPolicy(charge),
+    }),
     qrImageDataUrl: await createQrDataUrl(charge.codigo_publico),
   };
+}
+
+async function getChargeLocalRewardPolicy(charge) {
+  if (charge.origem !== "PRESENCIAL") return null;
+
+  const globalPolicy = await getPaymentPolicy();
+  let commission;
+  let policy;
+
+  if (charge.loja) {
+    commission = (await getStoreCommissionDistribution(undefined, charge.loja)).commission;
+    policy = resolvePaymentPolicy({ globalPolicy, store: charge.loja });
+  } else if (charge.vendedor?.segmento_venda) {
+    const globalDistribution = await getOrderEarningsDistribution();
+    commission = getSegmentCommissionDistribution(
+      charge.vendedor.segmento_venda,
+      globalDistribution,
+    );
+    policy = resolvePaymentPolicy({
+      globalPolicy,
+      segment: charge.vendedor.segmento_venda,
+    });
+  } else {
+    return null;
+  }
+
+  return calculateLocalPaymentPreview({
+    feePercent: commission.feePercent,
+    grossCents: cents(charge.valor_centavos),
+    policy,
+  });
 }
 
 async function loadCharge(repository, code) {
@@ -305,7 +386,12 @@ export async function createStoreQrCharge(userId, storeId, data) {
   await chargeRepository.requireUserCpf(userId);
   const parsedStoreId = Number(storeId);
   const store = await chargeRepository.findStore({
-    select: { id: true, nome: true, aceita_qrcode: true },
+    select: {
+      aceita_qrcode: true,
+      id: true,
+      lojista: { select: { usuario_id: true } },
+      nome: true,
+    },
     where: {
       excluido_em: null,
       id: parsedStoreId,
@@ -324,6 +410,8 @@ export async function createStoreQrCharge(userId, storeId, data) {
   if (!store.aceita_qrcode) {
     throw new AppError("Esta loja esta com o pagamento por QR desativado", 409);
   }
+
+  await requireActivePayoutAccount(store.lojista.usuario_id);
 
   const seller = await chargeRepository.findSeller({
     select: { id: true },
@@ -354,6 +442,7 @@ export async function createAutonomousQrCharge(database, {
   title,
   saleId,
 }) {
+  await requireActivePayoutAccount(seller.usuario_id, database);
   return createChargeRepository(database).createCharge({
     data: {
       codigo_publico: createPublicCode(),
@@ -379,6 +468,9 @@ export async function createServiceConversationCharge(database, {
   serviceName,
   valueCents,
 }) {
+  if (paymentMode === "QR_PRESENCIAL") {
+    await requireActivePayoutAccount(seller.usuario_id, database);
+  }
   return createChargeRepository(database).createCharge({
     data: {
       codigo_publico: createPublicCode(),
@@ -501,7 +593,11 @@ export async function getChargeForCustomer(userId, rawCode) {
     throw new AppError("Use outro usuario para ler a sua propria cobranca", 409);
   }
 
-  return { charge: serializeCharge(charge) };
+  return {
+    charge: serializeCharge(charge, {
+      localRewardPolicy: await getChargeLocalRewardPolicy(charge),
+    }),
+  };
 }
 
 function allocateWallets(wallets, totalCents) {
@@ -685,13 +781,30 @@ export async function payChargeWithWallet(userId, rawCode) {
 
     const earnings = charge.loja_id
       ? await settlePaidStoreChargeEarnings(database, charge.id)
-      : charge.venda_autonoma_id || charge.proposta_servico_id
+      : charge.venda_autonoma_id
         ? await settlePaidAutonomousChargeEarnings(database, charge.id)
         : null;
+
+    const isImmediatePhysical = Boolean(
+      charge.loja_id
+      || charge.venda_autonoma_id,
+    );
+    const releaseImmediately = isImmediatePhysical;
+    const release = earnings?.transactionId && releaseImmediately
+      ? await releaseCommercialSettlement(database, earnings.transactionId, {
+          holdMs: 0,
+          reason: "imediatamente por ser uma venda presencial",
+        })
+      : null;
+    const payout = earnings?.transactionId && releaseImmediately
+      ? await reserveImmediatePixPayout(database, earnings.transactionId)
+      : null;
 
     return {
       charge: serializeCharge(paidCharge),
       earnings,
+      payout,
+      release,
       serviceConversation,
       sellerUserId: charge.vendedor?.usuario_id ?? null,
       walletUserIds: [userId, ...(earnings?.walletUserIds ?? [])],
@@ -706,6 +819,17 @@ export async function payChargeWithWallet(userId, rawCode) {
     transactionId: result.earnings?.transactionId ?? result.charge.payment?.id,
     userIds: result.walletUserIds,
   });
+
+  if (result.payout?.id) {
+    try {
+      await submitPendingPayout(result.payout.id);
+    } catch (payoutError) {
+      console.error(
+        `[pix-payout] Nao foi possivel enviar o repasse ${result.payout.id}`,
+        payoutError,
+      );
+    }
+  }
   if (result.serviceConversation) {
     emitServiceChatUpdated({
       ...result.serviceConversation,

@@ -38,7 +38,10 @@ const emptyForm = {
   merchantKycStatus: "APROVADO",
   merchantMonthlySalesLimit: "",
   merchantStatus: "ATIVO",
+  localPriorityCashbackLimit: "",
+  localProcessingFee: "",
   name: "",
+  onlineServiceFee: "",
   ownerEmail: "",
   ownerName: "",
   ownerPhone: "",
@@ -139,7 +142,16 @@ export function StoresPage({ accessToken }) {
       merchantKycStatus: store.merchant?.kycStatus ?? "APROVADO",
       merchantMonthlySalesLimit: centsToMoneyInput(store.merchant?.monthlySalesLimitCents),
       merchantStatus: store.merchant?.status ?? "ATIVO",
+      localPriorityCashbackLimit: centsToMoneyInput(
+        store.paymentPolicyOverrides?.localPriorityCashbackLimitCents,
+      ),
+      localProcessingFee: centsToMoneyInput(
+        store.paymentPolicyOverrides?.localProcessingFeeCents,
+      ),
       name: store.name ?? "",
+      onlineServiceFee: centsToMoneyInput(
+        store.paymentPolicyOverrides?.onlineServiceFeeCents,
+      ),
       ownerEmail: store.merchant?.user?.email ?? "",
       ownerName: store.merchant?.user?.name ?? "",
       ownerPhone: store.merchant?.user?.phone ?? "",
@@ -179,7 +191,16 @@ export function StoresPage({ accessToken }) {
           ? moneyToCents(form.merchantMonthlySalesLimit)
           : null,
         merchantStatus: form.merchantStatus,
+        localPriorityCashbackLimitCents: form.localPriorityCashbackLimit
+          ? moneyToCents(form.localPriorityCashbackLimit)
+          : null,
+        localProcessingFeeCents: form.localProcessingFee
+          ? moneyToCents(form.localProcessingFee)
+          : null,
         name: form.name,
+        onlineServiceFeeCents: form.onlineServiceFee
+          ? moneyToCents(form.onlineServiceFee)
+          : null,
         ownerEmail: form.ownerEmail,
         ownerName: form.ownerName,
         ownerPhone: form.ownerPhone,
@@ -590,6 +611,52 @@ export function StoresPage({ accessToken }) {
                     />
                   </label>
                 ) : null}
+              </div>
+
+              <div className="fee-editor">
+                <div>
+                  <p className="eyebrow">Excecoes financeiras</p>
+                  <strong>Politica desta loja</strong>
+                  <span>Deixe vazio para herdar o segmento. O segmento vazio herda a configuracao global.</span>
+                </div>
+                <div className="form-grid form-grid--three">
+                  <label>
+                    Taxa de servico online (R$)
+                    <input
+                      min="0"
+                      onChange={(event) => setForm((current) => ({ ...current, onlineServiceFee: event.target.value }))}
+                      placeholder={centsToMoneyInput(editing?.paymentPolicy?.onlineServiceFeeCents) || "0,99"}
+                      step="0.01"
+                      type="text"
+                      value={form.onlineServiceFee}
+                    />
+                    <small>Efetiva agora: {formatMoney(editing?.paymentPolicy?.onlineServiceFeeCents)}.</small>
+                  </label>
+                  <label>
+                    Processamento local (R$)
+                    <input
+                      min="0"
+                      onChange={(event) => setForm((current) => ({ ...current, localProcessingFee: event.target.value }))}
+                      placeholder={centsToMoneyInput(editing?.paymentPolicy?.localProcessingFeeCents) || "0,99"}
+                      step="0.01"
+                      type="text"
+                      value={form.localProcessingFee}
+                    />
+                    <small>Efetivo agora: {formatMoney(editing?.paymentPolicy?.localProcessingFeeCents)}.</small>
+                  </label>
+                  <label>
+                    Cashback prioritario (R$)
+                    <input
+                      min="0"
+                      onChange={(event) => setForm((current) => ({ ...current, localPriorityCashbackLimit: event.target.value }))}
+                      placeholder={centsToMoneyInput(editing?.paymentPolicy?.localPriorityCashbackLimitCents) || "1,00"}
+                      step="0.01"
+                      type="text"
+                      value={form.localPriorityCashbackLimit}
+                    />
+                    <small>Efetivo agora: {formatMoney(editing?.paymentPolicy?.localPriorityCashbackLimitCents)}.</small>
+                  </label>
+                </div>
               </div>
 
               <label>

@@ -21,6 +21,20 @@ export function registerApp(data) {
   });
 }
 
+export function requestAppPasswordReset(email) {
+  return apiRequest("/api/app/auth/password-reset/request", {
+    body: { email },
+    method: "POST",
+  });
+}
+
+export function resetAppPassword({ password, token }) {
+  return apiRequest("/api/app/auth/password-reset/confirm", {
+    body: { password, token },
+    method: "POST",
+  });
+}
+
 export function completeAppCpf(accessToken, cpf) {
   return apiRequest("/api/app/auth/complete-cpf", {
     body: { cpf },

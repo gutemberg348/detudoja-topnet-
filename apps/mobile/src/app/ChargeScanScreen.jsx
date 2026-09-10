@@ -23,7 +23,7 @@ export function ChargeScanScreen({ navigation }) {
     const normalizedCode = normalizeChargeCode(value);
 
     if (normalizedCode.length < 8) {
-      setError("Aponte a camera para um QR DeTudoJa ou informe o codigo da cobranca.");
+      setError("Aponte a camera para um QR Brasil Cashback ou informe o codigo da cobranca.");
       return;
     }
 

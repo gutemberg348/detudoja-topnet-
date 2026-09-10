@@ -1,4 +1,5 @@
 export const demoDeliveryFeeCents = 790;
+export const defaultOnlineServiceFeeCents = 99;
 
 export function productPriceCents(product) {
   return Number(product?.promotionalPriceCents ?? product?.priceCents ?? 0);
@@ -25,14 +26,25 @@ export function cartSubtotalCents(items = []) {
   );
 }
 
-export function checkoutTotals(items = [], { deliveryMode = "delivery" } = {}) {
+export function checkoutTotals(
+  items = [],
+  {
+    deliveryFeeCents = demoDeliveryFeeCents,
+    deliveryMode = "delivery",
+    serviceFeeCents = defaultOnlineServiceFeeCents,
+  } = {},
+) {
   const subtotalCents = cartSubtotalCents(items);
-  const deliveryFeeCents = deliveryMode === "delivery" ? demoDeliveryFeeCents : 0;
+  const normalizedDeliveryFeeCents = deliveryMode === "delivery"
+    ? Math.max(Number(deliveryFeeCents) || 0, 0)
+    : 0;
+  const normalizedServiceFeeCents = Math.max(Number(serviceFeeCents) || 0, 0);
 
   return {
-    deliveryFeeCents,
+    deliveryFeeCents: normalizedDeliveryFeeCents,
+    serviceFeeCents: normalizedServiceFeeCents,
     subtotalCents,
-    totalCents: subtotalCents + deliveryFeeCents,
+    totalCents: subtotalCents + normalizedDeliveryFeeCents + normalizedServiceFeeCents,
   };
 }
 

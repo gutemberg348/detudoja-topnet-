@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { createHash, randomBytes, randomUUID } from "crypto";
 import argon2 from "argon2";
 import jwt from "jsonwebtoken";
 import { env } from "../../config/env.js";
@@ -12,6 +12,7 @@ import {
 } from "./store-signup.service.js";
 import { ensureUserWallets } from "../wallet/wallet.service.js";
 import { verifySocialIdentity } from "./social-auth.service.js";
+import { sendPasswordResetEmail } from "./password-reset-mail.service.js";
 
 export const authAudiences = {
   admin: "detudoja-admin",
@@ -54,6 +55,7 @@ function toPublicUser(user) {
     kycStatus: user.kyc?.status ?? "PENDENTE",
     name: user.nome,
     phone: user.telefone,
+    publicId: user.identificador_publico,
     role: roles[0],
     roles,
     status: user.status,
@@ -195,6 +197,25 @@ async function createGeneratedPasswordHash() {
     timeCost: 2,
     type: argon2.argon2id,
   });
+}
+
+async function createPasswordHash(password) {
+  return argon2.hash(password, {
+    memoryCost: 19456,
+    parallelism: 1,
+    timeCost: 2,
+    type: argon2.argon2id,
+  });
+}
+
+function hashPasswordResetToken(token) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function buildPasswordResetUrl(token) {
+  const url = new URL(env.passwordReset.url);
+  url.searchParams.set("token", token);
+  return url.toString();
 }
 
 async function ensureCompanyRootUser(repository) {
@@ -578,6 +599,63 @@ export async function completeCpf({ cpf, userId }) {
 
     throw error;
   }
+}
+
+export async function requestPasswordReset({ email }) {
+  const user = await authRepository.findUserByEmail(email);
+
+  // A resposta e identica para e-mails cadastrados ou nao, evitando enumeracao.
+  if (!user || !enabledStatuses.has(user.status) || user.excluido_em) {
+    return { accepted: true };
+  }
+
+  const token = randomBytes(32).toString("base64url");
+  const createdAt = new Date();
+  const expiresAt = new Date(
+    createdAt.getTime() + env.passwordReset.expiresMinutes * 60 * 1000,
+  );
+
+  await authRepository.transaction(async (repository) => {
+    await repository.invalidatePasswordResetTokens(user.id, createdAt);
+    await repository.createPasswordResetToken({
+      expira_em: expiresAt,
+      token_hash: hashPasswordResetToken(token),
+      usuario_id: user.id,
+    });
+  });
+
+  await sendPasswordResetEmail({
+    email: user.email,
+    name: user.nome,
+    resetUrl: buildPasswordResetUrl(token),
+  });
+
+  return { accepted: true };
+}
+
+export async function resetPassword({ password, token }) {
+  const tokenHash = hashPasswordResetToken(token);
+  const usedAt = new Date();
+
+  await authRepository.transaction(async (repository) => {
+    const resetToken = await repository.findActivePasswordResetToken(tokenHash, usedAt);
+
+    if (!resetToken || !enabledStatuses.has(resetToken.usuario.status)) {
+      throw new AppError("Este link e invalido ou expirou. Solicite outro.", 400);
+    }
+
+    const consumed = await repository.consumePasswordResetToken(tokenHash, usedAt);
+
+    if (consumed.count !== 1) {
+      throw new AppError("Este link ja foi utilizado. Solicite outro.", 400);
+    }
+
+    const passwordHash = await createPasswordHash(password);
+    await repository.updateUserPassword(resetToken.usuario_id, passwordHash, usedAt);
+    await repository.revokeUserSessions(resetToken.usuario_id, usedAt);
+  });
+
+  return { reset: true };
 }
 
 export async function refreshSession({ audience, refreshToken }) {

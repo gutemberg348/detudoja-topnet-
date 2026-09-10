@@ -1,4 +1,8 @@
 import { env } from "../../config/env.js";
+import {
+  recordWebhookFailure,
+  recordWebhookSuccess,
+} from "../monitoring/monitoring.service.js";
 import { AppError } from "../../utils/errors.js";
 import {
   processAsaasWebhook,
@@ -16,8 +20,13 @@ export async function asaasWebhookController(req, res, next) {
     }
 
     const result = await processAsaasWebhook(req.body);
+    recordWebhookSuccess({ event: req.body?.event ?? null });
     res.status(200).json(result);
   } catch (error) {
+    recordWebhookFailure(error, {
+      event: req.body?.event ?? null,
+      statusCode: error.statusCode ?? 500,
+    });
     next(error);
   }
 }

@@ -18,16 +18,20 @@ import { AppButton } from "../components/AppButton";
 import { ChatComposer } from "../components/ChatComposer";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { StatePanel } from "../components/StatePanel";
+import { ShareAddressModal } from "./service/ShareAddressModal";
 import { useConversationRealtime } from "../hooks/useConversationRealtime";
 import { getGeneratedChargeQr } from "../services/seller.api";
 import {
+  acceptServiceConversation,
   acceptServiceProposal,
   cancelServiceConversation,
   confirmServiceCompletion,
   createServiceProposal,
+  createServiceReview,
   declineServiceProposal,
   getServiceConversation,
   markServiceDelivered,
+  sendServiceConversationLocation,
   sendServiceConversationMessage,
 } from "../services/service-chats.api";
 import { realtimeEvents } from "../services/realtime";
@@ -35,6 +39,7 @@ import { useAuthStore } from "../stores/useAuthStore";
 import { resolveMediaUrl } from "../utils/media";
 import { formatarHora } from "../utils/date";
 import { formatarDinheiro } from "../utils/money";
+import { formatCep } from "../utils/authValidation";
 import {
   colors,
   fonts,
@@ -51,7 +56,7 @@ const initialProposalForm = {
 };
 
 const conversationStatusCopy = {
-  ABERTA: "Negociando",
+  ABERTA: "Aguardando aceite",
   ACORDADA: "Em atendimento",
   AGUARDANDO_CONFIRMACAO: "Aguardando confirmacao",
   CANCELADA: "Cancelada",
@@ -62,7 +67,9 @@ export function ServiceConversationScreen({ navigation, route }) {
   const { session } = useAuthStore();
   const initial = route.params?.conversation;
   const scrollRef = useRef(null);
+  const loadPromiseRef = useRef(null);
   const [actionLoading, setActionLoading] = useState("");
+  const [acceptPaymentMode, setAcceptPaymentMode] = useState("ONLINE");
   const [conversation, setConversation] = useState(initial);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [draft, setDraft] = useState("");
@@ -70,18 +77,21 @@ export function ServiceConversationScreen({ navigation, route }) {
   const [image, setImage] = useState(null);
   const [proposalForm, setProposalForm] = useState(initialProposalForm);
   const [proposalOpen, setProposalOpen] = useState(false);
+  const [reviewForm, setReviewForm] = useState({ comment: "", rating: 0 });
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [shareAddressOpen, setShareAddressOpen] = useState(false);
   const [sending, setSending] = useState(false);
 
   const latestProposal = useMemo(
     () => [...(conversation?.proposals ?? [])].reverse()[0] ?? null,
     [conversation?.proposals],
   );
-  const canChat = ["ABERTA", "ACORDADA", "AGUARDANDO_CONFIRMACAO"].includes(
+  const canChat = ["ACORDADA", "AGUARDANDO_CONFIRMACAO"].includes(
     conversation?.status,
   );
   const canCreateProposal =
     conversation?.isSeller
-    && ["ABERTA", "ACORDADA"].includes(conversation?.status)
+    && conversation?.status === "ACORDADA"
     && !["PAGA", "CONCLUIDA"].includes(latestProposal?.status)
     && !(
       latestProposal?.status === "ACEITA"
@@ -92,6 +102,9 @@ export function ServiceConversationScreen({ navigation, route }) {
   const isCourierRide = Boolean(
     conversation?.request?.store
     || conversation?.serviceType?.operationalType === "ENTREGA_LOCAL",
+  );
+  const isAwaitingServiceAcceptance = Boolean(
+    !isCourierRide && conversation?.status === "ABERTA",
   );
   const hasLockedPayment = (conversation?.proposals ?? []).some((proposal) => (
     ["PAGA", "CONCLUIDA"].includes(proposal.status)
@@ -106,21 +119,37 @@ export function ServiceConversationScreen({ navigation, route }) {
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!session?.accessToken || !initial?.id) return;
+    if (loadPromiseRef.current) return loadPromiseRef.current;
     if (!silent) setError("");
 
-    try {
-      const response = await getServiceConversation(session.accessToken, initial.id);
-      setConversation(response.conversation);
-    } catch (requestError) {
-      if (!silent) {
-        setError(requestError.message ?? "Nao foi possivel carregar a conversa.");
+    const request = (async () => {
+      try {
+        const response = await getServiceConversation(session.accessToken, initial.id);
+        setConversation(response.conversation);
+      } catch (requestError) {
+        if (!silent) {
+          setError(requestError.message ?? "Nao foi possivel carregar a conversa.");
+        }
       }
+    })();
+    loadPromiseRef.current = request;
+
+    try {
+      return await request;
+    } finally {
+      if (loadPromiseRef.current === request) loadPromiseRef.current = null;
     }
   }, [initial?.id, session?.accessToken]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (latestProposal?.status === "PENDENTE") {
+      setAcceptPaymentMode(latestProposal.paymentMode ?? "ONLINE");
+    }
+  }, [latestProposal?.id, latestProposal?.paymentMode, latestProposal?.status]);
 
   useEffect(() => {
     const eventName = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -186,6 +215,18 @@ export function ServiceConversationScreen({ navigation, route }) {
     }
   }
 
+  async function shareAddress(location) {
+    await runAction("location", async () => {
+      await sendServiceConversationLocation(
+        session.accessToken,
+        conversation.id,
+        location,
+      );
+      setShareAddressOpen(false);
+      await load({ silent: true });
+    });
+  }
+
   async function submitProposal() {
     const amountCents = parseMoneyToCents(proposalForm.amount);
 
@@ -210,16 +251,17 @@ export function ServiceConversationScreen({ navigation, route }) {
     });
   }
 
-  async function acceptProposal(proposal) {
+  async function acceptProposal(proposal, paymentMode = proposal?.paymentMode) {
     await runAction("accept", async () => {
       const response = await acceptServiceProposal(
         session.accessToken,
         conversation.id,
         proposal.id,
+        paymentMode,
       );
       setConversation(response.conversation);
 
-      if (proposal.paymentMode === "ONLINE" && response.charge?.code) {
+      if (paymentMode === "ONLINE" && response.charge?.code) {
         navigation.navigate("ChargePayment", {
           code: response.charge.code,
           returnToServiceConversation: true,
@@ -270,6 +312,26 @@ export function ServiceConversationScreen({ navigation, route }) {
     });
   }
 
+  async function acceptCall() {
+    await runAction("accept-call", async () => {
+      const response = await acceptServiceConversation(
+        session.accessToken,
+        conversation.id,
+      );
+      setConversation(response.conversation);
+    });
+  }
+
+  async function closePendingCall() {
+    await runAction("close-pending-call", async () => {
+      const response = await cancelServiceConversation(
+        session.accessToken,
+        conversation.id,
+      );
+      setConversation(response.conversation);
+    });
+  }
+
   async function confirmCompletion() {
     await runAction("completion", async () => {
       const response = await confirmServiceCompletion(
@@ -277,6 +339,22 @@ export function ServiceConversationScreen({ navigation, route }) {
         conversation.id,
       );
       setConversation(response.conversation);
+    });
+  }
+
+  async function submitReview() {
+    if (!reviewForm.rating) {
+      setError("Escolha de 1 a 5 estrelas para avaliar.");
+      return;
+    }
+    await runAction("review", async () => {
+      const response = await createServiceReview(
+        session.accessToken,
+        conversation.id,
+        reviewForm,
+      );
+      setConversation(response.conversation);
+      setReviewOpen(false);
     });
   }
 
@@ -401,6 +479,47 @@ export function ServiceConversationScreen({ navigation, route }) {
         </View>
       ) : null}
 
+      {isAwaitingServiceAcceptance ? (
+        <View style={styles.acceptanceCard}>
+          <View style={styles.acceptanceIcon}>
+            <Ionicons color={colors.primaryDark} name="notifications-outline" size={21} />
+          </View>
+          <View style={styles.acceptanceCopy}>
+            <Text style={styles.acceptanceEyebrow}>CHAMADO AGUARDANDO</Text>
+            <Text style={styles.acceptanceTitle}>
+              {conversation.isSeller ? "Aceite para iniciar a conversa" : "Aguardando o prestador aceitar"}
+            </Text>
+            <Text style={styles.acceptanceText}>
+              {conversation.isSeller
+                ? conversation.request?.description || "Confira o pedido e libere o chat para negociar os detalhes."
+                : "Assim que o prestador aceitar, o chat sera liberado em tempo real."}
+            </Text>
+          </View>
+          <View style={styles.acceptanceActions}>
+            {conversation.isSeller ? (
+              <Pressable
+                disabled={Boolean(actionLoading)}
+                onPress={acceptCall}
+                style={({ pressed }) => [styles.acceptanceButton, pressed && styles.pressed]}
+              >
+                {actionLoading === "accept-call"
+                  ? <ActivityIndicator color={colors.card} />
+                  : <><Text style={styles.acceptanceButtonText}>Aceitar</Text><Ionicons color={colors.card} name="arrow-forward" size={17} /></>}
+              </Pressable>
+            ) : null}
+            <Pressable
+              disabled={Boolean(actionLoading)}
+              onPress={closePendingCall}
+              style={({ pressed }) => [styles.acceptanceDismiss, pressed && styles.pressed]}
+            >
+              {actionLoading === "close-pending-call"
+                ? <ActivityIndicator color={colors.danger} />
+                : <Text style={styles.acceptanceDismissText}>{conversation.isSeller ? "Recusar" : "Cancelar"}</Text>}
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+
       {error ? (
         <View style={styles.errorStrip}>
           <Ionicons color={colors.danger} name="alert-circle-outline" size={18} />
@@ -432,6 +551,29 @@ export function ServiceConversationScreen({ navigation, route }) {
           </Text>
         </View>
       )}
+
+      {conversation.canReview ? (
+        <Pressable
+          onPress={() => setReviewOpen(true)}
+          style={({ pressed }) => [styles.reviewPrompt, pressed && styles.pressed]}
+        >
+          <View style={styles.reviewPromptIcon}>
+            <Ionicons color={colors.primaryDark} name="star-outline" size={19} />
+          </View>
+          <View style={styles.reviewPromptCopy}>
+            <Text style={styles.reviewPromptTitle}>Como foi este atendimento?</Text>
+            <Text style={styles.reviewPromptText}>Sua avaliacao ajuda clientes a escolher melhor.</Text>
+          </View>
+          <Ionicons color={colors.primaryDark} name="arrow-forward" size={19} />
+        </Pressable>
+      ) : conversation.review ? (
+        <View style={styles.reviewSaved}>
+          <Ionicons color={colors.primaryDark} name="star" size={17} />
+          <Text style={styles.reviewSavedText}>
+            Voce avaliou este atendimento com {conversation.review.rating} estrela{conversation.review.rating === 1 ? "" : "s"}.
+          </Text>
+        </View>
+      ) : null}
 
       <ScrollView
         contentContainerStyle={styles.messages}
@@ -472,41 +614,69 @@ export function ServiceConversationScreen({ navigation, route }) {
         disabled={!canChat}
         draft={draft}
         leadingAction={(
-          <Pressable
-            accessibilityLabel="Enviar foto"
-            disabled={!canChat}
-            onPress={pickImage}
-            style={styles.photo}
-          >
-            <Ionicons
-              color={canChat ? colors.primaryDark : colors.textMuted}
-              name="camera-outline"
-              size={22}
-            />
-          </Pressable>
+          <View style={styles.composerActions}>
+            <Pressable
+              accessibilityLabel="Enviar foto"
+              disabled={!canChat}
+              onPress={pickImage}
+              style={styles.photo}
+            >
+              <Ionicons
+                color={canChat ? colors.primaryDark : colors.textMuted}
+                name="camera-outline"
+                size={21}
+              />
+            </Pressable>
+            {!conversation.isSeller ? (
+              <Pressable
+                accessibilityLabel="Compartilhar endereco"
+                disabled={!canChat}
+                onPress={() => setShareAddressOpen(true)}
+                style={styles.photo}
+              >
+                <Ionicons
+                  color={canChat ? colors.primaryDark : colors.textMuted}
+                  name="location-outline"
+                  size={21}
+                />
+              </Pressable>
+            ) : null}
+          </View>
         )}
         onChangeDraft={setDraft}
         onFocus={() => setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80)}
         onSend={send}
-        placeholder={canChat ? "Escreva uma mensagem" : "Atendimento encerrado"}
+        placeholder={canChat ? "Escreva uma mensagem" : isAwaitingServiceAcceptance ? "Chat aguardando aceite" : "Atendimento encerrado"}
         sendEnabled={Boolean(draft.trim() || image)}
         sending={sending}
       />
 
       <ProposalModal
         form={proposalForm}
+        isCourierRide={isCourierRide}
         loading={actionLoading === "proposal"}
         onChange={setProposalForm}
         onClose={() => setProposalOpen(false)}
         onSubmit={submitProposal}
         open={proposalOpen}
       />
+      <ReviewModal
+        form={reviewForm}
+        loading={actionLoading === "review"}
+        onChange={setReviewForm}
+        onClose={() => setReviewOpen(false)}
+        onSubmit={submitReview}
+        open={reviewOpen}
+      />
       <ProposalDecisionModal
         error={error}
+        isCourierRide={isCourierRide}
         loading={actionLoading === "accept" || actionLoading === "decline"}
-        onAccept={() => acceptProposal(latestProposal)}
+        onAccept={() => acceptProposal(latestProposal, acceptPaymentMode)}
         onDecline={() => declineProposal(latestProposal)}
+        onPaymentModeChange={setAcceptPaymentMode}
         open={customerHasPendingProposal}
+        paymentMode={acceptPaymentMode}
         proposal={latestProposal}
       />
       <CancelRideModal
@@ -514,6 +684,12 @@ export function ServiceConversationScreen({ navigation, route }) {
         onCancel={cancelRide}
         onClose={() => setCancelOpen(false)}
         open={cancelOpen}
+      />
+      <ShareAddressModal
+        loading={actionLoading === "location"}
+        onClose={() => setShareAddressOpen(false)}
+        onSubmit={shareAddress}
+        open={shareAddressOpen}
       />
     </ScreenContainer>
   );
@@ -530,6 +706,10 @@ function MessageBubble({ message }) {
     );
   }
 
+  if (message.location) {
+    return <LocationMessageCard message={message} />;
+  }
+
   return (
     <View style={[styles.messageLine, message.isMine && styles.messageLineMine]}>
       <View style={[styles.bubble, message.isMine && styles.mine]}>
@@ -542,6 +722,56 @@ function MessageBubble({ message }) {
         {message.text ? (
           <Text style={[styles.messageText, message.isMine && styles.mineText]}>
             {message.text}
+          </Text>
+        ) : null}
+        <Text style={[styles.messageTime, message.isMine && styles.mineTime]}>
+          {formatarHora(message.createdAt)}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function LocationMessageCard({ message }) {
+  const location = message.location;
+  const label = location.label === "DESTINO"
+    ? "Destino"
+    : location.label === "OUTRO"
+      ? "Local compartilhado"
+      : "Local de retirada";
+
+  return (
+    <View style={[styles.messageLine, message.isMine && styles.messageLineMine]}>
+      <View style={[styles.locationCard, message.isMine && styles.locationCardMine]}>
+        <View style={styles.locationTopline}>
+          <View style={[styles.locationIcon, message.isMine && styles.locationIconMine]}>
+            <Ionicons
+              color={message.isMine ? colors.card : colors.primaryDark}
+              name="location"
+              size={18}
+            />
+          </View>
+          <View style={styles.locationCopy}>
+            <Text style={[styles.locationLabel, message.isMine && styles.locationTextMine]}>{label}</Text>
+            <Text style={[styles.locationAddress, message.isMine && styles.locationTextMine]}>
+              {location.street}, {location.number}
+            </Text>
+          </View>
+        </View>
+        <Text style={[styles.locationDetail, message.isMine && styles.locationDetailMine]}>
+          {location.district} - {location.city}/{location.state}
+        </Text>
+        <Text style={[styles.locationDetail, message.isMine && styles.locationDetailMine]}>
+          CEP {formatCep(location.zipCode)}
+        </Text>
+        {location.complement ? (
+          <Text style={[styles.locationDetail, message.isMine && styles.locationDetailMine]}>
+            Complemento: {location.complement}
+          </Text>
+        ) : null}
+        {location.reference ? (
+          <Text style={[styles.locationReference, message.isMine && styles.locationTextMine]}>
+            Referencia: {location.reference}
           </Text>
         ) : null}
         <Text style={[styles.messageTime, message.isMine && styles.mineTime]}>
@@ -687,7 +917,7 @@ function ProposalCard({
   );
 }
 
-function ProposalModal({ form, loading, onChange, onClose, onSubmit, open }) {
+function ProposalModal({ form, isCourierRide, loading, onChange, onClose, onSubmit, open }) {
   return (
     <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
       <KeyboardAvoidingView
@@ -722,6 +952,11 @@ function ProposalModal({ form, loading, onChange, onClose, onSubmit, open }) {
                 value={form.amount}
               />
             </View>
+            {isCourierRide ? (
+              <Text style={styles.proposalHint}>
+                O valor recebido pelo entregador fica pendente por 24 horas antes do saque.
+              </Text>
+            ) : null}
           </View>
 
           <View style={styles.field}>
@@ -778,6 +1013,70 @@ function ProposalModal({ form, loading, onChange, onClose, onSubmit, open }) {
   );
 }
 
+function ReviewModal({ form, loading, onChange, onClose, onSubmit, open }) {
+  return (
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={styles.modalOverlay}
+      >
+        <Pressable onPress={onClose} style={StyleSheet.absoluteFill} />
+        <View style={styles.modalCard}>
+          <View style={styles.modalHeader}>
+            <View style={styles.modalHeaderIcon}>
+              <Ionicons color={colors.primaryDark} name="star-outline" size={22} />
+            </View>
+            <View style={styles.modalHeaderCopy}>
+              <Text style={styles.modalEyebrow}>Avaliacao do atendimento</Text>
+              <Text style={styles.modalTitle}>Conte como foi sua experiencia.</Text>
+            </View>
+            <Pressable onPress={onClose} style={styles.modalClose}>
+              <Ionicons color={colors.textPrimary} name="close" size={21} />
+            </Pressable>
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>Sua nota</Text>
+            <View style={styles.ratingChoices}>
+              {[1, 2, 3, 4, 5].map((rating) => (
+                <Pressable
+                  accessibilityLabel={`${rating} estrelas`}
+                  key={rating}
+                  onPress={() => onChange((current) => ({ ...current, rating }))}
+                  style={styles.ratingChoice}
+                >
+                  <Ionicons
+                    color={rating <= form.rating ? "#F59E0B" : colors.borderStrong}
+                    name={rating <= form.rating ? "star" : "star-outline"}
+                    size={31}
+                  />
+                </Pressable>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>Comentario opcional</Text>
+            <TextInput
+              multiline
+              onChangeText={(comment) => onChange((current) => ({ ...current, comment }))}
+              placeholder="O que voce achou do atendimento?"
+              placeholderTextColor={colors.textMuted}
+              style={styles.descriptionInput}
+              value={form.comment}
+            />
+          </View>
+
+          <View style={styles.modalActions}>
+            <AppButton disabled={loading} onPress={onClose} style={styles.modalAction} title="Agora nao" variant="neutral" />
+            <AppButton icon="star-outline" loading={loading} onPress={onSubmit} style={styles.modalAction} title="Enviar avaliacao" />
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 function CancelRideModal({ loading, onCancel, onClose, open }) {
   return (
     <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
@@ -809,10 +1108,20 @@ function CancelRideModal({ loading, onCancel, onClose, open }) {
   );
 }
 
-function ProposalDecisionModal({ error, loading, onAccept, onDecline, open, proposal }) {
+function ProposalDecisionModal({
+  error,
+  isCourierRide,
+  loading,
+  onAccept,
+  onDecline,
+  onPaymentModeChange,
+  open,
+  paymentMode,
+  proposal,
+}) {
   if (!proposal) return null;
 
-  const isOnline = proposal.paymentMode === "ONLINE";
+  const isOnline = paymentMode === "ONLINE";
 
   return (
     <Modal animationType="fade" onRequestClose={() => {}} transparent visible={open}>
@@ -838,25 +1147,29 @@ function ProposalDecisionModal({ error, loading, onAccept, onDecline, open, prop
             ) : null}
           </View>
 
-          <View style={styles.decisionPaymentCard}>
-            <View style={styles.decisionPaymentIcon}>
-              <Ionicons
-                color={colors.primaryDark}
-                name={isOnline ? "wallet-outline" : "qr-code-outline"}
-                size={22}
-              />
-            </View>
-            <View style={styles.decisionPaymentCopy}>
-              <Text style={styles.decisionPaymentLabel}>
-                {isOnline ? "Pagamento pela plataforma" : "Pagamento presencial"}
-              </Text>
-              <Text style={styles.decisionPaymentText}>
-                {isOnline
-                  ? "Voce sera levado para pagar com suas carteiras."
-                  : "O prestador exibira o QR no momento do atendimento."}
-              </Text>
-            </View>
+          <Text style={styles.fieldLabel}>Escolha como deseja pagar</Text>
+          <View style={styles.paymentOptions}>
+            <PaymentOption
+              active={isOnline}
+              icon="wallet-outline"
+              label="Pelo aplicativo"
+              onPress={() => onPaymentModeChange("ONLINE")}
+              text="Pague agora com suas carteiras"
+            />
+            <PaymentOption
+              active={!isOnline}
+              icon="qr-code-outline"
+              label="No local"
+              onPress={() => onPaymentModeChange("QR_PRESENCIAL")}
+              text="Use o QR exibido pelo entregador"
+            />
           </View>
+
+          {isCourierRide ? (
+            <Text style={styles.decisionText}>
+              Por seguranca, o valor do entregador fica pendente por 24 horas antes de poder ser sacado.
+            </Text>
+          ) : null}
 
           {error ? <Text style={styles.decisionError}>{error}</Text> : null}
 
@@ -921,6 +1234,17 @@ function parseMoneyToCents(value) {
 }
 
 const styles = StyleSheet.create({
+  acceptanceButton: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.md, flexDirection: "row", gap: 5, justifyContent: "center", minHeight: 40, minWidth: 88, paddingHorizontal: spacing.md },
+  acceptanceButtonText: { color: colors.card, fontFamily: fonts.bold, fontSize: typography.caption },
+  acceptanceActions: { alignItems: "stretch", gap: spacing.xs },
+  acceptanceCard: { alignItems: "center", backgroundColor: colors.warningSoft, borderBottomColor: "#FED7AA", borderBottomWidth: 1, flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  acceptanceCopy: { flex: 1, gap: 2, minWidth: 0 },
+  acceptanceDismiss: { alignItems: "center", justifyContent: "center", minHeight: 30, paddingHorizontal: spacing.sm },
+  acceptanceDismissText: { color: colors.danger, fontFamily: fonts.bold, fontSize: 10 },
+  acceptanceEyebrow: { color: "#B45309", fontFamily: fonts.extraBold, fontSize: 9 },
+  acceptanceIcon: { alignItems: "center", backgroundColor: colors.card, borderRadius: radius.round, height: 38, justifyContent: "center", width: 38 },
+  acceptanceText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 11, lineHeight: 15 },
+  acceptanceTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.small },
   amountInput: { color: colors.textPrimary, flex: 1, fontFamily: fonts.extraBold, fontSize: 24, minHeight: 54 },
   amountInputShell: { alignItems: "center", backgroundColor: colors.cardMuted, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.md },
   amountPrefix: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: typography.h3 },
@@ -935,6 +1259,7 @@ const styles = StyleSheet.create({
   cancelRideButton: { alignItems: "center", alignSelf: "flex-start", backgroundColor: "#FFF1F2", borderColor: "#FECDD3", borderRadius: radius.round, borderWidth: 1, flexDirection: "row", gap: 5, minHeight: 34, paddingHorizontal: spacing.sm },
   cancelRideText: { color: colors.danger, fontFamily: fonts.bold, fontSize: 10 },
   composer: { backgroundColor: colors.card, borderTopColor: colors.border, borderTopWidth: 1, gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  composerActions: { alignItems: "center", flexDirection: "row" },
   content: { backgroundColor: colors.background, flex: 1 },
   contextStrip: { alignItems: "center", backgroundColor: colors.primarySoft, borderBottomColor: colors.primaryLight, borderBottomWidth: 1, flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: 7 },
   contextText: { color: colors.primaryDark, flex: 1, fontFamily: fonts.medium, fontSize: typography.caption, lineHeight: 17 },
@@ -980,6 +1305,18 @@ const styles = StyleSheet.create({
   imageReadyText: { color: colors.primaryDark, flex: 1, fontFamily: fonts.bold, fontSize: typography.caption },
   input: { color: colors.textPrimary, flex: 1, fontFamily: fonts.regular, fontSize: typography.small, maxHeight: 92, minHeight: 40, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
   inputRow: { alignItems: "flex-end", backgroundColor: colors.cardMuted, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.xs, padding: spacing.xs },
+  locationAddress: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.small },
+  locationCard: { backgroundColor: colors.card, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, gap: 4, maxWidth: "88%", padding: spacing.md },
+  locationCardMine: { backgroundColor: colors.primaryDark, borderColor: colors.primaryDark },
+  locationCopy: { flex: 1, gap: 2 },
+  locationDetail: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption },
+  locationDetailMine: { color: "#D5F4E7" },
+  locationIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 34, justifyContent: "center", width: 34 },
+  locationIconMine: { backgroundColor: "rgba(255,255,255,0.16)" },
+  locationLabel: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: 9, textTransform: "uppercase" },
+  locationReference: { color: colors.textPrimary, fontFamily: fonts.medium, fontSize: typography.caption, marginTop: 3 },
+  locationTextMine: { color: colors.card },
+  locationTopline: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
   messageImage: { borderRadius: radius.md, height: 190, maxWidth: "100%", width: 240 },
   messageLine: { alignItems: "flex-start" },
   messageLineMine: { alignItems: "flex-end" },
@@ -1028,6 +1365,15 @@ const styles = StyleSheet.create({
   proposalShortcutText: { color: colors.card, fontFamily: fonts.bold, fontSize: 10 },
   proposalTopline: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
   proposalWarning: { color: colors.danger, fontFamily: fonts.bold, fontSize: 11 },
+  ratingChoice: { alignItems: "center", height: 42, justifyContent: "center", width: 42 },
+  ratingChoices: { alignItems: "center", flexDirection: "row", gap: spacing.xs, justifyContent: "space-between" },
+  reviewPrompt: { alignItems: "center", backgroundColor: "#FFF9E9", borderBottomColor: "#FDE68A", borderBottomWidth: 1, flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  reviewPromptCopy: { flex: 1, gap: 2, minWidth: 0 },
+  reviewPromptIcon: { alignItems: "center", backgroundColor: "#FEF3C7", borderRadius: radius.round, height: 36, justifyContent: "center", width: 36 },
+  reviewPromptText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption },
+  reviewPromptTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.small },
+  reviewSaved: { alignItems: "center", backgroundColor: colors.primarySoft, flexDirection: "row", gap: spacing.xs, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  reviewSavedText: { color: colors.primaryDark, flex: 1, fontFamily: fonts.medium, fontSize: typography.caption },
   send: { alignItems: "center", backgroundColor: colors.primary, borderRadius: radius.md, height: 40, justifyContent: "center", width: 40 },
   sendDisabled: { backgroundColor: colors.textMuted },
   serviceName: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: 10, textTransform: "uppercase" },

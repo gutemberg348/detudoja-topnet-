@@ -23,12 +23,32 @@ export function countNewStoreOrders(store, newOrderStatuses) {
 }
 
 export function formatCnpj(value = "") {
-  const digits = value.replace(/\D/g, "").slice(0, 14);
-  return digits
-    .replace(/^(\d{2})(\d)/, "$1.$2")
-    .replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3")
-    .replace(/\.(\d{3})(\d)/, ".$1/$2")
-    .replace(/(\d{4})(\d)/, "$1-$2");
+  const characters = String(value).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 14);
+  return characters
+    .replace(/^(.{2})(.)/, "$1.$2")
+    .replace(/^(.{2})\.(.{3})(.)/, "$1.$2.$3")
+    .replace(/\.(.{3})(.)/, ".$1/$2")
+    .replace(/(.{4})(.{1,2})$/, "$1-$2");
+}
+
+export function isValidCnpj(value = "") {
+  const cnpj = String(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!/^[A-Z0-9]{12}\d{2}$/.test(cnpj) || /^(.)\1{13}$/.test(cnpj)) return false;
+
+  const calculateDigit = (base) => {
+    let weight = base.length - 7;
+    let total = 0;
+    for (const character of base) {
+      total += (character.charCodeAt(0) - 48) * weight;
+      weight = weight === 2 ? 9 : weight - 1;
+    }
+    const remainder = total % 11;
+    return remainder < 2 ? 0 : 11 - remainder;
+  };
+
+  const firstDigit = calculateDigit(cnpj.slice(0, 12));
+  const secondDigit = calculateDigit(`${cnpj.slice(0, 12)}${firstDigit}`);
+  return cnpj.endsWith(`${firstDigit}${secondDigit}`);
 }
 
 export function formatPhone(value = "") {

@@ -155,17 +155,19 @@ export function SocialAuthButtons({ action = "Entrar" }) {
         variant="neutral"
       />
       {Platform.OS === "ios" && isAppleAvailable ? (
-        <AppleAuthentication.AppleAuthenticationButton
-          buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
-          buttonType={
-            action === "Cadastrar"
-              ? AppleAuthentication.AppleAuthenticationButtonType.CONTINUE
-              : AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN
-          }
-          cornerRadius={8}
-          onPress={handleApplePress}
-          style={styles.appleButton}
-        />
+        <View style={styles.appleButtonFrame}>
+          <AppleAuthentication.AppleAuthenticationButton
+            buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE_OUTLINE}
+            buttonType={
+              action === "Cadastrar"
+                ? AppleAuthentication.AppleAuthenticationButtonType.CONTINUE
+                : AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN
+            }
+            cornerRadius={8}
+            onPress={handleApplePress}
+            style={styles.appleButton}
+          />
+        </View>
       ) : (
         <AppButton
           disabled={isSubmitting}
@@ -187,6 +189,12 @@ const styles = StyleSheet.create({
   },
   appleButton: {
     height: 50,
+    width: "100%",
+  },
+  appleButtonFrame: {
+    borderRadius: 8,
+    height: 50,
+    overflow: "hidden",
     width: "100%",
   },
   message: {

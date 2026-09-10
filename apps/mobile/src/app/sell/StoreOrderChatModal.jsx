@@ -252,7 +252,7 @@ export function StoreOrderChatModal({
           {proposalOpen ? (
             <View style={styles.orderProposalForm}>
               <View style={styles.orderProposalField}>
-                <Text style={styles.orderProposalLabel}>Valor final</Text>
+                <Text style={styles.orderProposalLabel}>Valor final ao cliente</Text>
                 <TextInput
                   keyboardType="decimal-pad"
                   onChangeText={setProposalValue}
@@ -261,6 +261,9 @@ export function StoreOrderChatModal({
                   style={styles.orderProposalInput}
                   value={proposalValue}
                 />
+                <Text style={styles.orderProposalBarText}>
+                  Inclua a taxa de servico de {formatarDinheiro(visibleOrder.serviceFeeCents ?? 0)} neste total.
+                </Text>
               </View>
               <View style={styles.orderProposalFieldWide}>
                 <Text style={styles.orderProposalLabel}>Resumo da proposta</Text>

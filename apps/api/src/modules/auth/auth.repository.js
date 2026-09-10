@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import { prisma } from "../../config/prisma.js";
 
 const appUserInclude = {
@@ -6,10 +7,27 @@ const appUserInclude = {
   vendedor: true,
 };
 
+function withPublicIdentifier(data) {
+  if (data.identificador_publico) return data;
+
+  const name = String(data.nome ?? "usuario")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ".")
+    .replace(/^\.+|\.+$/g, "")
+    .slice(0, 48) || "usuario";
+
+  return {
+    ...data,
+    identificador_publico: `${name}.${randomBytes(4).toString("hex")}`,
+  };
+}
+
 export function createAuthRepository(database = prisma) {
   return {
     createCompanyRootUser(data) {
-      return database.usuario.create({ data });
+      return database.usuario.create({ data: withPublicIdentifier(data) });
     },
 
     createIndication(data) {
@@ -17,11 +35,15 @@ export function createAuthRepository(database = prisma) {
     },
 
     createRegisteredUser(data) {
-      return database.usuario.create({ data });
+      return database.usuario.create({ data: withPublicIdentifier(data) });
     },
 
     createSession(data) {
       return database.sessaoAutenticacao.create({ data });
+    },
+
+    createPasswordResetToken(data) {
+      return database.tokenRecuperacaoSenha.create({ data });
     },
 
     createSocialIdentity(data) {
@@ -29,7 +51,7 @@ export function createAuthRepository(database = prisma) {
     },
 
     createSocialUser(data) {
-      return database.usuario.create({ data });
+      return database.usuario.create({ data: withPublicIdentifier(data) });
     },
 
     findAdminById(id) {
@@ -127,6 +149,17 @@ export function createAuthRepository(database = prisma) {
       return database.usuario.findUnique({ where: { id } });
     },
 
+    findActivePasswordResetToken(tokenHash, now = new Date()) {
+      return database.tokenRecuperacaoSenha.findFirst({
+        include: { usuario: true },
+        where: {
+          expira_em: { gt: now },
+          token_hash: tokenHash,
+          usado_em: null,
+        },
+      });
+    },
+
     findUserConflict(email, phone) {
       return database.usuario.findFirst({
         where: { OR: [{ email }, { telefone: phone }] },
@@ -159,6 +192,17 @@ export function createAuthRepository(database = prisma) {
       });
     },
 
+    revokeUserSessions(userId, date = new Date()) {
+      return database.sessaoAutenticacao.updateMany({
+        data: { revogada_em: date },
+        where: {
+          audiencia: "detudoja-app",
+          revogada_em: null,
+          usuario_id: userId,
+        },
+      });
+    },
+
     rotateSession({ audience, adminId, jti, userId }, now = new Date()) {
       return database.sessaoAutenticacao.updateMany({
         data: { revogada_em: now, rotacionada_em: now },
@@ -169,6 +213,24 @@ export function createAuthRepository(database = prisma) {
           revogada_em: null,
           ...(adminId ? { administrador_id: adminId } : { usuario_id: userId }),
         },
+      });
+    },
+
+    consumePasswordResetToken(tokenHash, now = new Date()) {
+      return database.tokenRecuperacaoSenha.updateMany({
+        data: { usado_em: now },
+        where: {
+          expira_em: { gt: now },
+          token_hash: tokenHash,
+          usado_em: null,
+        },
+      });
+    },
+
+    invalidatePasswordResetTokens(userId, date = new Date()) {
+      return database.tokenRecuperacaoSenha.updateMany({
+        data: { usado_em: date },
+        where: { usuario_id: userId, usado_em: null },
       });
     },
 
@@ -189,6 +251,16 @@ export function createAuthRepository(database = prisma) {
       return database.usuario.update({
         data: { ultimo_login_em: date },
         include: appUserInclude,
+        where: { id },
+      });
+    },
+
+    updateUserPassword(id, passwordHash, date = new Date()) {
+      return database.usuario.update({
+        data: {
+          senha_hash: passwordHash,
+          atualizado_em: date,
+        },
         where: { id },
       });
     },

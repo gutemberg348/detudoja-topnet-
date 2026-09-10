@@ -113,6 +113,40 @@ export const creditAdminUserWalletSchema = z.object({
   walletCode: z.enum(["saldo_pix", "cashback", "rede", "vendas"]),
 });
 
+export const adjustAdminUserWalletSchema = z.object({
+  description: z.string().trim().min(8, "Explique o motivo do ajuste").max(240),
+  operation: z.enum(["CREDIT", "DEBIT"]),
+  valueCents: z.coerce.number().int().positive("Informe um valor positivo"),
+  walletCode: z.enum(["saldo_pix", "cashback", "rede", "vendas"]),
+});
+
+export const updateAdminSellerProfileSchema = z.object({
+  status: z.enum(["ATIVO", "PAUSADO", "BLOQUEADO", "REPROVADO"]),
+}).strict();
+
+export const updateAdminCourierProfileSchema = z.object({
+  acceptsPlatformCalls: z.boolean().optional(),
+  status: z.enum(["ATIVO", "PAUSADO", "BLOQUEADO"]).optional(),
+}).strict().refine((data) => Object.keys(data).length > 0, "Informe ao menos um campo");
+
+export const createAdminUserServiceSchema = z.object({
+  serviceTypeId: segmentIdSchema,
+}).strict();
+
+export const updateAdminUserServiceSchema = z.object({
+  status: z.enum(["ATIVO", "INATIVO", "PAUSADO"]),
+}).strict();
+
+export const updateAdminWalletTypeSchema = z.object({
+  canWithdraw: z.boolean(),
+}).strict();
+
+export const moveAdminNetworkPlacementSchema = z.object({
+  parentUserId: z.coerce.number().int().positive(),
+  position: z.coerce.number().int().min(1).max(2),
+  reason: z.string().trim().min(8, "Explique o motivo da mudanca").max(240),
+}).strict();
+
 export const refundAdminPaymentSchema = z.object({
   reason: z
     .string()
@@ -167,12 +201,26 @@ export const updateAdminOrderEarningsDistributionSchema = z
     }
   });
 
+export const updateAdminPaymentPolicySchema = z.object({
+  localPriorityCashbackLimitCents: z.coerce.number().int().min(0).max(100000),
+  localProcessingFeeCents: z.coerce.number().int().min(0).max(100000),
+  onlineServiceFeeCents: z.coerce.number().int().min(0).max(100000),
+}).strict();
+
+const nullablePaymentPolicyCentsSchema = z.preprocess(
+  (value) => (value === "" || value === null ? null : value),
+  z.coerce.number().int().min(0).max(100000).nullable().optional(),
+);
+
 export const updateAdminSegmentFeeSchema = z
   .object({
     cashbackPercent: earningsDistributionPercentSchema,
     consumerReferralPercent: earningsDistributionPercentSchema,
     feePercent: feePercentSchema,
+    localPriorityCashbackLimitCents: nullablePaymentPolicyCentsSchema,
+    localProcessingFeeCents: nullablePaymentPolicyCentsSchema,
     networkPercent: earningsDistributionPercentSchema,
+    onlineServiceFeeCents: nullablePaymentPolicyCentsSchema,
     sellerReferralPercent: earningsDistributionPercentSchema,
   })
   .superRefine((data, context) => {
@@ -197,6 +245,8 @@ export const updateAdminStoreSchema = z
     categoryId: z.coerce.number().int().positive().optional(),
     segmentId: segmentIdSchema.optional(),
     customFeePercent: nullableFeePercentSchema,
+    localPriorityCashbackLimitCents: nullablePaymentPolicyCentsSchema,
+    localProcessingFeeCents: nullablePaymentPolicyCentsSchema,
     description: z.string().trim().max(2000).optional().or(z.literal("")),
     email: z.string().trim().email("E-mail invalido").max(255).optional().or(z.literal("")),
     merchantKycStatus: z
@@ -214,6 +264,7 @@ export const updateAdminStoreSchema = z
     ownerName: z.string().trim().min(2, "Informe o nome do responsavel").max(160).optional(),
     ownerPhone: z.string().trim().max(30).optional().or(z.literal("")),
     phone: z.string().trim().max(30).optional().or(z.literal("")),
+    onlineServiceFeeCents: nullablePaymentPolicyCentsSchema,
     status: z
       .enum(["RASCUNHO", "EM_ANALISE", "ATIVA", "PAUSADA", "BLOQUEADA", "REPROVADA"])
       .optional(),

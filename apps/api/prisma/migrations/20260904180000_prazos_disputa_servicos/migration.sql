@@ -1,0 +1,1 @@
+ALTER TYPE "StatusConversaServico" ADD VALUE IF NOT EXISTS 'EM_DISPUTA';

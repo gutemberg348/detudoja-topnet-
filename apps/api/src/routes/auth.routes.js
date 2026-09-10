@@ -7,10 +7,14 @@ import {
   createSocialLoginController,
   logoutController,
   meController,
+  requestPasswordResetController,
+  resetPasswordController,
 } from "../modules/auth/auth.controller.js";
 import {
   completeCpfSchema,
   loginSchema,
+  passwordResetConfirmSchema,
+  passwordResetRequestSchema,
   refreshTokenSchema,
   registrationSchema,
   socialLoginSchema,
@@ -19,6 +23,8 @@ import { authAudiences } from "../modules/auth/auth.service.js";
 import { authMiddleware } from "../middlewares/auth.middleware.js";
 import {
   loginRateLimit,
+  passwordResetConfirmRateLimit,
+  passwordResetRequestRateLimit,
   registerRateLimit,
 } from "../middlewares/rate-limit.middleware.js";
 import { validate } from "../middlewares/validate.middleware.js";
@@ -42,6 +48,18 @@ authRoutes.post(
   registerRateLimit,
   validate(registrationSchema),
   createRegisterController(authAudiences.app),
+);
+authRoutes.post(
+  "/password-reset/request",
+  passwordResetRequestRateLimit,
+  validate(passwordResetRequestSchema),
+  requestPasswordResetController,
+);
+authRoutes.post(
+  "/password-reset/confirm",
+  passwordResetConfirmRateLimit,
+  validate(passwordResetConfirmSchema),
+  resetPasswordController,
 );
 authRoutes.post(
   "/refresh",

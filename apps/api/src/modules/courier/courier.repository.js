@@ -26,6 +26,12 @@ export function createCourierRepository(database = prisma) {
     lockCourier(courierId) {
       return database.$queryRaw`SELECT pg_advisory_xact_lock(71427, ${courierId}::int)::text AS lock_result`;
     },
+    lockCustomerDispatch(userId) {
+      return database.$queryRaw`SELECT pg_advisory_xact_lock(71429, ${userId}::int)::text AS lock_result`;
+    },
+    lockStoreDispatch(storeId) {
+      return database.$queryRaw`SELECT pg_advisory_xact_lock(71428, ${storeId}::int)::text AS lock_result`;
+    },
     transaction(work) { return database.$transaction(work); },
     updateCourier(args) { return database.motoboy.update(args); },
     updateCourierRequest(args) { return database.solicitacaoMotoboy.update(args); },

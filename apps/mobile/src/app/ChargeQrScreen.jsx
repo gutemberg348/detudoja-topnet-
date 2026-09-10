@@ -3,6 +3,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useCallback, useState } from "react";
 import { ActivityIndicator, Image, Modal, Pressable, Share, StyleSheet, Text, View } from "react-native";
 import { AppButton } from "../components/AppButton";
+import { LocalRewardNotice } from "../components/LocalRewardNotice";
 import { PaymentFeedbackOverlay } from "../components/PaymentFeedbackOverlay";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { useRealtimeCharge } from "../hooks/useRealtimeCharge";
@@ -24,7 +25,10 @@ export function ChargeQrScreen({ navigation, route }) {
   const [signupQr, setSignupQr] = useState(null);
 
   const handleChargeUpdated = useCallback((updatedCharge) => {
-    setCharge(updatedCharge);
+    setCharge((current) => ({
+      ...updatedCharge,
+      localRewardPolicy: updatedCharge.localRewardPolicy ?? current?.localRewardPolicy,
+    }));
     if (updatedCharge?.status === "PAGA") {
       setSignupQr(null);
       setPaymentReceived(true);
@@ -113,11 +117,13 @@ export function ChargeQrScreen({ navigation, route }) {
         <Text style={styles.expiry}>{charge.status === "PAGA" ? "Pagamento confirmado em tempo real" : charge.expiresAt ? `Valida ate ${formatExpiry(charge.expiresAt)}` : "Sem prazo para expirar"}</Text>
       </View>
 
+      <LocalRewardNotice policy={charge.localRewardPolicy} />
+
       <View style={styles.qrCard}>
         <View style={styles.qrFrame}>
           <Image accessibilityLabel="QR da cobranca" source={{ uri: qrImageDataUrl }} style={styles.qrImage} />
         </View>
-        <Text style={styles.qrTitle}>{charge.status === "PAGA" ? "Pagamento recebido" : "Ler cobranca DeTudoJa"}</Text>
+        <Text style={styles.qrTitle}>{charge.status === "PAGA" ? "Pagamento recebido" : "Ler cobranca Brasil Cashback"}</Text>
         <Text style={styles.qrText}>
           {charge.status === "PAGA" ? "A venda foi confirmada e os saldos foram atualizados." : "O cliente abre Pagar QR no app, confere o valor e confirma com a carteira."}
         </Text>
@@ -208,7 +214,7 @@ export function ChargeQrScreen({ navigation, route }) {
       </Modal>
       <PaymentFeedbackOverlay
         amountCents={charge.amountCents}
-        counterparty={charge.customer?.name ?? "Cliente DeTudoJa"}
+        counterparty={charge.customer?.name ?? "Cliente Brasil Cashback"}
         durationMs={3000}
         message="A venda foi confirmada e o valor ja entrou no seu historico."
         onFinished={() => {
