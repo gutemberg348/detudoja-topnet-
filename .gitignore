@@ -18,3 +18,5 @@ yarn-error.log*
 pnpm-debug.log*
 .DS_Store
 txt.txt
+apps/mobile/.expo-check/
+apps/mobile/dist-*/
