@@ -14,6 +14,21 @@ npm run prisma:validate
 npm run prisma:generate
 ```
 
+## Variaveis do Docker Compose
+
+Depois de clonar o repositorio, crie o `.env` da raiz usando o modelo
+versionado e troque a senha do PostgreSQL antes de iniciar os containers:
+
+```bash
+cp .env.example .env
+docker compose config --quiet
+docker compose up -d --build
+```
+
+As configuracoes privadas da API ficam separadamente em `apps/api/.env`,
+criado a partir de `apps/api/.env.example`. Nenhum arquivo `.env` real deve
+ser enviado ao Git.
+
 ## Acesso local
 
 O usuário temporário da autenticação fica em `apps/api/.env`.
