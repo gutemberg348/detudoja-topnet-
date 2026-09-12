@@ -1,0 +1,21 @@
+{
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api-brasil.testes-techcode.shop"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production": {
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api-brasil.testes-techcode.shop"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      }
+    }
+  }
+}

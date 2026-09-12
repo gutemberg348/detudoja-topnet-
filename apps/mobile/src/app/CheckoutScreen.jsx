@@ -122,16 +122,24 @@ export function CheckoutScreen({ navigation, route }) {
       try {
         const response = await getCurrentUserAddresses(session.accessToken);
         const nextAddresses = response.addresses ?? [];
+        const completeAddresses = nextAddresses.filter((address) => address.complete !== false);
+        const baseLocation = nextAddresses[0] ?? null;
 
         if (!active) {
           return;
         }
 
-        setAddresses(nextAddresses);
+        setAddresses(completeAddresses);
 
-        if (nextAddresses[0]) {
-          setSelectedAddressId(nextAddresses[0].id);
-          setAddressForm(addressFromSaved(nextAddresses[0]));
+        if (completeAddresses[0]) {
+          setSelectedAddressId(completeAddresses[0].id);
+          setAddressForm(addressFromSaved(completeAddresses[0]));
+        } else if (baseLocation) {
+          setAddressForm((current) => ({
+            ...current,
+            cidade: baseLocation.cidade ?? "",
+            estado: baseLocation.estado ?? "",
+          }));
         }
       } catch {
         if (active) {

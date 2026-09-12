@@ -8,7 +8,9 @@ dist
 **/dist
 dist-*-check
 **/dist-*-check
-storage/uploads
+storage/uploads/*
+!storage/uploads/curated
+!storage/uploads/curated/**
 .env
 **/.env
 npm-debug.log*

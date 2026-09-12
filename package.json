@@ -11,6 +11,7 @@
     "packages/*"
   ],
   "overrides": {
+    "react-native-svg": "15.12.1",
     "socket.io-parser": "4.2.7"
   },
   "scripts": {

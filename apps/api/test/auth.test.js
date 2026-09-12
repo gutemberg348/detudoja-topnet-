@@ -21,6 +21,11 @@ const testAccount = {
   password: "senha123",
   phone: "11977776666",
 };
+const minimalAccount = {
+  email: "auth-minimal-test@detudoja.local",
+  name: "Usuario Minimo Teste",
+  password: "senha123",
+};
 const networkChildren = [
   {
     cpf: "11144477735",
@@ -78,7 +83,11 @@ async function deleteAdminTestCategory() {
 }
 
 async function deleteTestAccount() {
-  const testEmails = [testAccount.email, ...networkChildren.map((item) => item.email)];
+  const testEmails = [
+    testAccount.email,
+    minimalAccount.email,
+    ...networkChildren.map((item) => item.email),
+  ];
   const testPhones = [testAccount.phone, ...networkChildren.map((item) => item.phone)];
   const users = await prisma.usuario.findMany({
     select: { id: true },
@@ -231,6 +240,35 @@ test("app registration creates a user and starts a session", async () => {
   );
   assert.notEqual(storedUser.senha_hash, testAccount.password);
   assert.equal("senha_hash" in registerResponse.data.user, false);
+});
+
+test("app registration allows phone and address to be completed later", async () => {
+  const registerResponse = await request("/api/app/auth/register", {
+    body: minimalAccount,
+  });
+  const storedUser = await prisma.usuario.findUnique({
+    include: { enderecos: true },
+    where: { email: minimalAccount.email },
+  });
+
+  assert.equal(registerResponse.status, 201);
+  assert.equal(storedUser.telefone, null);
+  assert.equal(storedUser.enderecos.length, 0);
+
+  const locationResponse = await request("/api/app/users/me", {
+    body: { location: { city: "Patos", state: "PB" } },
+    method: "PATCH",
+    token: registerResponse.data.accessToken,
+  });
+  const addressesResponse = await request("/api/app/users/me/addresses", {
+    token: registerResponse.data.accessToken,
+  });
+
+  assert.equal(locationResponse.status, 200);
+  assert.equal(addressesResponse.status, 200);
+  assert.equal(addressesResponse.data.addresses[0].cidade, "Patos");
+  assert.equal(addressesResponse.data.addresses[0].estado, "PB");
+  assert.equal(addressesResponse.data.addresses[0].complete, false);
 });
 
 test("app login accepts a database user email", async () => {

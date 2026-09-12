@@ -29,6 +29,7 @@ export function AuthNavigator() {
       />
       <Stack.Screen component={LoginScreen} name="Login" />
       <Stack.Screen component={RegisterScreen} name="Register" />
+      <Stack.Screen component={RegisterScreen} name="InviteRegister" />
       <Stack.Screen component={ForgotPasswordScreen} name="ForgotPassword" />
       <Stack.Screen component={ResetPasswordScreen} name="ResetPassword" />
     </Stack.Navigator>

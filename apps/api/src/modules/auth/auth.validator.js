@@ -40,7 +40,7 @@ export const socialLoginSchema = z.object({
 });
 
 export const registrationSchema = z.object({
-  address: accountAddressSchema,
+  address: accountAddressSchema.optional(),
   email: z.string().trim().toLowerCase().email("E-mail invalido").max(255),
   inviteCode: z.string().trim().toUpperCase().max(40).optional(),
   storeSlug: z
@@ -57,10 +57,13 @@ export const registrationSchema = z.object({
     .max(72, "Senha muito longa")
     .regex(/[a-z]/i, "A senha deve conter uma letra")
     .regex(/\d/, "A senha deve conter um numero"),
-  phone: z
-    .string()
-    .transform(onlyDigits)
-    .refine((value) => phonePattern.test(value), "Telefone invalido"),
+  phone: z.preprocess(
+    (value) => {
+      const normalized = typeof value === "string" ? onlyDigits(value) : value;
+      return normalized || undefined;
+    },
+    z.string().refine((value) => phonePattern.test(value), "Telefone invalido").optional(),
+  ),
 });
 
 export const completeCpfSchema = z.object({

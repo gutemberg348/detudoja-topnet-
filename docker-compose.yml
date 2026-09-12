@@ -118,6 +118,26 @@ services:
       start_period: 35s
       retries: 3
 
+  seed-demo:
+    profiles: ["seed"]
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: "no"
+    env_file:
+      - path: apps/api/.env
+        format: raw
+    environment:
+      <<: *api_environment
+      DEMO_ASSETS_DIR: /app/seed-assets/curated
+      DEMO_SEED_PASSWORD: ${DEMO_SEED_PASSWORD:-}
+    command: npm run seed:demo
+    volumes:
+      - uploads_data:/app/storage/uploads
+    depends_on:
+      api-migrate:
+        condition: service_completed_successfully
+
   web-admin:
     build:
       context: .

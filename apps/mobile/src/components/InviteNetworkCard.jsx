@@ -14,8 +14,10 @@ export function InviteNetworkCard({ code, message }) {
   }
 
   async function shareInvite() {
+    const inviteUrl = `detudoja://cadastro/convite/${encodeURIComponent(code)}`;
+
     await Share.share({
-      message: `${message} Meu código de convite é ${code}.`,
+      message: `${message} Meu codigo de convite e ${code}. Abra no app: ${inviteUrl}`,
     });
   }
 

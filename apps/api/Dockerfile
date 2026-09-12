@@ -19,6 +19,7 @@ RUN npm ci --include=dev \
 
 COPY apps/api ./apps/api
 COPY packages/shared ./packages/shared
+COPY storage/uploads/curated ./seed-assets/curated
 
 RUN npm run prisma:generate \
   && chown -R node:node /app

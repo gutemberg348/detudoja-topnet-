@@ -1,9 +1,9 @@
 {
   "expo": {
     "name": "Brasil Cashback",
-    "slug": "detudoja",
+    "slug": "brasil-cashback",
     "scheme": "detudoja",
-    "icon": "./assets/brasil-cashback-logo.png",
+    "icon": "./assets/brasil-cashback-app-icon.png",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -15,12 +15,18 @@
     },
     "android": {
       "package": "com.detudoja.mobile",
+      "versionCode": 4,
       "adaptiveIcon": {
         "backgroundColor": "#F5FFF8",
-        "foregroundImage": "./assets/brasil-cashback-logo.png"
-      }
+        "foregroundImage": "./assets/brasil-cashback-app-icon.png"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "ios": {
+      "buildNumber": "1",
       "bundleIdentifier": "com.detudoja.mobile",
       "usesAppleSignIn": true,
       "supportsTablet": true
@@ -43,10 +49,21 @@
           "photosPermission": "O Brasil Cashback acessa suas fotos para enviar logo, banner e imagens de produtos."
         }
       ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "O Brasil Cashback usa sua localizacao para mostrar lojas e servicos da sua cidade."
+        }
+      ],
       "expo-font",
       "expo-web-browser",
       "expo-notifications",
       "expo-apple-authentication"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "a1b5369b-d353-4d57-80db-90d89fbbff40"
+      }
+    }
   }
 }

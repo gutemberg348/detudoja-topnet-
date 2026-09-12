@@ -162,7 +162,12 @@ export function createAuthRepository(database = prisma) {
 
     findUserConflict(email, phone) {
       return database.usuario.findFirst({
-        where: { OR: [{ email }, { telefone: phone }] },
+        where: {
+          OR: [
+            { email },
+            ...(phone ? [{ telefone: phone }] : []),
+          ],
+        },
       });
     },
 

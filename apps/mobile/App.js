@@ -14,10 +14,21 @@ import {
   registerDeviceForPushNotifications,
   subscribePushNotificationResponses,
 } from "./src/services/push-notifications";
-import { useAuthStore } from "./src/stores/useAuthStore";
+import {
+  AuthStoreProvider,
+  useAuthStore,
+} from "./src/stores/useAuthStore";
 import { colors } from "./src/utils/theme";
 
 export function App() {
+  return (
+    <AuthStoreProvider>
+      <AppContent />
+    </AuthStoreProvider>
+  );
+}
+
+function AppContent() {
   const { session } = useAuthStore();
   const [fontsLoaded] = useFonts({
     Inter_400Regular,

@@ -3,10 +3,14 @@ import { addressData } from "../../utils/location.js";
 import { usersRepository } from "./users.repository.js";
 
 function serializeAddress(address) {
+  const complete = [address.cep, address.bairro, address.rua, address.numero]
+    .every((value) => String(value ?? "").trim());
+
   return {
     bairro: address.bairro,
     cep: address.cep,
     cidade: address.cidade,
+    complete,
     complemento: address.complemento,
     estado: address.estado,
     id: address.id,
@@ -98,15 +102,19 @@ export async function listCurrentUserAddresses(userId) {
 export async function updateCurrentUser(userId, data) {
   try {
     await usersRepository.transaction(async (repository) => {
-      const currentAddress = data.address
+      const currentAddress = data.address || data.location
         ? await repository.findCurrentAddress(userId)
         : null;
 
-      await repository.updateUser(userId, {
+      const userData = {
         ...(data.email ? { email: data.email } : {}),
         ...(data.name ? { nome: data.name } : {}),
         ...(data.phone ? { telefone: data.phone } : {}),
-      });
+      };
+
+      if (Object.keys(userData).length) {
+        await repository.updateUser(userId, userData);
+      }
 
       if (data.address) {
         const savedAddress = addressData(data.address);
@@ -115,6 +123,17 @@ export async function updateCurrentUser(userId, data) {
         } else {
           await repository.createMainAddress(userId, savedAddress);
         }
+      } else if (data.location && !currentAddress) {
+        await repository.createMainAddress(userId, {
+          bairro: "",
+          cep: "",
+          cidade: data.location.city,
+          complemento: null,
+          estado: data.location.state,
+          numero: "",
+          referencia: null,
+          rua: "",
+        });
       }
     });
   } catch (error) {

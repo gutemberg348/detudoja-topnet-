@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { BrandLogo } from "../components/BrandLogo";
+import { MarketplaceLocationModal } from "../components/MarketplaceLocationModal";
 import { MarketplaceProductCard } from "../components/MarketplaceProductCard";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { SearchBar } from "../components/SearchBar";
@@ -23,6 +24,7 @@ import {
 } from "../services/marketplace.api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import { getServiceTypes } from "../services/service-chats.api";
+import { getCurrentUserAddresses, updateCurrentUser } from "../services/users.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { resolveMediaUrl } from "../utils/media";
 import { matchesSearchText, normalizeSearchText } from "../utils/search";
@@ -50,13 +52,16 @@ export function StoresScreen({ navigation, route }) {
   const [categories, setCategories] = useState([]);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [locationPromptOpen, setLocationPromptOpen] = useState(false);
   const [marketplaceSearch, setMarketplaceSearch] = useState(route.params?.query ?? "");
+  const [marketplaceLocation, setMarketplaceLocation] = useState(null);
   const [products, setProducts] = useState([]);
   const [resultMode, setResultMode] = useState(() => initialResultMode(route));
   const [serviceTypes, setServiceTypes] = useState([]);
   const [search, setSearch] = useState(route.params?.query ?? "");
   const [stores, setStores] = useState([]);
   const { suggestions } = useMarketplaceSuggestions(session?.accessToken, search, {
+    enabled: Boolean(marketplaceLocation),
     limit: 8,
   });
   const hasSearch = Boolean(search.trim());
@@ -101,6 +106,41 @@ export function StoresScreen({ navigation, route }) {
     && !hasAnySearchResult;
 
   useEffect(() => {
+    let active = true;
+
+    async function loadLocation() {
+      if (!session?.accessToken) return;
+
+      try {
+        const response = await getCurrentUserAddresses(session.accessToken);
+        const address = (response.addresses ?? []).find(
+          (item) => item.cidade && item.estado,
+        );
+
+        if (!active) return;
+
+        if (address) {
+          setMarketplaceLocation({ city: address.cidade, state: address.estado });
+        } else {
+          setLocationPromptOpen(true);
+          setIsLoading(false);
+        }
+      } catch {
+        if (active) {
+          setLocationPromptOpen(true);
+          setIsLoading(false);
+        }
+      }
+    }
+
+    loadLocation();
+
+    return () => {
+      active = false;
+    };
+  }, [session?.accessToken]);
+
+  useEffect(() => {
     if (route.params?.category) {
       if (route.params.category === SERVICES_CATEGORY_ID) {
         setCategory("todas");
@@ -137,7 +177,7 @@ export function StoresScreen({ navigation, route }) {
     let active = true;
 
     async function loadMarketplace() {
-      if (!session?.accessToken) {
+      if (!session?.accessToken || !marketplaceLocation) {
         setIsLoading(false);
         return;
       }
@@ -187,7 +227,7 @@ export function StoresScreen({ navigation, route }) {
     return () => {
       active = false;
     };
-  }, [category, hasMarketplaceSearch, marketplaceSearch, resultMode, session?.accessToken]);
+  }, [category, hasMarketplaceSearch, marketplaceLocation, marketplaceSearch, resultMode, session?.accessToken]);
 
   const refreshServiceTypes = useCallback(async () => {
     if (!session?.accessToken) {
@@ -317,6 +357,14 @@ export function StoresScreen({ navigation, route }) {
     setSearch("");
   }
 
+  async function confirmMarketplaceLocation(location) {
+    if (!session?.accessToken) return;
+
+    await updateCurrentUser(session.accessToken, { location });
+    setMarketplaceLocation(location);
+    setLocationPromptOpen(false);
+  }
+
   const resultDescription = search.trim()
     ? `Resultados para "${search.trim()}"`
     : selectedCategory
@@ -329,6 +377,15 @@ export function StoresScreen({ navigation, route }) {
     <ScreenContainer contentContainerStyle={styles.content} padded={false}>
       <View style={styles.hero}>
         <BrandLogo centered size="large" />
+
+        {marketplaceLocation ? (
+          <View style={styles.locationBadge}>
+            <Ionicons color={colors.primaryDark} name="location" size={15} />
+            <Text style={styles.locationBadgeText}>
+              {marketplaceLocation.city} - {marketplaceLocation.state}
+            </Text>
+          </View>
+        ) : null}
 
         <View style={styles.searchArea}>
           <SearchBar
@@ -520,6 +577,11 @@ export function StoresScreen({ navigation, route }) {
         />
       ) : null}
       </View>
+
+      <MarketplaceLocationModal
+        onConfirm={confirmMarketplaceLocation}
+        visible={locationPromptOpen}
+      />
     </ScreenContainer>
   );
 }
@@ -844,6 +906,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.md,
     zIndex: 20,
+  },
+  locationBadge: {
+    alignItems: "center",
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.round,
+    flexDirection: "row",
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 7,
+  },
+  locationBadgeText: {
+    color: colors.primaryDark,
+    fontFamily: fonts.bold,
+    fontSize: typography.caption,
+    fontWeight: "700",
   },
   modeIcon: {
     alignItems: "center",

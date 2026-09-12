@@ -484,13 +484,17 @@ export async function register({
       }
 
       const createdUser = await repository.createRegisteredUser({
-        enderecos: {
-          create: {
-            ...addressData(address),
-            nome_endereco: "Endereco principal",
-            principal: true,
-          },
-        },
+        ...(address
+          ? {
+              enderecos: {
+                create: {
+                  ...addressData(address),
+                  nome_endereco: "Endereco principal",
+                  principal: true,
+                },
+              },
+            }
+          : {}),
         email,
         kyc: {
           create: {
@@ -503,7 +507,7 @@ export async function register({
         loja_origem_cadastro_id: storeSignupSource?.id ?? null,
         senha_hash: passwordHash,
         status: "ATIVO",
-        telefone: phone,
+        telefone: phone ?? null,
         tipo_conta: "CONSUMIDOR",
       });
 

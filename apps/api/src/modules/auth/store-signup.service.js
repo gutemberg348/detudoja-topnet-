@@ -165,14 +165,8 @@ export function renderStoreSignupPage({ appDownloadUrl, store }) {
     <div class="code"><span>Codigo da loja</span><strong>${registrationCode}</strong></div>
     <form id="register-form">
       <label>Nome completo<input name="name" autocomplete="name" minlength="3" required></label>
-      <label>Telefone<input name="phone" autocomplete="tel" inputmode="tel" required></label>
+      <label>Telefone (opcional)<input name="phone" autocomplete="tel" inputmode="tel"></label>
       <label>E-mail<input name="email" autocomplete="email" inputmode="email" type="email" required></label>
-      <label>CEP<input name="zipCode" autocomplete="postal-code" inputmode="numeric" maxlength="9" required></label>
-      <label>Rua<input name="street" autocomplete="street-address" required></label>
-      <label>Numero<input name="number" inputmode="numeric" required></label>
-      <label>Bairro<input name="district" required></label>
-      <label>Cidade<input name="city" autocomplete="address-level2" required></label>
-      <label>UF<input name="state" autocomplete="address-level1" maxlength="2" required></label>
       <label>Senha<input name="password" autocomplete="new-password" minlength="8" type="password" required></label>
       <button id="submit" type="submit">Criar minha conta</button>
     </form>
@@ -193,18 +187,10 @@ export function renderStoreSignupPage({ appDownloadUrl, store }) {
       try {
         const response = await fetch("/api/app/auth/register", {
           body: JSON.stringify({
-            address: {
-              city: formData.get("city"),
-              district: formData.get("district"),
-              number: formData.get("number"),
-              state: String(formData.get("state") || "").toUpperCase(),
-              street: formData.get("street"),
-              zipCode: formData.get("zipCode")
-            },
             email: formData.get("email"),
             name: formData.get("name"),
             password: formData.get("password"),
-            phone: formData.get("phone"),
+            ...(formData.get("phone") ? { phone: formData.get("phone") } : {}),
             storeSlug: "${storeSlug}"
           }),
           headers: { "Content-Type": "application/json" },
@@ -214,7 +200,7 @@ export function renderStoreSignupPage({ appDownloadUrl, store }) {
         if (!response.ok) throw new Error(data?.message || "Nao foi possivel concluir o cadastro.");
         form.hidden = true;
         status.className = "success";
-        status.textContent = "Conta criada. Abra ou baixe o app Brasil Cashback e entre com seu e-mail ou telefone.";
+        status.textContent = "Conta criada. Abra ou baixe o app Brasil Cashback e entre com seu e-mail.";
       } catch (error) {
         status.className = "error";
         status.textContent = error.message || "Nao foi possivel concluir o cadastro.";

@@ -33,10 +33,7 @@ import { WalletScreen } from "../app/WalletScreen";
 import { WalletDepositScreen } from "../app/WalletDepositScreen";
 import { WithdrawalScreen } from "../app/WithdrawalScreen";
 import { BackHeader } from "../components/BackHeader";
-import {
-  AuthStoreProvider,
-  useAuthStore,
-} from "../stores/useAuthStore";
+import { useAuthStore } from "../stores/useAuthStore";
 import { colors } from "../utils/theme";
 import { AuthNavigator } from "./AuthNavigator";
 import { MainTabs } from "./MainTabs";
@@ -79,6 +76,7 @@ const linking = {
   config: {
     screens: {
       Register: "cadastro/loja/:storeSlug",
+      InviteRegister: "cadastro/convite/:registrationCode",
       ResetPassword: "redefinir-senha",
       PersonalChatsInbox: "amigos",
     },
@@ -270,11 +268,9 @@ function Routes() {
 export function AppNavigator() {
   return (
     <SafeAreaProvider>
-      <AuthStoreProvider>
-        <NavigationContainer linking={linking} ref={navigationRef} theme={navigationTheme}>
-          <Routes />
-        </NavigationContainer>
-      </AuthStoreProvider>
+      <NavigationContainer linking={linking} ref={navigationRef} theme={navigationTheme}>
+        <Routes />
+      </NavigationContainer>
     </SafeAreaProvider>
   );
 }

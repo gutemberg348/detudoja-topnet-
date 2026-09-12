@@ -1,11 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { ApiError } from "../services/api";
-import { fetchCepAddress } from "../services/cep.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import {
   formatLogin,
-  formatCep,
   formatPhone,
   normalizeLogin,
   onlyDigits,
@@ -24,16 +22,6 @@ export function AuthCredentialsForm({
 }) {
   const { login, register } = useAuthStore();
   const [email, setEmail] = useState("");
-  const [address, setAddress] = useState({
-    city: "",
-    complement: "",
-    district: "",
-    number: "",
-    reference: "",
-    state: "",
-    street: "",
-    zipCode: "",
-  });
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loginValue, setLoginValue] = useState("");
@@ -43,6 +31,13 @@ export function AuthCredentialsForm({
   const [password, setPassword] = useState("");
   const [phone, setPhone] = useState("");
   const isLogin = mode === "login";
+  const isInviteLocked = Boolean(registrationCode);
+
+  useEffect(() => {
+    if (registrationCode) {
+      setInviteCode(registrationCode);
+    }
+  }, [registrationCode]);
 
   function updateField(setter, field, formatter = (value) => value) {
     return (value) => {
@@ -52,41 +47,10 @@ export function AuthCredentialsForm({
     };
   }
 
-  function updateAddressField(field, formatter = (value) => value) {
-    return (value) => {
-      setAddress((current) => ({ ...current, [field]: formatter(value) }));
-      setErrors((current) => ({ ...current, [field]: undefined }));
-      setMessage("");
-    };
-  }
-
-  async function handleCepChange(value) {
-    const zipCode = formatCep(value);
-    updateAddressField("zipCode", formatCep)(value);
-
-    if (onlyDigits(zipCode).length !== 8) {
-      return;
-    }
-
-    try {
-      const cepAddress = await fetchCepAddress(zipCode);
-      setAddress((current) => ({
-        ...current,
-        city: cepAddress.cidade || current.city,
-        district: cepAddress.bairro || current.district,
-        state: cepAddress.estado || current.state,
-        street: cepAddress.rua || current.street,
-        zipCode,
-      }));
-    } catch {
-      setMessage("Nao encontramos esse CEP. Complete seu endereco manualmente.");
-    }
-  }
-
   async function handleSubmit() {
     const fieldErrors = isLogin
       ? validateLoginFields({ login: loginValue, password })
-      : validateRegistrationFields({ address, email, name, password, phone });
+      : validateRegistrationFields({ email, name, password, phone });
 
     setErrors(fieldErrors);
     setMessage("");
@@ -102,11 +66,6 @@ export function AuthCredentialsForm({
         await login({ login: normalizeLogin(loginValue), password });
       } else {
         await register({
-          address: {
-            ...address,
-            state: address.state.trim().toUpperCase(),
-            zipCode: onlyDigits(address.zipCode),
-          },
           email: email.trim().toLowerCase(),
           ...(inviteCode.trim()
             ? { inviteCode: inviteCode.trim().toUpperCase() }
@@ -114,7 +73,7 @@ export function AuthCredentialsForm({
           ...(storeSlug ? { storeSlug } : {}),
           name: name.trim(),
           password,
-          phone: onlyDigits(phone),
+          ...(phone.trim() ? { phone: onlyDigits(phone) } : {}),
         });
       }
     } catch (requestError) {
@@ -155,71 +114,11 @@ export function AuthCredentialsForm({
             keyboardType="phone-pad"
             maxLength={15}
             onChangeText={updateField(setPhone, "phone", formatPhone)}
-            placeholder="(00) 00000-0000"
+            placeholder="Telefone com DDD (opcional)"
             returnKeyType="next"
             textContentType="telephoneNumber"
             value={phone}
           />
-          <View style={styles.locationBlock}>
-            <Text style={styles.locationTitle}>Sua cidade</Text>
-            <Text style={styles.locationHint}>Mostramos lojas, servicos e ofertas da sua regiao.</Text>
-            <AppInput
-              autoComplete="postal-code"
-              error={errors.zipCode}
-              icon="location-outline"
-              inputMode="numeric"
-              keyboardType="number-pad"
-              maxLength={9}
-              onChangeText={handleCepChange}
-              placeholder="CEP"
-              value={address.zipCode}
-            />
-            <AppInput
-              autoCapitalize="words"
-              error={errors.street}
-              icon="map-outline"
-              onChangeText={updateAddressField("street")}
-              placeholder="Rua ou avenida"
-              value={address.street}
-            />
-            <AppInput
-              error={errors.number}
-              icon="business-outline"
-              onChangeText={updateAddressField("number")}
-              placeholder="Numero"
-              value={address.number}
-            />
-            <AppInput
-              autoCapitalize="words"
-              error={errors.district}
-              icon="navigate-outline"
-              onChangeText={updateAddressField("district")}
-              placeholder="Bairro"
-              value={address.district}
-            />
-            <View style={styles.locationRow}>
-              <View style={styles.locationCity}>
-                <AppInput
-                  autoCapitalize="words"
-                  error={errors.city}
-                  icon="location-outline"
-                  onChangeText={updateAddressField("city")}
-                  placeholder="Cidade"
-                  value={address.city}
-                />
-              </View>
-              <View style={styles.locationState}>
-                <AppInput
-                  autoCapitalize="characters"
-                  error={errors.state}
-                  maxLength={2}
-                  onChangeText={updateAddressField("state", (value) => value.toUpperCase())}
-                  placeholder="UF"
-                  value={address.state}
-                />
-              </View>
-            </View>
-          </View>
           <AppInput
             autoComplete="email"
             error={errors.email}
@@ -242,6 +141,16 @@ export function AuthCredentialsForm({
                 <Text style={styles.storeOriginText}>Sua origem ja esta aplicada. Conclua seus dados.</Text>
               </View>
             </View>
+          ) : isInviteLocked ? (
+            <AppInput
+              autoCapitalize="characters"
+              autoComplete="off"
+              editable={false}
+              icon="lock-closed-outline"
+              label="Codigo do convite"
+              placeholder="Codigo de convite"
+              value={inviteCode}
+            />
           ) : (
             <AppInput
               autoCapitalize="characters"
@@ -344,32 +253,6 @@ const styles = StyleSheet.create({
   },
   form: {
     gap: spacing.md,
-  },
-  locationBlock: {
-    gap: spacing.sm,
-    marginTop: spacing.xs,
-  },
-  locationCity: {
-    flex: 1,
-  },
-  locationHint: {
-    color: colors.textMuted,
-    fontFamily: fonts.regular,
-    fontSize: typography.small,
-    lineHeight: 18,
-    marginBottom: spacing.xs,
-  },
-  locationRow: {
-    flexDirection: "row",
-    gap: spacing.sm,
-  },
-  locationState: {
-    width: 82,
-  },
-  locationTitle: {
-    color: colors.text,
-    fontFamily: fonts.bold,
-    fontSize: typography.body,
   },
   message: {
     color: colors.danger,

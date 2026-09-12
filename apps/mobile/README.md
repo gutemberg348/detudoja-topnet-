@@ -1,6 +1,6 @@
 # Mobile
 
-Aplicativo consumidor DeTudoJa em Expo e JavaScript.
+Aplicativo consumidor Brasil Cashback em Expo e JavaScript.
 
 ## Estado atual
 

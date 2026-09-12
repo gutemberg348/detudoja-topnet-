@@ -13,10 +13,16 @@ const addressSchema = z.object({
   zipCode: z.string().transform(onlyDigits).refine((value) => value.length === 8, "CEP invalido"),
 });
 
+const locationSchema = z.object({
+  city: z.string().trim().min(2, "Informe sua cidade").max(120),
+  state: z.string().trim().length(2, "Informe a UF").transform((value) => value.toUpperCase()),
+});
+
 export const updateCurrentUserSchema = z
   .object({
     address: addressSchema.optional(),
     email: z.string().trim().toLowerCase().email("E-mail invalido").max(255).optional(),
+    location: locationSchema.optional(),
     name: z.string().trim().min(3, "Informe o nome completo").max(160).optional(),
     phone: z
       .string()

@@ -18,13 +18,14 @@ const categoryAssets = [
 ];
 
 const storeAssets = [
-  { banner: "stores/demo-cafe-central/banner.webp", logo: "categories/restaurantes.webp", names: ["Cafe Central Demo"] },
-  { banner: "stores/demo-mercado-bom-preco/banner.webp", logo: "categories/mercados.webp", names: ["Mercado Bom Preco Demo"] },
-  { banner: "stores/demo-farma-mais/banner.webp", logo: "categories/farmacias.webp", names: ["Farma Mais Demo"] },
-  { banner: "stores/loja-de-roupas-melo/banner.webp", logo: "categories/moda.webp", names: ["LOJA DE ROUPAS MELO", "Loja Melo Demo"] },
-  { banner: "stores/demo-studio-bella/banner.webp", logo: "categories/beleza.webp", names: ["Studio Bella Demo"] },
+  { banner: "stores/demo-cafe-central/banner.webp", logo: "categories/restaurantes.webp", names: ["Cafe Central", "Cafe Central Demo"] },
+  { banner: "stores/demo-mercado-bom-preco/banner.webp", logo: "categories/mercados.webp", names: ["Mercado Bom Preco", "Mercado Bom Preco Demo"] },
+  { banner: "stores/demo-farma-mais/banner.webp", logo: "categories/farmacias.webp", names: ["Farma Mais", "Farma Mais Demo"] },
+  { banner: "stores/loja-de-roupas-melo/banner.webp", logo: "categories/moda.webp", names: ["LOJA DE ROUPAS MELO", "Loja Melo", "Loja Melo Demo"] },
+  { banner: "stores/demo-studio-bella/banner.webp", logo: "categories/beleza.webp", names: ["Studio Bella", "Studio Bella Demo"] },
   { banner: "stores/mercado-pires/banner.webp", logo: "categories/casa.webp", names: ["Mercado pires"] },
   { banner: "stores/loja-de-informatica/banner.webp", logo: "categories/eletronicos.webp", names: ["Loja de Informatica"] },
+  { banner: "stores/mercado-pires/banner.webp", logo: "categories/casa.webp", names: ["Casa Forte Materiais"] },
   { banner: "stores/fretes-jose/banner.webp", logo: "categories/servicos.webp", names: ["FRETES JOSE"] },
 ];
 
@@ -42,10 +43,10 @@ const productAssets = [
   { file: "products/bolsa-casual.webp", names: ["Bolsa Casual"] },
   { file: "products/escova-modelada.webp", names: ["Escova Modelada"] },
   { file: "products/design-de-sobrancelha.webp", names: ["Design de Sobrancelha"] },
-  { file: "products/telha.webp", names: ["telha"] },
-  { file: "products/ceramica.webp", names: ["ceramica"] },
-  { file: "products/carregador.webp", names: ["Carregador"] },
-  { file: "products/porcelanato.webp", names: ["porcelanato"] },
+  { file: "products/telha.webp", names: ["telha", "Telha Ceramica"] },
+  { file: "products/ceramica.webp", names: ["ceramica", "Piso Ceramico"] },
+  { file: "products/carregador.webp", names: ["Carregador", "Carregador Turbo USB-C"] },
+  { file: "products/porcelanato.webp", names: ["porcelanato", "Porcelanato Acetinado"] },
   { file: "products/cesta-basica-compacta.webp", names: ["Cesta Basica Compacta"] },
   { file: "products/burger-artesanal.webp", names: ["Burger Artesanal"] },
   { file: "products/kit-skincare.webp", names: ["Kit Skincare"] },

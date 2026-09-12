@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { getMarketplaceSuggestions } from "../services/marketplace.api";
 import { normalizeSearchText } from "../utils/search";
 
-export function useMarketplaceSuggestions(accessToken, query, { limit = 8 } = {}) {
+export function useMarketplaceSuggestions(accessToken, query, { enabled = true, limit = 8 } = {}) {
   const [isLoading, setIsLoading] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const search = normalizeSearchText(query);
@@ -10,7 +10,7 @@ export function useMarketplaceSuggestions(accessToken, query, { limit = 8 } = {}
   useEffect(() => {
     let active = true;
 
-    if (!accessToken || search.length < 1) {
+    if (!enabled || !accessToken || search.length < 1) {
       setSuggestions([]);
       setIsLoading(false);
       return () => {
@@ -45,7 +45,7 @@ export function useMarketplaceSuggestions(accessToken, query, { limit = 8 } = {}
       active = false;
       clearTimeout(timeout);
     };
-  }, [accessToken, limit, search]);
+  }, [accessToken, enabled, limit, search]);
 
   return { isLoading, suggestions };
 }

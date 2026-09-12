@@ -146,6 +146,17 @@ function addressSnapshot(address, reference = "") {
   };
 }
 
+function hasCompleteDeliveryAddress(address) {
+  return [
+    address?.cep,
+    address?.bairro,
+    address?.cidade,
+    address?.estado,
+    address?.numero,
+    address?.rua,
+  ].every((value) => String(value ?? "").trim());
+}
+
 async function resolveDeliveryAddress(database, userId, data) {
   if (data.deliveryMode !== "delivery") {
     return null;
@@ -164,23 +175,51 @@ async function resolveDeliveryAddress(database, userId, data) {
       throw new AppError("Endereco de entrega nao encontrado", 404);
     }
 
+    if (!hasCompleteDeliveryAddress(address)) {
+      throw new AppError("Complete o endereco de entrega antes de continuar", 400);
+    }
+
     return address;
   }
 
   const address = data.address;
-  const addressCount = await createOrdersRepository(database).countUserAddresses({
+  const repository = createOrdersRepository(database);
+  const currentAddress = await repository.findAddress({
+    orderBy: [{ principal: "desc" }, { criado_em: "asc" }],
+    where: { excluido_em: null, usuario_id: userId },
+  });
+
+  if (currentAddress && !hasCompleteDeliveryAddress(currentAddress)) {
+    return repository.updateUserAddress({
+      data: {
+        bairro: address.bairro,
+        cep: formatCep(address.cep),
+        cidade: address.cidade,
+        complemento: address.complemento || null,
+        estado: address.estado,
+        nome_endereco: "Principal",
+        numero: address.numero,
+        principal: true,
+        referencia: address.referencia || null,
+        rua: address.rua,
+      },
+      where: { id: currentAddress.id },
+    });
+  }
+
+  const addressCount = await repository.countUserAddresses({
     where: { excluido_em: null, usuario_id: userId },
   });
   const shouldBeMain = addressCount === 0;
 
   if (shouldBeMain) {
-    await createOrdersRepository(database).updateAddresses({
+    await repository.updateAddresses({
       data: { principal: false },
       where: { usuario_id: userId },
     });
   }
 
-  return createOrdersRepository(database).createUserAddress({
+  return repository.createUserAddress({
     data: {
       bairro: address.bairro,
       cep: formatCep(address.cep),

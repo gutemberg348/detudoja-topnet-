@@ -55,6 +55,9 @@ export function createOrdersRepository(database = prisma) {
     updateAddresses(args) {
       return database.enderecoUsuario.updateMany(args);
     },
+    updateUserAddress(args) {
+      return database.enderecoUsuario.update(args);
+    },
     updateOrder(args) {
       return database.pedidoLoja.update(args);
     },

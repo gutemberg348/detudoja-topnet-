@@ -3,6 +3,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform, StyleSheet, Vibration, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { HomeScreen } from "../app/HomeScreen";
 import { NetworkScreen } from "../app/NetworkScreen";
 import { ProfileScreen } from "../app/ProfileScreen";
@@ -71,6 +72,7 @@ function countSellerStoreNotifications(stores = []) {
 
 export function MainTabs({ navigation }) {
   const { session } = useAuthStore();
+  const insets = useSafeAreaInsets();
   const alertTimerRef = useRef(null);
   const serviceNotificationRequestRef = useRef(null);
   const serviceRefreshTimerRef = useRef(null);
@@ -457,8 +459,8 @@ export function MainTabs({ navigation }) {
           backgroundColor: colors.card,
           borderTopColor: colors.border,
           borderTopWidth: 1,
-          height: 70,
-          paddingBottom: 8,
+          height: 62 + insets.bottom,
+          paddingBottom: Math.max(insets.bottom, 8),
           paddingTop: 6,
         },
       })}

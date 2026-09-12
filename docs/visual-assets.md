@@ -30,7 +30,10 @@ npm run media:curated
 
 O script `apps/api/prisma/apply-curated-media.js` procura categorias, lojas e produtos pelo nome normalizado, sem depender dos IDs locais. Pode ser executado novamente sem duplicar registros.
 
-O `seed:demo` tambem foi ajustado para usar os assets curados em todas as categorias, lojas demo e seus 15 produtos. O fallback gerado pela seed permanece disponivel apenas para futuros itens que ainda nao tenham arte oficial.
+O `seed:demo` usa os assets curados em sete lojas de teste e 19 produtos. No
+Docker, os arquivos sao copiados para o volume persistente `uploads_data` antes
+da carga. O fallback gerado permanece disponivel apenas para futuros itens que
+ainda nao tenham arte oficial.
 
 ## Geracao
 

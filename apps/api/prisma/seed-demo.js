@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { mkdir } from "node:fs/promises";
+import { cp, mkdir } from "node:fs/promises";
 import path from "node:path";
 import argon2 from "argon2";
 import sharp from "sharp";
@@ -8,8 +8,11 @@ import { prisma } from "../src/config/prisma.js";
 import { uploadsBasePath, uploadsRoot } from "../src/config/storage.js";
 import { ensureUserWallets } from "../src/modules/wallet/wallet.service.js";
 
-const demoPassword = "Demo@123456";
+const demoPassword = process.env.DEMO_SEED_PASSWORD?.trim();
 const defaultSegmentFeePercent = 10;
+const bundledAssetsRoot = process.env.DEMO_ASSETS_DIR
+  ? path.resolve(process.env.DEMO_ASSETS_DIR)
+  : path.resolve(uploadsRoot, "curated");
 const demoCityAddress = {
   bairro: "Centro",
   cep: "58700000",
@@ -128,7 +131,7 @@ const demoStores = [
   {
     categoryName: "Restaurantes",
     description: "Comida caseira, lanches e combos para retirada ou entrega.",
-    name: "Cafe Central Demo",
+    name: "Cafe Central",
     products: [
       ["Combo Cafe Central", "Cafe, pao de queijo e suco natural.", 2490],
       ["Marmita Executiva", "Arroz, feijao, salada e proteina do dia.", 2990],
@@ -139,7 +142,7 @@ const demoStores = [
   {
     categoryName: "Mercados",
     description: "Mercado de bairro com produtos do dia e ofertas rapidas.",
-    name: "Mercado Bom Preco Demo",
+    name: "Mercado Bom Preco",
     products: [
       ["Cesta Basica Compacta", "Itens essenciais para a semana.", 8990],
       ["Kit Hortifruti", "Frutas, legumes e verduras selecionados.", 4590],
@@ -150,7 +153,7 @@ const demoStores = [
   {
     categoryName: "Farmacias",
     description: "Farmacia local com produtos de saude, beleza e bem-estar.",
-    name: "Farma Mais Demo",
+    name: "Farma Mais",
     products: [
       ["Kit Higiene", "Itens de cuidado pessoal para o dia a dia.", 2990],
       ["Vitamina C", "Suplemento de vitamina C com 60 capsulas.", 4990],
@@ -161,7 +164,7 @@ const demoStores = [
   {
     categoryName: "Moda",
     description: "Roupas, acessorios e looks prontos para varias ocasioes.",
-    name: "Loja Melo Demo",
+    name: "Loja Melo",
     products: [
       ["Camiseta Premium", "Camiseta basica em algodao.", 6990],
       ["Bolsa Casual", "Bolsa compacta para uso diario.", 11990],
@@ -172,13 +175,33 @@ const demoStores = [
   {
     categoryName: "Beleza",
     description: "Produtos e servicos para beleza, cuidado e autoestima.",
-    name: "Studio Bella Demo",
+    name: "Studio Bella",
     products: [
       ["Escova Modelada", "Servico de escova com finalizacao.", 5990],
       ["Kit Skincare", "Rotina basica de cuidado facial.", 12990],
       ["Design de Sobrancelha", "Design personalizado com acabamento.", 3990],
     ],
     slug: "demo-studio-bella",
+  },
+  {
+    categoryName: "Eletronicos",
+    description: "Acessorios para celular, informatica e tecnologia para o dia a dia.",
+    name: "Loja de Informatica",
+    products: [
+      ["Carregador Turbo USB-C", "Carregador rapido com cabo USB-C incluso.", 8990],
+    ],
+    slug: "demo-loja-informatica",
+  },
+  {
+    categoryName: "Casa",
+    description: "Materiais para construcao, reforma e acabamento da sua casa.",
+    name: "Casa Forte Materiais",
+    products: [
+      ["Telha Ceramica", "Telha ceramica resistente para cobertura residencial.", 249],
+      ["Piso Ceramico", "Piso ceramico para ambientes internos, vendido por metro quadrado.", 3490],
+      ["Porcelanato Acetinado", "Porcelanato acetinado de acabamento moderno.", 6990],
+    ],
+    slug: "demo-casa-forte",
   },
 ];
 
@@ -229,6 +252,14 @@ const curatedStoreMedia = {
     banner: "stores/demo-studio-bella/banner.webp",
     logo: "categories/beleza.webp",
   },
+  "demo-loja-informatica": {
+    banner: "stores/loja-de-informatica/banner.webp",
+    logo: "categories/eletronicos.webp",
+  },
+  "demo-casa-forte": {
+    banner: "stores/mercado-pires/banner.webp",
+    logo: "categories/casa.webp",
+  },
 };
 
 const curatedProductMedia = {
@@ -236,6 +267,7 @@ const curatedProductMedia = {
   "Burger Artesanal": "products/burger-artesanal.webp",
   "Camiseta Premium": "products/camiseta-premium.webp",
   "Cesta Basica Compacta": "products/cesta-basica-compacta.webp",
+  "Carregador Turbo USB-C": "products/carregador.webp",
   "Combo Cafe Central": "products/combo-cafe-central.webp",
   "Combo Limpeza": "products/combo-limpeza.webp",
   "Design de Sobrancelha": "products/design-de-sobrancelha.webp",
@@ -245,9 +277,23 @@ const curatedProductMedia = {
   "Kit Hortifruti": "products/kit-hortifruti.webp",
   "Kit Skincare": "products/kit-skincare.webp",
   "Marmita Executiva": "products/marmita-executiva.webp",
+  "Piso Ceramico": "products/ceramica.webp",
+  "Porcelanato Acetinado": "products/porcelanato.webp",
   "Protetor Solar": "products/protetor-solar.webp",
+  "Telha Ceramica": "products/telha.webp",
   "Vitamina C": "products/vitamina-c.webp",
 };
+
+async function installCuratedAssets() {
+  const destination = path.resolve(uploadsRoot, "curated");
+
+  if (bundledAssetsRoot === destination) {
+    return;
+  }
+
+  await mkdir(path.dirname(destination), { recursive: true });
+  await cp(bundledAssetsRoot, destination, { force: true, recursive: true });
+}
 
 function publicUploadPath(relativePath) {
   return `${uploadsBasePath}/${relativePath.split(path.sep).join("/")}`;
@@ -867,6 +913,13 @@ async function seedStores(database, categoriesByName, users) {
 }
 
 async function main() {
+  if (!demoPassword || demoPassword.length < 12) {
+    throw new Error(
+      "Defina DEMO_SEED_PASSWORD com pelo menos 12 caracteres antes de executar a seed.",
+    );
+  }
+
+  await installCuratedAssets();
   const passwordHash = await hashPassword(demoPassword);
 
   const result = await prisma.$transaction(
@@ -894,7 +947,7 @@ async function main() {
   console.log(`Usuarios demo verificados: ${result.users}`);
   console.log(`Categorias: ${result.categories}`);
   console.log(`Lojas visiveis com produtos: ${result.stores}`);
-  console.log(`Login exemplo: ${result.firstUserEmail} / ${demoPassword}`);
+  console.log(`Login exemplo: ${result.firstUserEmail} (senha definida em DEMO_SEED_PASSWORD)`);
 }
 
 main()

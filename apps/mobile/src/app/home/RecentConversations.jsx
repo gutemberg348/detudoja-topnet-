@@ -1,5 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { AppButton } from "../../components/AppButton";
 import { colors, fonts, radius, spacing, typography } from "../../utils/theme";
 
 function formatConversationDate(value) {
@@ -26,8 +27,31 @@ export function RecentConversations({
   onOpen,
   onViewAll,
 }) {
-  if (isLoading || conversations.length === 0) {
+  if (isLoading) {
     return null;
+  }
+
+  if (conversations.length === 0) {
+    return (
+      <View style={styles.emptyState}>
+        <View style={styles.emptyIcon}>
+          <Ionicons color={colors.primaryDark} name="chatbubbles-outline" size={32} />
+        </View>
+        <View style={styles.emptyCopy}>
+          <Text style={styles.emptyTitle}>Inicie uma nova conversa</Text>
+          <Text style={styles.emptyText}>
+            Converse com pessoas, lojas e prestadores pelo Brasil Cashback.
+          </Text>
+        </View>
+        <AppButton
+          icon="chatbubble-ellipses-outline"
+          onPress={onViewAll}
+          style={styles.emptyButton}
+          title="Iniciar conversa"
+          variant="outline"
+        />
+      </View>
+    );
   }
 
   return (
@@ -111,6 +135,40 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontFamily: fonts.medium,
     fontSize: 10,
+  },
+  emptyButton: { minWidth: 190 },
+  emptyCopy: { gap: spacing.xs, maxWidth: 310 },
+  emptyIcon: {
+    alignItems: "center",
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.round,
+    height: 68,
+    justifyContent: "center",
+    width: 68,
+  },
+  emptyState: {
+    alignItems: "center",
+    alignSelf: "stretch",
+    flex: 1,
+    gap: spacing.lg,
+    justifyContent: "center",
+    minHeight: 230,
+    paddingBottom: spacing.xxl,
+    paddingHorizontal: spacing.lg,
+  },
+  emptyText: {
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    fontSize: typography.small,
+    lineHeight: 20,
+    textAlign: "center",
+  },
+  emptyTitle: {
+    color: colors.textPrimary,
+    fontFamily: fonts.extraBold,
+    fontSize: typography.h3,
+    fontWeight: "800",
+    textAlign: "center",
   },
   heading: {
     alignItems: "flex-end",

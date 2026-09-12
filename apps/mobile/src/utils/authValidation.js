@@ -109,38 +109,19 @@ export function validateLoginFields({ login, password }) {
   return errors;
 }
 
-export function validateRegistrationFields({ address, email, name, password, phone }) {
+export function validateRegistrationFields({ email, name, password, phone }) {
   const errors = {};
 
   if (name.trim().length < 3) {
     errors.name = "Informe seu nome completo.";
   }
 
-  if (!isValidPhone(phone)) {
+  if (phone.trim() && !isValidPhone(phone)) {
     errors.phone = "Digite um telefone com DDD.";
   }
 
   if (!isValidEmail(email)) {
     errors.email = "Digite um e-mail valido.";
-  }
-
-  if (!address || onlyDigits(address.zipCode).length !== 8) {
-    errors.zipCode = "Informe um CEP valido.";
-  }
-  if (!address?.street?.trim()) {
-    errors.street = "Informe sua rua.";
-  }
-  if (!address?.number?.trim()) {
-    errors.number = "Informe o numero.";
-  }
-  if (!address?.district?.trim()) {
-    errors.district = "Informe seu bairro.";
-  }
-  if (!address?.city?.trim()) {
-    errors.city = "Informe sua cidade.";
-  }
-  if (!/^[A-Za-z]{2}$/.test(address?.state?.trim() ?? "")) {
-    errors.state = "Informe a UF.";
   }
 
   if (password.length < 8 || !/[a-z]/i.test(password) || !/\d/.test(password)) {
