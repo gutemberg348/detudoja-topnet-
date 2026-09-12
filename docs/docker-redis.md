@@ -18,7 +18,7 @@ KYC local (Tesseract portugues e Human/TensorFlow.js WASM) entram na mesma
 imagem e nao precisam ser baixados quando um usuario envia os documentos.
 
 A API fica em `http://localhost:3333` e a verificacao completa esta em `GET /health/ready`.
-O painel fica em `http://localhost:8080`. No Compose ele esta ligado apenas em
+O painel fica em `http://localhost:8081`. No Compose ele esta ligado apenas em
 `127.0.0.1`, para ser publicado com HTTPS pelo proxy da VPS.
 
 ## Comandos locais

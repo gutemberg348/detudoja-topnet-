@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-adimin}
       POSTGRES_DB: ${POSTGRES_DB:-meu_banco}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -102,7 +102,7 @@ services:
         format: raw
     environment: *api_environment
     ports:
-      - "3333:3333"
+      - "127.0.0.1:${API_HOST_PORT:-3333}:3333"
     volumes:
       - uploads_data:/app/storage/uploads
       - kyc_private_data:/app/storage/private/kyc
@@ -126,7 +126,7 @@ services:
         VITE_API_URL: ${VITE_API_URL:-}
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:80"
+      - "127.0.0.1:${WEB_ADMIN_HOST_PORT:-8081}:80"
     depends_on:
       api:
         condition: service_healthy

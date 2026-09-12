@@ -11,6 +11,10 @@ import { requestLoggerMiddleware } from "./middlewares/request-logger.middleware
 
 export const app = express();
 
+// A API fica atras de um unico proxy Nginx na VPS. Isso permite que logs e
+// rate limits usem o IP real enviado em X-Forwarded-For.
+app.set("trust proxy", 1);
+
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
