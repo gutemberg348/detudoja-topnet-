@@ -1,6 +1,13 @@
 import { z } from "zod";
 
 export const createFriendInvitationSchema = z.object({
+  message: z
+    .string()
+    .trim()
+    .min(1, "Escreva uma mensagem")
+    .max(2000, "Mensagem muito longa")
+    .optional()
+    .default("Ola! Quero conversar com voce."),
   publicId: z
     .string()
     .trim()

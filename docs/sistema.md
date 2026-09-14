@@ -2378,8 +2378,9 @@ sensíveis continuam com seus limitadores dedicados.
 
 - Todo usuario recebe um identificador publico unico baseado no nome. Ele pode
   ser compartilhado como texto ou QR sem expor dados cadastrais.
-- Adicionar amigo cria um convite pendente; apenas o destinatario pode aceitar
-  ou recusar e o chat so abre depois do aceite.
+- Localizar um contato permite enviar a primeira mensagem e abrir a conversa
+  imediatamente, sem aceite ou recusa. Os dois participantes continuam o chat
+  ate que um deles use o botao de bloqueio.
 - A amizade e armazenada uma unica vez para o par de usuarios. Apelidos e
   contadores de nao lidas pertencem a cada lado da conversa.
 - Mensagens pessoais usam Socket.IO e aparecem junto das conversas comerciais
@@ -2393,12 +2394,12 @@ sensíveis continuam com seus limitadores dedicados.
 - O ID aceita `@`, payload `DTJ:FRIEND:` e deep link conhecido. A coluna
   `usuarios.identificador_publico` possui unicidade no PostgreSQL; a auditoria
   local encontrou 70 usuarios, nenhum ID nulo e nenhuma duplicidade.
-- Aceite e recusa usam `updateMany` condicionado a convite `PENDENTE`,
-  participante destinatario e solicitante diferente. Duas respostas
-  concorrentes nao conseguem sobrescrever uma a outra.
+- Conversas `PENDENTE` antigas continuam acessiveis e viram `ATIVA` no proximo
+  envio, evitando travar contatos criados por versoes anteriores do app.
 - O apelido continua separado em `apelido_usuario_a/b` e a atualizacao emite
   evento apenas para quem salvou o nome.
-- Busca, convite e envio de mensagem possuem limitadores independentes. Um
+- Busca, mensagem inicial e continuacao da conversa possuem limitadores
+  independentes. Um
   terceiro continua recebendo `404` ao tentar acessar a conversa.
 - Nao houve mudanca de schema nem migration nesta revisao.
 

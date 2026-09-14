@@ -15,7 +15,7 @@ COPY apps/web-admin/package.json ./apps/web-admin/package.json
 COPY packages/shared/package.json ./packages/shared/package.json
 
 RUN npm ci --include=dev \
-  && mkdir -p /app/storage/uploads
+  && mkdir -p /app/storage/uploads /app/storage/private/kyc
 
 COPY apps/api ./apps/api
 COPY packages/shared ./packages/shared

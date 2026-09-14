@@ -28,7 +28,7 @@ export const friendInvitationRateLimit = createRateLimiter({
   keyGenerator: (req) => `friend-invitation:${req.auth.user.id}`,
   legacyHeaders: false,
   limit: 12,
-  message: { message: "Muitos convites enviados. Aguarde alguns minutos." },
+  message: { message: "Muitas mensagens iniciais enviadas. Aguarde alguns minutos." },
   skip: skipInTests,
   standardHeaders: "draft-7",
   windowMs: 10 * 60 * 1000,
@@ -128,14 +128,14 @@ export const withdrawalRequestRateLimit = createRateLimiter({
 });
 
 export const payoutPixKeyValidationRateLimit = createRateLimiter({
-  keyPrefix: "payout-pix-key-validation-user",
+  keyPrefix: "payout-pix-key-validation-user-v2",
   keyGenerator: (req) => `payout-pix-key:${req.auth.user.id}`,
   legacyHeaders: false,
-  limit: 2,
-  message: { message: "Muitas validacoes de chave Pix. Aguarde alguns minutos." },
+  limit: 5,
+  message: { message: "Limite de validacoes atingido. Aguarde 5 minutos e confira os dados antes de tentar novamente." },
   skip: skipInTests,
   standardHeaders: "draft-7",
-  windowMs: 10 * 60 * 1000,
+  windowMs: 5 * 60 * 1000,
 });
 
 export const payoutPixKeyValidationGatewayRateLimit = createRateLimiter({

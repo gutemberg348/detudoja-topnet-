@@ -8,6 +8,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   Share,
   StyleSheet,
   Text,
@@ -19,11 +20,9 @@ import { AppButton } from "../components/AppButton";
 import { ContactAvatar } from "../components/ContactAvatar";
 import { ScreenContainer } from "../components/ScreenContainer";
 import {
-  acceptFriendInvitation,
-  declineFriendInvitation,
   getPersonalChats,
   lookupPersonalContact,
-  sendFriendInvitation,
+  sendPersonalMessageRequest,
   updateFriendAlias,
 } from "../services/personal-chats.api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
@@ -102,14 +101,19 @@ export function PersonalChatsInboxScreen({ navigation, route }) {
     }
   }
 
-  async function submitInvitation(contact = contactPreview) {
-    if (!contact?.publicId || isSubmitting) return;
+  async function submitMessageRequest(message, contact = contactPreview) {
+    const text = String(message ?? "").trim();
+    if (!contact?.publicId || !text || isSubmitting) return;
     setIsSubmitting(true);
     setError("");
     setNotice("");
 
     try {
-      const response = await sendFriendInvitation(session.accessToken, contact.publicId);
+      const response = await sendPersonalMessageRequest(
+        session.accessToken,
+        contact.publicId,
+        text,
+      );
       setContactPreview((current) => ({
         ...current,
         relationship: {
@@ -119,30 +123,11 @@ export function PersonalChatsInboxScreen({ navigation, route }) {
         },
       }));
       setPublicId("");
-      setNotice("Convite enviado. Voce podera conversar assim que a pessoa aceitar.");
+      setContactPreview(null);
       await load();
-    } catch (requestError) {
-      setError(requestError.message);
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  async function decide(request, accepted) {
-    setIsSubmitting(true);
-    setError("");
-
-    try {
-      const response = accepted
-        ? await acceptFriendInvitation(session.accessToken, request.id)
-        : await declineFriendInvitation(session.accessToken, request.id);
-      await load();
-      if (accepted && response.conversation) {
-        setContactPreview(null);
-        navigation.navigate("PersonalConversation", {
-          conversation: response.conversation,
-        });
-      }
+      navigation.navigate("PersonalConversation", {
+        conversation: response.request,
+      });
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -201,7 +186,7 @@ export function PersonalChatsInboxScreen({ navigation, route }) {
     const id = data.profile?.publicId;
     if (!id) return;
     await Share.share({
-      message: `Me adicione no Brasil Cashback pelo ID @${id}`,
+      message: `Fale comigo no Brasil Cashback pelo ID @${id}`,
     });
   }
 
@@ -214,7 +199,7 @@ export function PersonalChatsInboxScreen({ navigation, route }) {
         <View style={styles.heroCopy}>
           <Text style={styles.kicker}>Conversas pessoais</Text>
           <Text style={styles.title}>Amigos</Text>
-          <Text style={styles.subtitle}>Adicione pelo ID ou QR e converse com privacidade.</Text>
+          <Text style={styles.subtitle}>Encontre pelo ID ou QR e envie uma mensagem com privacidade.</Text>
         </View>
         <Pressable accessibilityLabel="Exibir meu QR" onPress={() => setQrOpen(true)} style={styles.qrButton}>
           <Ionicons color={colors.primaryDark} name="qr-code-outline" size={23} />
@@ -239,7 +224,7 @@ export function PersonalChatsInboxScreen({ navigation, route }) {
           </View>
 
           <View style={styles.addSection}>
-            <Text style={styles.sectionTitle}>Adicionar amigo</Text>
+            <Text style={styles.sectionTitle}>Nova mensagem</Text>
             <View style={styles.addRow}>
               <View style={styles.inputShell}>
                 <Ionicons color={colors.textMuted} name="at-outline" size={19} />
@@ -274,36 +259,6 @@ export function PersonalChatsInboxScreen({ navigation, route }) {
             {notice ? <Text style={styles.notice}>{notice}</Text> : null}
           </View>
 
-          {data.requests.length > 0 ? (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Convites</Text>
-              {data.requests.map((request) => (
-                <View key={request.id} style={styles.requestRow}>
-                  <ContactAvatar
-                    name={request.person.name}
-                    photoUrl={request.person.photoUrl}
-                  />
-                  <View style={styles.personCopy}>
-                    <Text numberOfLines={1} style={styles.personName}>{request.person.name}</Text>
-                    <Text numberOfLines={1} style={styles.personMeta}>@{request.person.publicId}</Text>
-                  </View>
-                  {request.invitationDirection === "incoming" ? (
-                    <View style={styles.requestActions}>
-                      <Pressable accessibilityLabel="Recusar convite" disabled={isSubmitting} onPress={() => decide(request, false)} style={styles.declineButton}>
-                        <Ionicons color={colors.danger} name="close" size={20} />
-                      </Pressable>
-                      <Pressable accessibilityLabel="Aceitar convite" disabled={isSubmitting} onPress={() => decide(request, true)} style={styles.acceptButton}>
-                        <Ionicons color={colors.card} name="checkmark" size={20} />
-                      </Pressable>
-                    </View>
-                  ) : (
-                    <Text style={styles.pending}>Enviado</Text>
-                  )}
-                </View>
-              ))}
-            </View>
-          ) : null}
-
           <View style={styles.section}>
             <View style={styles.sectionHeading}>
               <Text style={styles.sectionTitle}>Suas conversas</Text>
@@ -312,8 +267,8 @@ export function PersonalChatsInboxScreen({ navigation, route }) {
             {data.conversations.length === 0 ? (
               <View style={styles.empty}>
                 <Ionicons color={colors.primaryDark} name="people-outline" size={28} />
-                <Text style={styles.emptyTitle}>Nenhum amigo adicionado</Text>
-                <Text style={styles.emptyText}>Compartilhe seu QR ou envie um convite pelo ID.</Text>
+                <Text style={styles.emptyTitle}>Nenhuma conversa iniciada</Text>
+                <Text style={styles.emptyText}>Compartilhe seu QR ou envie uma primeira mensagem pelo ID.</Text>
               </View>
             ) : data.conversations.map((conversation) => (
               <View key={conversation.id} style={styles.friendRow}>
@@ -356,8 +311,8 @@ export function PersonalChatsInboxScreen({ navigation, route }) {
             <Pressable accessibilityLabel="Fechar QR" onPress={() => setQrOpen(false)} style={styles.modalClose}>
               <Ionicons color={colors.textPrimary} name="close" size={22} />
             </Pressable>
-            <Text style={styles.qrTitle}>Meu QR de amigo</Text>
-            <Text style={styles.qrSubtitle}>A outra pessoa aponta a camera e envia o convite.</Text>
+            <Text style={styles.qrTitle}>Meu QR de contato</Text>
+            <Text style={styles.qrSubtitle}>A outra pessoa aponta a camera e pode enviar uma mensagem.</Text>
             {data.profile?.qrValue ? (
               <View style={styles.qrCode}>
                 <QRCode color={colors.textPrimary} size={210} value={data.profile.qrValue} />
@@ -373,10 +328,9 @@ export function PersonalChatsInboxScreen({ navigation, route }) {
         contact={contactPreview}
         error={error}
         loading={isSubmitting}
-        onAccept={() => decide({ id: contactPreview?.relationship?.conversationId }, true)}
         onClose={() => setContactPreview(null)}
         onOpenConversation={() => openConversationById(contactPreview?.relationship?.conversationId)}
-        onSendInvitation={() => submitInvitation(contactPreview)}
+        onSendMessage={(message) => submitMessageRequest(message, contactPreview)}
       />
 
       <Modal
@@ -431,25 +385,34 @@ function ContactPreviewModal({
   contact,
   error,
   loading,
-  onAccept,
   onClose,
   onOpenConversation,
-  onSendInvitation,
+  onSendMessage,
 }) {
+  const [message, setMessage] = useState("");
   const relationship = contact?.relationship;
-  const isActive = relationship?.status === "ATIVA";
-  const isIncoming = relationship?.status === "PENDENTE"
-    && relationship.invitationDirection === "incoming";
-  const isOutgoing = relationship?.status === "PENDENTE"
-    && relationship.invitationDirection === "outgoing";
-  const canInvite = !contact?.isSelf
+  const isActive = ["ATIVA", "PENDENTE"].includes(relationship?.status);
+  const canSendMessage = !contact?.isSelf
     && (!relationship || relationship.status === "RECUSADA");
+
+  useEffect(() => {
+    setMessage("");
+  }, [contact?.publicId]);
 
   return (
     <Modal animationType="fade" onRequestClose={onClose} transparent visible={Boolean(contact)}>
-      <View style={styles.modalOverlay}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={styles.modalOverlay}
+      >
         <Pressable onPress={onClose} style={StyleSheet.absoluteFill} />
-        <View style={styles.contactModal}>
+        <ScrollView
+          contentContainerStyle={styles.contactModalScroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          style={styles.contactModalViewport}
+        >
+          <View style={styles.contactModal}>
           <Pressable accessibilityLabel="Fechar contato" onPress={onClose} style={styles.modalClose}>
             <Ionicons color={colors.textPrimary} name="close" size={22} />
           </Pressable>
@@ -465,12 +428,6 @@ function ContactPreviewModal({
               <Text style={styles.relationshipText}>Este e o seu proprio perfil.</Text>
             </View>
           ) : null}
-          {isOutgoing ? (
-            <View style={styles.relationshipNotice}>
-              <Ionicons color={colors.warning} name="time-outline" size={20} />
-              <Text style={styles.relationshipText}>Convite enviado. Aguardando a pessoa aceitar.</Text>
-            </View>
-          ) : null}
           {relationship?.status === "BLOQUEADA" ? (
             <View style={styles.relationshipNotice}>
               <Ionicons color={colors.textMuted} name="lock-closed-outline" size={20} />
@@ -482,21 +439,36 @@ function ContactPreviewModal({
           {isActive ? (
             <AppButton icon="chatbubble-outline" onPress={onOpenConversation} title="Abrir conversa" />
           ) : null}
-          {isIncoming ? (
-            <AppButton icon="person-add-outline" loading={loading} onPress={onAccept} title="Aceitar e conversar" />
-          ) : null}
-          {canInvite ? (
-            <AppButton icon="person-add-outline" loading={loading} onPress={onSendInvitation} title="Enviar convite" />
+          {canSendMessage ? (
+            <View style={styles.messageRequestForm}>
+              <Text style={styles.messageRequestLabel}>Sua primeira mensagem</Text>
+              <TextInput
+                maxLength={2000}
+                multiline
+                onChangeText={setMessage}
+                placeholder="Oi! Escreva por que voce quer conversar..."
+                placeholderTextColor={colors.textMuted}
+                style={styles.messageRequestInput}
+                value={message}
+              />
+              <AppButton
+                disabled={!message.trim()}
+                icon="send-outline"
+                loading={loading}
+                onPress={() => onSendMessage(message)}
+                title="Enviar mensagem"
+              />
+            </View>
           ) : null}
           <AppButton disabled={loading} onPress={onClose} title="Fechar" variant="outline" />
-        </View>
-      </View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  acceptButton: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.round, height: 38, justifyContent: "center", width: 38 },
   addRow: { flexDirection: "row", gap: spacing.sm },
   addSection: { gap: spacing.md },
   aliasInput: { borderColor: colors.borderStrong, borderRadius: radius.md, borderWidth: 1, color: colors.textPrimary, fontFamily: fonts.medium, fontSize: typography.body, minHeight: 52, paddingHorizontal: spacing.md, width: "100%" },
@@ -505,10 +477,11 @@ const styles = StyleSheet.create({
   contactAction: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 38, justifyContent: "center", width: 38 },
   contactIdentity: { alignItems: "center", gap: spacing.xs },
   contactModal: { alignItems: "center", backgroundColor: colors.card, borderRadius: radius.lg, gap: spacing.md, maxWidth: 380, padding: spacing.xl, width: "100%", ...shadowSoft },
+  contactModalScroll: { alignItems: "center", flexGrow: 1, justifyContent: "center", paddingVertical: spacing.lg },
+  contactModalViewport: { width: "100%" },
   contactName: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.h2, textAlign: "center" },
   content: { gap: spacing.xl, paddingBottom: spacing.xxxl },
   count: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: typography.caption },
-  declineButton: { alignItems: "center", backgroundColor: "#FFF1F2", borderRadius: radius.round, height: 38, justifyContent: "center", width: 38 },
   empty: { alignItems: "center", borderColor: colors.border, borderRadius: radius.md, borderStyle: "dashed", borderWidth: 1, gap: spacing.sm, padding: spacing.xl },
   emptyText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption, textAlign: "center" },
   emptyTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small },
@@ -525,10 +498,12 @@ const styles = StyleSheet.create({
   modalClose: { alignItems: "center", alignSelf: "flex-end", backgroundColor: colors.cardMuted, borderRadius: radius.round, height: 40, justifyContent: "center", width: 40 },
   modalActions: { gap: spacing.sm, width: "100%" },
   modalOverlay: { alignItems: "center", backgroundColor: "rgba(8, 24, 18, 0.52)", flex: 1, justifyContent: "center", padding: spacing.lg },
+  messageRequestForm: { alignSelf: "stretch", gap: spacing.sm },
+  messageRequestInput: { borderColor: colors.borderStrong, borderRadius: radius.md, borderWidth: 1, color: colors.textPrimary, fontFamily: fonts.regular, fontSize: typography.small, maxHeight: 130, minHeight: 88, padding: spacing.md, textAlignVertical: "top" },
+  messageRequestLabel: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small },
   myIdBand: { alignItems: "center", backgroundColor: colors.primarySoft, borderColor: colors.primaryLight, borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: spacing.sm, padding: spacing.md },
   myIdCopy: { flex: 1, minWidth: 0 },
   notice: { color: colors.primaryDark, fontFamily: fonts.medium, fontSize: typography.caption },
-  pending: { color: colors.textSecondary, fontFamily: fonts.bold, fontSize: typography.caption },
   personCopy: { flex: 1, minWidth: 0 },
   personMeta: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption, marginTop: 2 },
   personName: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small },
@@ -542,8 +517,6 @@ const styles = StyleSheet.create({
   qrTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.h2 },
   relationshipNotice: { alignItems: "center", alignSelf: "stretch", backgroundColor: colors.cardMuted, borderRadius: radius.md, flexDirection: "row", gap: spacing.sm, padding: spacing.md },
   relationshipText: { color: colors.textSecondary, flex: 1, fontFamily: fonts.medium, fontSize: typography.caption, lineHeight: 18 },
-  requestActions: { flexDirection: "row", gap: spacing.xs },
-  requestRow: { alignItems: "center", borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: spacing.md, minHeight: 66, paddingVertical: spacing.sm },
   scanButton: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, height: 52, justifyContent: "center", width: 52 },
   section: { gap: spacing.sm },
   sectionHeading: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },

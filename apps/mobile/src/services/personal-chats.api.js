@@ -9,9 +9,17 @@ export function lookupPersonalContact(token, publicId) {
   return apiRequest(`/api/app/personal-chats/lookup?${query}`, { token });
 }
 
-export function sendFriendInvitation(token, publicId) {
+export function sendPersonalMessageRequest(token, publicId, message) {
   return apiRequest("/api/app/personal-chats/requests", {
-    body: { publicId },
+    body: { message, publicId },
+    method: "POST",
+    token,
+  });
+}
+
+export function blockPersonalConversation(token, conversationId) {
+  return apiRequest(`/api/app/personal-chats/${conversationId}/block`, {
+    body: {},
     method: "POST",
     token,
   });

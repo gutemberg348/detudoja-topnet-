@@ -3,6 +3,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -13,11 +14,12 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppButton } from "../components/AppButton";
 import { ChatComposer } from "../components/ChatComposer";
 import { ContactAvatar } from "../components/ContactAvatar";
 import {
+  blockPersonalConversation,
   getPersonalConversation,
   sendPersonalMessage,
   updateFriendAlias,
@@ -26,8 +28,9 @@ import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import { useAuthStore } from "../stores/useAuthStore";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
 
-export function PersonalConversationScreen({ route }) {
+export function PersonalConversationScreen({ navigation, route }) {
   const { session } = useAuthStore();
+  const insets = useSafeAreaInsets();
   const initialConversation = route.params?.conversation;
   const conversationId = initialConversation?.id ?? route.params?.conversationId;
   const listRef = useRef(null);
@@ -120,10 +123,39 @@ export function PersonalConversationScreen({ route }) {
     }
   }
 
+  function confirmBlock() {
+    Alert.alert(
+      "Bloquear este contato?",
+      "A conversa sera encerrada e essa pessoa nao podera enviar novas solicitacoes para voce.",
+      [
+        { style: "cancel", text: "Cancelar" },
+        {
+          onPress: async () => {
+            setIsSending(true);
+            setError("");
+            try {
+              await blockPersonalConversation(
+                session.accessToken,
+                conversationId,
+              );
+              navigation.goBack();
+            } catch (requestError) {
+              setError(requestError.message);
+            } finally {
+              setIsSending(false);
+            }
+          },
+          style: "destructive",
+          text: "Bloquear",
+        },
+      ],
+    );
+  }
+
   return (
-    <SafeAreaView edges={["left", "right", "bottom"]} style={styles.safeArea}>
+    <SafeAreaView edges={["left", "right"]} style={styles.safeArea}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
         keyboardVerticalOffset={0}
         style={styles.keyboard}
       >
@@ -141,9 +173,14 @@ export function PersonalConversationScreen({ route }) {
                 : `@${conversation?.person?.publicId ?? ""}`}
             </Text>
           </View>
-          <Pressable accessibilityLabel="Editar nome salvo" onPress={() => setAliasOpen(true)} style={styles.aliasButton}>
-            <Ionicons color={colors.primaryDark} name="pencil-outline" size={19} />
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable accessibilityLabel="Editar nome salvo" onPress={() => setAliasOpen(true)} style={styles.aliasButton}>
+              <Ionicons color={colors.primaryDark} name="pencil-outline" size={19} />
+            </Pressable>
+            <Pressable accessibilityLabel="Bloquear contato" disabled={isSending} onPress={confirmBlock} style={styles.blockButton}>
+              <Ionicons color={colors.danger} name="ban-outline" size={19} />
+            </Pressable>
+          </View>
         </View>
 
         {error ? (
@@ -187,11 +224,12 @@ export function PersonalConversationScreen({ route }) {
           onSend={sendMessage}
           placeholder="Escreva uma mensagem"
           sending={isSending}
+          style={{ paddingBottom: Math.max(spacing.sm, insets.bottom + spacing.xs) }}
         />
       </KeyboardAvoidingView>
 
       <Modal animationType="fade" onRequestClose={() => setAliasOpen(false)} transparent visible={aliasOpen}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalOverlay}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalOverlay}>
           <Pressable onPress={() => setAliasOpen(false)} style={StyleSheet.absoluteFill} />
           <View style={styles.modalCard}>
             <View style={styles.modalIcon}>
@@ -236,6 +274,7 @@ function MessageBubble({ message }) {
 
 const styles = StyleSheet.create({
   aliasButton: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 40, justifyContent: "center", width: 40 },
+  blockButton: { alignItems: "center", backgroundColor: "#FFF1F2", borderRadius: radius.round, height: 40, justifyContent: "center", width: 40 },
   aliasInput: { borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, color: colors.textPrimary, fontFamily: fonts.medium, fontSize: typography.body, minHeight: 52, paddingHorizontal: spacing.md },
   bubble: { backgroundColor: colors.cardMuted, borderBottomLeftRadius: 4, borderRadius: radius.lg, gap: 4, maxWidth: "84%", paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   bubbleMine: { backgroundColor: colors.primaryDark, borderBottomLeftRadius: radius.lg, borderBottomRightRadius: 4 },
@@ -246,6 +285,7 @@ const styles = StyleSheet.create({
   errorStrip: { alignItems: "center", backgroundColor: "#FFF1F2", flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
   errorText: { color: colors.danger, flex: 1, fontFamily: fonts.medium, fontSize: typography.caption },
   header: { alignItems: "center", backgroundColor: colors.card, borderBottomColor: colors.border, borderBottomWidth: 1, flexDirection: "row", gap: spacing.md, minHeight: 68, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  headerActions: { flexDirection: "row", gap: spacing.xs },
   headerCopy: { flex: 1, minWidth: 0 },
   keyboard: { flex: 1 },
   list: { flex: 1 },

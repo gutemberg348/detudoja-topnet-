@@ -7,6 +7,7 @@ import {
 } from "../middlewares/rate-limit.middleware.js";
 import {
   acceptFriendInvitationController,
+  blockPersonalChatController,
   createFriendInvitationController,
   createPersonalMessageController,
   declineFriendInvitationController,
@@ -44,6 +45,10 @@ personalChatsRoutes.post(
 personalChatsRoutes.post(
   "/:conversationId/decline",
   declineFriendInvitationController,
+);
+personalChatsRoutes.post(
+  "/:conversationId/block",
+  blockPersonalChatController,
 );
 personalChatsRoutes.patch(
   "/:conversationId/alias",

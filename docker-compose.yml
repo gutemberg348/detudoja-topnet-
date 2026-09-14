@@ -75,6 +75,15 @@ services:
       timeout: 3s
       retries: 12
 
+  storage-init:
+    image: alpine:3.21
+    restart: "no"
+    user: "0:0"
+    command: ["sh", "-c", "mkdir -p /uploads /kyc && chown -R 1000:1000 /uploads /kyc"]
+    volumes:
+      - uploads_data:/uploads
+      - kyc_private_data:/kyc
+
   api-migrate:
     build:
       context: .
@@ -113,6 +122,8 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3333/health/ready').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 30s
@@ -136,6 +147,8 @@ services:
       - kyc_private_data:/app/storage/private/kyc
     depends_on:
       api-migrate:
+        condition: service_completed_successfully
+      storage-init:
         condition: service_completed_successfully
 
   seed-demo:

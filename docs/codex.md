@@ -117,6 +117,38 @@ O indice e a regra completa de documentacao ficam em `docs/README.md`.
 - Validacao: migration aplicada, Prisma Client gerado e 81 testes da API
   aprovados, incluindo os dois cenarios de resposta perdida.
 
+## Atualizacao 2026-09-14: mensagens diretas e teclado Android
+
+- O fluxo de contato pessoal nao pede mais convite nem decisao. O remetente
+  escreve a primeira mensagem e a conversa abre imediatamente para os dois.
+- Qualquer participante pode bloquear pelo cabecalho quando nao quiser mais
+  contato; o par bloqueado nao pode reabrir a conversa.
+- Criacao/reabertura da conversa e persistencia da primeira mensagem sao
+  transacionais. Registros `PENDENTE` antigos continuam funcionando e sao
+  ativados no proximo envio.
+- O chat Android usa `softwareKeyboardLayoutMode: resize`, evita ajuste duplo
+  do `KeyboardAvoidingView` e aplica o inset da barra de navegacao ao composer.
+- Nao houve mudanca de schema nem migration: o estado `BLOQUEADA` ja existia.
+- Validacoes: 96/96 testes da API, 18/18 verificacoes Expo e export Android
+  aprovados.
+
+## Atualizacao 2026-09-14: CPF contextual e volume privado do KYC
+
+- `GET /api/app/users/me` agora devolve `cpfRequired`, mantendo a sessao e as
+  telas sincronizadas mesmo para contas antigas sem CPF.
+- KYC, cadastro de chave Pix para vendas e destino de saque abrem o formulario
+  de CPF quando ele estiver ausente. Se uma sessao antiga chegar ao backend, o
+  status `428` tambem abre o mesmo fluxo em vez de deixar apenas um erro solto.
+- A validacao de chave Pix por CPF exige primeiro que o CPF esteja vinculado a
+  conta. O limite passou a cinco tentativas por cinco minutos e a mensagem
+  informa o tempo de espera.
+- O Compose executa `storage-init` como root antes da API e do worker para
+  ajustar os volumes `uploads_data` e `kyc_private_data` ao UID 1000. Isso
+  corrige volumes criados como root que faziam o envio KYC retornar erro 500 ao
+  tentar gravar as fotos.
+- Nao houve migration. Validacoes: `docker compose config`, 96/96 testes da API
+  e export Android aprovados.
+
 ## Atualizacao 2026-08-31: amigos e conversas pessoais
 
 - Home sem logo: pesquisa no topo, `Pagar`/`Receber` abaixo e lista de

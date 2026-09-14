@@ -8,10 +8,15 @@ import {
 } from "../src/modules/personal-chats/personal-chats.validator.js";
 
 test("convite exige um identificador publico valido", () => {
-  assert.equal(
-    createFriendInvitationSchema.safeParse({ publicId: "@guto.12ab" }).success,
-    true,
-  );
+  const compatibleRequest = createFriendInvitationSchema.safeParse({
+    publicId: "@guto.12ab",
+  });
+  assert.equal(compatibleRequest.success, true);
+  assert.equal(compatibleRequest.data.message, "Ola! Quero conversar com voce.");
+  assert.equal(createFriendInvitationSchema.safeParse({
+    message: "Oi, podemos conversar?",
+    publicId: "@guto.12ab",
+  }).success, true);
   assert.equal(
     createFriendInvitationSchema.safeParse({ publicId: "  " }).success,
     false,

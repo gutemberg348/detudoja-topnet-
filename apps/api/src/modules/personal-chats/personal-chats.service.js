@@ -127,8 +127,8 @@ async function getConversationAccess(userId, conversationId, { active = false } 
     throw new AppError("Conversa nao encontrada", 404);
   }
 
-  if (active && conversation.status !== "ATIVA") {
-    throw new AppError("A amizade precisa ser aceita antes da conversa", 409);
+  if (active && !["ATIVA", "PENDENTE"].includes(conversation.status)) {
+    throw new AppError("Esta conversa nao esta disponivel", 409);
   }
 
   return { conversation, viewerSide };
@@ -138,8 +138,8 @@ export async function listPersonalChats(userId) {
   ensurePrismaClient();
   const profile = await ensurePublicId(userId);
   const conversations = await personalChatsRepository.listForUser(userId);
-  const active = conversations.filter((item) => item.status === "ATIVA");
-  const pending = conversations.filter((item) => item.status === "PENDENTE");
+  const active = conversations.filter((item) =>
+    ["ATIVA", "PENDENTE"].includes(item.status));
 
   return {
     conversations: active.map((item) => serializeConversation(item, userId)),
@@ -149,7 +149,7 @@ export async function listPersonalChats(userId) {
       publicId: profile.identificador_publico,
       qrValue: `DTJ:FRIEND:${profile.identificador_publico}`,
     },
-    requests: pending.map((item) => serializeConversation(item, userId)),
+    requests: [],
   };
 }
 
@@ -201,6 +201,8 @@ export async function lookupPersonalContact(userId, data) {
 export async function createFriendInvitation(userId, data) {
   ensurePrismaClient();
   await ensurePublicId(userId);
+  const initialMessage = String(data.message ?? "").trim()
+    || "Ola! Quero conversar com voce.";
   const target = await personalChatsRepository.findUserByPublicId(
     normalizePublicId(data.publicId),
   );
@@ -217,39 +219,41 @@ export async function createFriendInvitation(userId, data) {
   const existing = await personalChatsRepository.findByPair(userAId, userBId);
 
   if (existing?.status === "ATIVA") {
-    throw new AppError("Este usuario ja esta nos seus amigos", 409);
+    throw new AppError("Ja existe uma conversa com este usuario", 409);
   }
 
   if (existing?.status === "BLOQUEADA") {
-    throw new AppError("Nao foi possivel enviar este convite", 409);
+    throw new AppError("Nao foi possivel enviar a mensagem para este contato", 409);
   }
 
   if (existing?.status === "PENDENTE") {
-    throw new AppError(
-      existing.solicitado_por_id === userId
-        ? "O convite ja foi enviado"
-        : "Este usuario ja enviou um convite para voce",
-      409,
-    );
+    const conversation = await personalChatsRepository.findById(existing.id);
+    return { request: serializeConversation(conversation, userId) };
   }
 
-  let invitation;
+  let messageRequest;
 
   try {
-    invitation = existing
-      ? await personalChatsRepository.reopenInvitation(existing.id, userId)
-      : await personalChatsRepository.createInvitation({
+    messageRequest = existing
+      ? await personalChatsRepository.reopenMessageRequest(
+          existing.id,
+          userId,
+          initialMessage,
+          userAId,
+        )
+      : await personalChatsRepository.createMessageRequest({
           requesterId: userId,
+          text: initialMessage,
           userAId,
           userBId,
         });
   } catch (error) {
     if (error?.code === "P2002") {
-      throw new AppError("Ja existe um convite entre estas contas", 409);
+      throw new AppError("Ja existe uma solicitacao entre estas contas", 409);
     }
     throw error;
   }
-  const conversation = await personalChatsRepository.findById(invitation.id);
+  const conversation = await personalChatsRepository.findById(messageRequest.id);
 
   emitPersonalChatCreated({
     conversationId: conversation.id,
@@ -264,11 +268,11 @@ export async function decideFriendInvitation(userId, conversationId, accepted) {
   const access = await getConversationAccess(userId, conversationId);
 
   if (access.conversation.status !== "PENDENTE") {
-    throw new AppError("Este convite ja foi respondido", 409);
+    throw new AppError("Esta solicitacao ja foi respondida", 409);
   }
 
   if (access.conversation.solicitado_por_id === userId) {
-    throw new AppError("Somente quem recebeu o convite pode responder", 403);
+    throw new AppError("Somente quem recebeu a mensagem pode responder", 403);
   }
 
   const decided = await personalChatsRepository.decidePendingInvitation(
@@ -278,7 +282,14 @@ export async function decideFriendInvitation(userId, conversationId, accepted) {
   );
 
   if (decided.count !== 1) {
-    throw new AppError("Este convite ja foi respondido", 409);
+    throw new AppError("Esta solicitacao ja foi respondida", 409);
+  }
+  if (accepted) {
+    await personalChatsRepository.markRead(
+      access.conversation.id,
+      userId,
+      access.viewerSide,
+    );
   }
   const conversation = await personalChatsRepository.findById(access.conversation.id);
 
@@ -294,6 +305,27 @@ export async function decideFriendInvitation(userId, conversationId, accepted) {
       : null,
     status: conversation.status,
   };
+}
+
+export async function blockPersonalChat(userId, conversationId) {
+  ensurePrismaClient();
+  const access = await getConversationAccess(userId, conversationId);
+  const blocked = await personalChatsRepository.blockConversation(
+    access.conversation.id,
+    userId,
+  );
+
+  if (blocked.count !== 1) {
+    throw new AppError("Esta conversa nao pode mais ser bloqueada", 409);
+  }
+
+  emitPersonalChatUpdated({
+    conversationId: access.conversation.id,
+    reason: "blocked",
+    userIds: getParticipantIds(access.conversation),
+  });
+
+  return { status: "BLOQUEADA" };
 }
 
 export async function updateFriendAlias(userId, conversationId, data) {
@@ -340,12 +372,20 @@ export async function createPersonalMessage(userId, conversationId, data) {
   ensurePrismaClient();
   const access = await getConversationAccess(userId, conversationId, { active: true });
   const recipientSide = access.viewerSide === "a" ? "b" : "a";
-  const message = await personalChatsRepository.createMessage({
-    conversationId: access.conversation.id,
-    recipientSide,
-    text: data.message,
-    userId,
-  });
+  let message;
+  try {
+    message = await personalChatsRepository.createMessage({
+      conversationId: access.conversation.id,
+      recipientSide,
+      text: data.message,
+      userId,
+    });
+  } catch (error) {
+    if (error?.code === "PERSONAL_CHAT_INACTIVE") {
+      throw new AppError("Esta conversa foi encerrada ou bloqueada", 409);
+    }
+    throw error;
+  }
   const conversation = await personalChatsRepository.findById(access.conversation.id);
   const serializedMessage = serializeMessage(message, userId);
 

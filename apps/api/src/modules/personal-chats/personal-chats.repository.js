@@ -26,6 +26,36 @@ const conversationDetailInclude = {
 };
 
 export const personalChatsRepository = {
+  createMessageRequest({ requesterId, text, userAId, userBId }) {
+    const now = new Date();
+    const recipientSide = requesterId === userAId ? "b" : "a";
+
+    return prisma.$transaction(async (transaction) => {
+      const conversation = await transaction.conversaPessoal.create({
+        data: {
+          aceito_em: now,
+          nao_lidas_usuario_a: recipientSide === "a" ? 1 : 0,
+          nao_lidas_usuario_b: recipientSide === "b" ? 1 : 0,
+          solicitado_por_id: requesterId,
+          status: "ATIVA",
+          ultima_mensagem_em: now,
+          usuario_a_id: userAId,
+          usuario_b_id: userBId,
+        },
+      });
+
+      await transaction.conversaPessoalMensagem.create({
+        data: {
+          autor_usuario_id: requesterId,
+          conversa_id: conversation.id,
+          mensagem: text,
+        },
+      });
+
+      return conversation;
+    });
+  },
+
   createInvitation({ requesterId, userAId, userBId }) {
     return prisma.conversaPessoal.create({
       data: {
@@ -40,22 +70,29 @@ export const personalChatsRepository = {
     const now = new Date();
 
     return prisma.$transaction(async (transaction) => {
+      const activeConversation = await transaction.conversaPessoal.updateMany({
+        data: {
+          ...(recipientSide === "a"
+            ? { nao_lidas_usuario_a: { increment: 1 } }
+            : { nao_lidas_usuario_b: { increment: 1 } }),
+          status: "ATIVA",
+          ultima_mensagem_em: now,
+        },
+        where: { id: conversationId, status: { in: ["ATIVA", "PENDENTE"] } },
+      });
+
+      if (activeConversation.count !== 1) {
+        const error = new Error("Personal chat is no longer active");
+        error.code = "PERSONAL_CHAT_INACTIVE";
+        throw error;
+      }
+
       const message = await transaction.conversaPessoalMensagem.create({
         data: {
           autor_usuario_id: userId,
           conversa_id: conversationId,
           mensagem: text,
         },
-      });
-
-      await transaction.conversaPessoal.update({
-        data: {
-          ...(recipientSide === "a"
-            ? { nao_lidas_usuario_a: { increment: 1 } }
-            : { nao_lidas_usuario_b: { increment: 1 } }),
-          ultima_mensagem_em: now,
-        },
-        where: { id: conversationId },
       });
 
       return message;
@@ -159,6 +196,24 @@ export const personalChatsRepository = {
     });
   },
 
+  blockConversation(id, userId) {
+    return prisma.conversaPessoal.updateMany({
+      data: {
+        nao_lidas_usuario_a: 0,
+        nao_lidas_usuario_b: 0,
+        status: "BLOQUEADA",
+      },
+      where: {
+        id,
+        status: { in: ["PENDENTE", "ATIVA"] },
+        OR: [
+          { usuario_a_id: userId },
+          { usuario_b_id: userId },
+        ],
+      },
+    });
+  },
+
   reopenInvitation(id, requesterId) {
     return prisma.conversaPessoal.update({
       data: {
@@ -167,6 +222,36 @@ export const personalChatsRepository = {
         status: "PENDENTE",
       },
       where: { id },
+    });
+  },
+
+  reopenMessageRequest(id, requesterId, text, userAId) {
+    const now = new Date();
+    const recipientSide = requesterId === userAId ? "b" : "a";
+
+    return prisma.$transaction(async (transaction) => {
+      await transaction.conversaPessoalMensagem.deleteMany({
+        where: { conversa_id: id },
+      });
+      const conversation = await transaction.conversaPessoal.update({
+        data: {
+          aceito_em: now,
+          nao_lidas_usuario_a: recipientSide === "a" ? 1 : 0,
+          nao_lidas_usuario_b: recipientSide === "b" ? 1 : 0,
+          solicitado_por_id: requesterId,
+          status: "ATIVA",
+          ultima_mensagem_em: now,
+        },
+        where: { id },
+      });
+      await transaction.conversaPessoalMensagem.create({
+        data: {
+          autor_usuario_id: requesterId,
+          conversa_id: id,
+          mensagem: text,
+        },
+      });
+      return conversation;
     });
   },
 

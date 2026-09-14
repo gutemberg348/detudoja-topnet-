@@ -112,10 +112,10 @@ TransacaoComercial
 
 ### `conversas_pessoais` e `conversas_pessoais_mensagens`
 
-- Finalidade: convite de amizade e conversa privada entre duas contas.
+- Finalidade: primeira mensagem e conversa privada direta entre duas contas.
 - O par `(usuario_a_id, usuario_b_id)` e unico e sempre ordenado com o menor ID
   no lado A. A migration adiciona `CHECK (usuario_a_id < usuario_b_id)`.
-- `solicitado_por_id` identifica quem enviou o convite. Estados:
+- `solicitado_por_id` identifica quem enviou a primeira mensagem. Estados:
   `PENDENTE`, `ATIVA`, `RECUSADA` e `BLOQUEADA`.
 - `apelido_usuario_a` e `apelido_usuario_b` sao privados por participante.
 - `nao_lidas_usuario_a/b` evitam contar mensagens em toda abertura da Home;
@@ -128,8 +128,9 @@ TransacaoComercial
 - Indices cobrem listagem por participante/status/data, solicitante/status,
   historico da conversa e mensagens ainda nao lidas.
 - A API localiza contatos por `identificador_publico` e devolve somente dados
-  publicos. Aceite/recusa atualizam apenas convites ainda `PENDENTE`, evitando
-  sobrescrita em respostas concorrentes.
+  publicos. A primeira mensagem cria a conversa como `ATIVA`, sem etapa de
+  aceite. `BLOQUEADA` encerra a conversa e impede novo contato entre o mesmo
+  par; `PENDENTE` e mantido apenas para compatibilidade com dados antigos.
 
 ### `sessoes_autenticacao`
 

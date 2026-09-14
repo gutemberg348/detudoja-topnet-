@@ -166,6 +166,7 @@ async function allowedHolderDocuments(repository, userId) {
   if (!user) throw new AppError("Usuario nao encontrado", 404);
 
   return {
+    cpfRequired: !user.cpf,
     documents: new Set([
       user.cpf,
       user.lojista?.cpf,
@@ -232,6 +233,13 @@ export async function savePayoutAccount(userId, data) {
   const key = normalizePixKey(data.keyType, data.key);
   const holderName = data.holderName.trim();
   const owner = await allowedHolderDocuments(payoutRepository, userId);
+
+  if (document.length === 11 && owner.cpfRequired) {
+    throw new AppError(
+      "Cadastre seu CPF na conta antes de validar uma chave Pix de pessoa fisica",
+      428,
+    );
+  }
 
   if (!owner.documents.has(document)) {
     throw new AppError("O documento do titular precisa ser o CPF ou CNPJ vinculado a sua conta", 409);

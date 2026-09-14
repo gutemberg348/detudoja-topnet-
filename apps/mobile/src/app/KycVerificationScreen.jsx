@@ -2,10 +2,12 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useEffect, useMemo, useState } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { AppButton } from "../components/AppButton";
+import { CpfRequirementModal } from "../components/CpfRequirementModal";
 import { KycSubmissionProgress } from "../components/KycSubmissionProgress";
 import { PageHeader } from "../components/PageHeader";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { getCurrentUser } from "../services/users.api";
+import { ApiError } from "../services/api";
 import { getKycStatus, submitKycDocuments } from "../services/kyc.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { colors, fonts, radius, shadow, spacing, typography } from "../utils/theme";
@@ -63,6 +65,8 @@ function CaptureField({ image, label, onPress, optional = false }) {
 
 export function KycVerificationScreen() {
   const { session, updateSessionUser } = useAuthStore();
+  const [cpfModalOpen, setCpfModalOpen] = useState(false);
+  const [cpfRequired, setCpfRequired] = useState(Boolean(session?.user?.cpfRequired));
   const [documentType, setDocumentType] = useState("RG");
   const [images, setImages] = useState({ documentBack: null, documentFront: null, selfie: null });
   const [kyc, setKyc] = useState(null);
@@ -88,7 +92,12 @@ export function KycVerificationScreen() {
         getCurrentUser(session.accessToken),
       ]);
       setKyc(kycResponse.kyc);
+      const profileNeedsCpf = Boolean(profileResponse.user.cpfRequired);
+      const kycIsLocked = ["APROVADO", "BLOQUEADO", "EM_ANALISE"].includes(kycResponse.kyc?.status);
+      setCpfRequired(profileNeedsCpf);
+      setCpfModalOpen(profileNeedsCpf && !kycIsLocked);
       updateSessionUser({
+        cpfRequired: profileNeedsCpf,
         kycLevel: profileResponse.user.kycLevel,
         kycStatus: profileResponse.user.kycStatus,
       });
@@ -156,6 +165,13 @@ export function KycVerificationScreen() {
       setSubmissionStage("ANALYZING");
       await wait(1_500);
     } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 428) {
+        setCpfRequired(true);
+        setCpfModalOpen(true);
+        setSubmissionStage(null);
+        setError("Informe seu CPF para concluir a verificacao.");
+        return;
+      }
       try {
         const recovered = await getKycStatus(session.accessToken);
         if (
@@ -180,7 +196,11 @@ export function KycVerificationScreen() {
         // Usa abaixo o erro original do envio.
       }
       setSubmissionStage(null);
-      setError(requestError.message ?? "Nao foi possivel enviar os documentos.");
+      setError(
+        requestError instanceof ApiError && requestError.status >= 500
+          ? "Nao conseguimos salvar as fotos agora. Elas continuam nesta tela; aguarde um instante e toque em Verificar identidade novamente."
+          : requestError.message ?? "Nao foi possivel enviar os documentos.",
+      );
     } finally {
       setSubmissionStage(null);
       setIsSaving(false);
@@ -201,7 +221,20 @@ export function KycVerificationScreen() {
       ) : null}
       {kyc?.rejectionReason ? <View style={styles.rejection}><Text style={styles.rejectionLabel}>{kyc.status === "BLOQUEADO" ? "Motivo do bloqueio" : "Motivo da reprovação"}</Text><Text style={styles.rejectionText}>{kyc.rejectionReason}</Text></View> : null}
 
-      {!locked && !isLoading ? (
+      {!locked && !isLoading && cpfRequired ? (
+        <View style={styles.cpfGate}>
+          <View style={styles.cpfGateIcon}>
+            <Ionicons color="#B45309" name="card-outline" size={24} />
+          </View>
+          <View style={styles.cpfGateCopy}>
+            <Text style={styles.cpfGateTitle}>CPF necessario para verificar</Text>
+            <Text style={styles.cpfGateText}>Informe o CPF que aparece no documento antes de fotografar. Se ele ja estiver salvo, esta etapa nao aparece.</Text>
+          </View>
+          <AppButton icon="arrow-forward" onPress={() => setCpfModalOpen(true)} title="Informar CPF" />
+        </View>
+      ) : null}
+
+      {!locked && !isLoading && !cpfRequired ? (
         <>
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>1. Escolha o documento</Text>
@@ -225,6 +258,17 @@ export function KycVerificationScreen() {
         </>
       ) : null}
       {locked && error ? <Text style={styles.error}>{error}</Text> : null}
+
+      <CpfRequirementModal
+        onClose={() => setCpfModalOpen(false)}
+        onCompleted={() => {
+          setCpfRequired(false);
+          setCpfModalOpen(false);
+          setError("");
+        }}
+        open={cpfModalOpen}
+        reason="kyc"
+      />
     </ScreenContainer>
   );
 }
@@ -237,6 +281,11 @@ const styles = StyleSheet.create({
   captureLabel: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.label, fontWeight: "700" },
   capturePreview: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, height: 54, justifyContent: "center", overflow: "hidden", width: 54 },
   content: { gap: spacing.lg, paddingBottom: spacing.xxxl },
+  cpfGate: { backgroundColor: "#FFFBEB", borderColor: "#FDE68A", borderRadius: radius.lg, borderWidth: 1, gap: spacing.md, padding: spacing.lg, ...shadow },
+  cpfGateCopy: { gap: spacing.xs },
+  cpfGateIcon: { alignItems: "center", backgroundColor: "#FEF3C7", borderRadius: radius.round, height: 48, justifyContent: "center", width: 48 },
+  cpfGateText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.small, lineHeight: 20 },
+  cpfGateTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.label, fontWeight: "700" },
   error: { color: colors.danger, fontFamily: fonts.medium, fontSize: typography.small, lineHeight: 20, textAlign: "center" },
   notice: { borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, padding: spacing.lg },
   noticeText: { color: colors.textSecondary, textAlign: "center" },

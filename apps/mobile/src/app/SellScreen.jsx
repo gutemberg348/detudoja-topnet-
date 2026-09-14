@@ -85,6 +85,7 @@ import {
 } from "../services/store-chats.api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import { useAuthStore } from "../stores/useAuthStore";
+import { ApiError } from "../services/api";
 import { colors } from "../utils/theme";
 
 const activeServiceConversationStatuses = new Set([
@@ -345,6 +346,8 @@ export function SellScreen() {
       openStoreForm();
     } else if (action === "service") {
       openSellerServices();
+    } else if (action === "payout") {
+      openPayoutForm();
     }
   }
 
@@ -399,6 +402,12 @@ export function SellScreen() {
         setError("A chave foi salva, mas ainda precisa ser validada antes de receber ou sacar.");
       }
     } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 428) {
+        setPayoutOpen(false);
+        setPendingCpfAction("payout");
+        setError("");
+        return;
+      }
       setError(requestError.message ?? "Nao foi possivel salvar a chave Pix.");
     } finally {
       setIsSaving(false);
@@ -1156,7 +1165,7 @@ export function SellScreen() {
         onOpenCharge={reopenGeneratedCharge}
         onOpenChargeHistory={() => navigation.navigate("GeneratedChargesHistory")}
         onOpenGuide={() => setSellerGuideOpen(true)}
-        onOpenPayout={() => openPayoutForm()}
+        onOpenPayout={() => requestSellerAction("payout")}
         onOpenStoreChats={() => navigation.navigate("StoreChatsInbox", { scope: "seller" })}
         onOpenStore={openStoreDetails}
         sales={sales}

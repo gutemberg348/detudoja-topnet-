@@ -22,6 +22,11 @@ const reasonCopy = {
     text: "O CPF identifica o titular do pagamento e protege o seu saldo. Voce informa uma vez e ele fica salvo na conta.",
     title: "Confirme seu CPF para comprar",
   },
+  kyc: {
+    eyebrow: "Verificacao de identidade",
+    text: "O reconhecimento precisa comparar o CPF cadastrado com o documento fotografado. Voce informa uma vez e ele fica protegido na sua conta.",
+    title: "Informe seu CPF antes das fotos",
+  },
   sale: {
     eyebrow: "Primeira operacao",
     text: "Precisamos identificar o responsavel antes da primeira venda, loja ou servico. Se o CPF ja estiver salvo, esta etapa nao aparece novamente.",

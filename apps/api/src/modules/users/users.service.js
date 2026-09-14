@@ -37,6 +37,7 @@ function serializeUser(user, accountLevel) {
     addresses: user.enderecos.map(serializeAddress),
     createdAt: user.criado_em.toISOString(),
     cpf: maskCpf(user.cpf),
+    cpfRequired: !user.cpf,
     directVerifiedCount: accountLevel.directVerifiedCount,
     directVerifiedRequired: accountLevel.directVerifiedRequired,
     email: user.email,

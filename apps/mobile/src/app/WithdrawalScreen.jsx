@@ -9,10 +9,12 @@ import {
   View,
 } from "react-native";
 import { AppButton } from "../components/AppButton";
+import { CpfRequirementModal } from "../components/CpfRequirementModal";
 import { PageHeader } from "../components/PageHeader";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { PayoutAccountModal } from "./sell/PayoutAccountModal";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
+import { ApiError } from "../services/api";
 import {
   cancelWithdrawal,
   createWithdrawal,
@@ -72,6 +74,7 @@ export function WithdrawalScreen() {
   const [accountForm, setAccountForm] = useState(initialAccountForm);
   const [accountError, setAccountError] = useState("");
   const [accountModalOpen, setAccountModalOpen] = useState(false);
+  const [cpfModalOpen, setCpfModalOpen] = useState(false);
   const [sourceAmounts, setSourceAmounts] = useState({});
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
@@ -152,7 +155,11 @@ export function WithdrawalScreen() {
     );
   }
 
-  async function openAccount() {
+  async function openAccount(skipCpfGate = false) {
+    if (!skipCpfGate && session?.user?.cpfRequired) {
+      setCpfModalOpen(true);
+      return;
+    }
     setAccountError("");
     try {
       const response = await getWithdrawalPixAccount(session.accessToken);
@@ -178,6 +185,12 @@ export function WithdrawalScreen() {
       setAccountModalOpen(false);
       await load();
     } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 428) {
+        setAccountModalOpen(false);
+        setCpfModalOpen(true);
+        setAccountError("");
+        return;
+      }
       setAccountError(
         requestError.message ?? "Nao foi possivel salvar a chave Pix.",
       );
@@ -450,6 +463,15 @@ export function WithdrawalScreen() {
         onSubmit={saveAccount}
         open={accountModalOpen}
         purpose="withdrawal"
+      />
+      <CpfRequirementModal
+        onClose={() => setCpfModalOpen(false)}
+        onCompleted={() => {
+          setCpfModalOpen(false);
+          void openAccount(true);
+        }}
+        open={cpfModalOpen}
+        reason="sale"
       />
     </ScreenContainer>
   );

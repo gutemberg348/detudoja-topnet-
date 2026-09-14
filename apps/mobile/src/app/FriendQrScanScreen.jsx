@@ -16,7 +16,7 @@ export function FriendQrScanScreen({ navigation }) {
     const value = String(rawValue ?? "").trim();
 
     if (!/^DTJ:FRIEND:/i.test(value) && !/^detudoja:\/\/friends\/add\?id=/i.test(value)) {
-      setError("Este QR nao pertence a um perfil de amigo do Brasil Cashback.");
+      setError("Este QR nao pertence a um contato do Brasil Cashback.");
       setHasRead(true);
       return;
     }
@@ -33,9 +33,9 @@ export function FriendQrScanScreen({ navigation }) {
           <Ionicons color={colors.primaryDark} name="person-add-outline" size={25} />
         </View>
         <View style={styles.headerCopy}>
-          <Text style={styles.kicker}>Adicionar amigo</Text>
+          <Text style={styles.kicker}>Nova mensagem</Text>
           <Text style={styles.title}>Leia o QR</Text>
-          <Text style={styles.subtitle}>O convite ainda precisara ser aceito pela outra pessoa.</Text>
+          <Text style={styles.subtitle}>Depois de ler, escreva a primeira mensagem e a conversa abre na hora.</Text>
         </View>
       </View>
 

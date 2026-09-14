@@ -250,7 +250,9 @@ export function ProfileScreen({ navigation }) {
   );
 
   function fillForm(user) {
-    const primaryAddress = user.addresses?.[0] ?? {};
+    const primaryAddress = Array.isArray(user?.addresses)
+      ? (user.addresses[0] ?? {})
+      : {};
     setAddress({
       city: primaryAddress.cidade ?? "",
       complement: primaryAddress.complemento ?? "",
@@ -586,7 +588,9 @@ export function ProfileScreen({ navigation }) {
         <DetailRow
           icon="location-outline"
           label="Enderecos cadastrados"
-          value={String(profile.addresses.length)}
+          value={String(
+            Array.isArray(profile.addresses) ? profile.addresses.length : 0,
+          )}
         />
         <DetailRow
           icon="calendar-outline"
@@ -720,9 +724,11 @@ function ProfileSectionHeading({ icon, subtitle, title }) {
   );
 }
 
-function WalletPreview({ isLoading, onOpen, summary, wallets = [] }) {
+function WalletPreview({ isLoading, onOpen, summary, wallets }) {
+  const safeSummary = summary ?? {};
+  const safeWallets = Array.isArray(wallets) ? wallets : [];
   const walletByCode = Object.fromEntries(
-    wallets.map((item) => [item.code, item]),
+    safeWallets.map((item) => [item.code, item]),
   );
   const composition = [
     {
@@ -775,7 +781,7 @@ function WalletPreview({ isLoading, onOpen, summary, wallets = [] }) {
             <Text style={styles.walletPreviewValue}>
               {isLoading
                 ? "Atualizando..."
-                : formatarDinheiro(summary.availableCents)}
+                : formatarDinheiro(safeSummary.availableCents)}
             </Text>
           </View>
           <Ionicons color={colors.card} name="chevron-forward" size={20} />
@@ -784,14 +790,14 @@ function WalletPreview({ isLoading, onOpen, summary, wallets = [] }) {
           <View style={styles.walletPreviewStat}>
             <Text style={styles.walletPreviewStatLabel}>Pendente</Text>
             <Text style={styles.walletPreviewStatValue}>
-              {formatarDinheiro(summary.pendingCents)}
+              {formatarDinheiro(safeSummary.pendingCents)}
             </Text>
           </View>
           <View style={styles.walletPreviewStatDivider} />
           <View style={styles.walletPreviewStat}>
             <Text style={styles.walletPreviewStatLabel}>Bloqueado</Text>
             <Text style={styles.walletPreviewStatValue}>
-              {formatarDinheiro(summary.blockedCents)}
+              {formatarDinheiro(safeSummary.blockedCents)}
             </Text>
           </View>
         </View>

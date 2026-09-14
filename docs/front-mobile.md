@@ -6,22 +6,24 @@
   abaixo e `Ultimas conversas` na sequencia. A logo e o texto promocional
   intermediario foram removidos dessa tela.
 - A Home possui uma bolha flutuante de chat com badge de mensagens pessoais e
-  convites recebidos.
+  solicitacoes de mensagem recebidas.
 - O bloco `Conversas` mistura cronologicamente pedidos, lojas e pessoas, mas
   cada item preserva sua rota e seu contrato.
 - `PersonalChatsInboxScreen` mostra o ID publico, copiar, compartilhar, QR,
-  entrada manual, scanner, convites e amigos ativos. A entrada manual e o QR
-  primeiro localizam e exibem nome, foto, ID e estado do vinculo; o convite so
-  e enviado depois da confirmacao.
+  entrada manual, scanner, solicitacoes e conversas ativas. A entrada manual e
+  o QR primeiro localizam nome, foto, ID e estado do vinculo; o remetente
+  escreve a primeira mensagem antes do envio.
 - O QR usa `react-native-qrcode-svg`; a leitura reutiliza `expo-camera` e aceita
   apenas payload `DTJ:FRIEND:*` ou deep link conhecido.
-- `PersonalConversationScreen` usa `KeyboardAvoidingView`, lista flexivel e
-  `ChatComposer`, mantendo o campo visivel quando o teclado do iPhone abre.
+- `PersonalConversationScreen` usa redimensionamento nativo no Android,
+  `KeyboardAvoidingView` no iOS, lista flexivel, inset inferior seguro e
+  `ChatComposer`, mantendo o campo acima do teclado e dos botoes do sistema.
 - O nome salvo pode ser editado diretamente na lista ou no chat. Ele e
   particular de quem o salvou; o nome e o ID originais continuam visiveis para
   evitar confusao de identidade.
-- Contatos com amizade ativa abrem o chat; convite recebido oferece aceitar e
-  conversar; convite enviado mostra espera, sem gerar erro generico.
+- A primeira mensagem abre a conversa imediatamente, sem aceite ou recusa. Os
+  dois lados podem continuar escrevendo; quem nao quiser mais contato usa o
+  botao de bloqueio no cabecalho da conversa.
 - Fotos de perfil sao usadas quando existem, com iniciais como fallback.
 - API mobile em `services/personal-chats.api.js`; atualizacao em tempo real por
   `personal-chat.created`, `personal-chat.message.created` e
@@ -277,9 +279,13 @@ servico. Se `cpfRequired` ja for `false`, essa etapa nao aparece novamente.
 Depois de informar o CPF, o Perfil exibe KYC pendente com alerta no menu inferior. O card
 `Verificacao KYC` leva para `KycVerificationScreen`. A tela escolhe RG, CNH ou
 RNE, captura documento/selfie somente pela camera e envia `multipart/form-data`
-para `POST /api/app/kyc/submissions`. OCR, comparacao facial e prova de vida
-passiva retornam `APROVADO` ou `REPROVADO`; uma recusa mostra o motivo e libera
-novas fotos. `EM_ANALISE` permanece apenas para registros legados/contingencia.
+para `POST /api/app/kyc/submissions`. Antes de liberar as fotos, a propria tela
+consulta o perfil: se o CPF estiver ausente, abre `CpfRequirementModal`, salva
+por `POST /api/app/auth/complete-cpf` e continua no KYC. Um CPF ja cadastrado
+pula essa etapa automaticamente; a API mantem a exigencia como protecao contra
+chamadas diretas. OCR, comparacao facial e prova de vida passiva retornam
+`APROVADO`, `REPROVADO` ou `EM_ANALISE`; uma recusa libera novas fotos, enquanto
+um resultado inconclusivo aguarda decisao no painel administrativo.
 
 Google e Apple aparecem no login/cadastro, mas o toque nao executa OAuth nesta
 etapa.

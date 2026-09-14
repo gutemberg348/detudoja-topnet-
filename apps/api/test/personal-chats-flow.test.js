@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { prisma } from "../src/config/prisma.js";
 import {
+  blockPersonalChat,
   createFriendInvitation,
   createPersonalMessage,
-  decideFriendInvitation,
   getPersonalChat,
   listPersonalChats,
   lookupPersonalContact,
@@ -73,7 +73,7 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-test("contato pessoal percorre busca, convite, apelido privado, mensagem e leitura", async () => {
+test("primeira mensagem abre a conversa sem aceite e o bloqueio encerra o contato", async () => {
   const found = await lookupPersonalContact(state.ana.id, { publicId: "@bia.teste.contato" });
   assert.deepEqual(Object.keys(found.contact).sort(), [
     "isSelf",
@@ -86,24 +86,21 @@ test("contato pessoal percorre busca, convite, apelido privado, mensagem e leitu
   assert.equal(found.contact.relationship, null);
 
   const invitation = await createFriendInvitation(state.ana.id, {
+    message: "Oi, Bia. Podemos conversar?",
     publicId: "DTJ:FRIEND:bia.teste.contato",
   });
   const conversationId = invitation.request.id;
   const incoming = await lookupPersonalContact(state.bia.id, {
     publicId: "ana.teste.contato",
   });
-  assert.equal(incoming.contact.relationship.status, "PENDENTE");
+  assert.equal(incoming.contact.relationship.status, "ATIVA");
   assert.equal(incoming.contact.relationship.invitationDirection, "incoming");
-
-  await assert.rejects(
-    decideFriendInvitation(state.ana.id, conversationId, true),
-    (error) => error.statusCode === 403,
-  );
-  await decideFriendInvitation(state.bia.id, conversationId, true);
-  await assert.rejects(
-    decideFriendInvitation(state.bia.id, conversationId, false),
-    (error) => error.statusCode === 409,
-  );
+  const incomingInbox = await listPersonalChats(state.bia.id);
+  assert.equal(incomingInbox.requests.length, 0);
+  assert.equal(incomingInbox.conversations[0].lastMessage.text, "Oi, Bia. Podemos conversar?");
+  assert.equal(incomingInbox.conversations[0].unreadCount, 1);
+  const initialConversation = await getPersonalChat(state.bia.id, conversationId);
+  assert.equal(initialConversation.conversation.messages[0].text, "Oi, Bia. Podemos conversar?");
 
   await updateFriendAlias(state.ana.id, conversationId, { alias: "Bia Faculdade" });
   const [anaList, biaList] = await Promise.all([
@@ -126,13 +123,42 @@ test("contato pessoal percorre busca, convite, apelido privado, mensagem e leitu
     (error) => error.statusCode === 404,
   );
 
-  const secondInvitation = await createFriendInvitation(state.ana.id, {
+  const secondConversation = await createFriendInvitation(state.ana.id, {
+    message: "Oi, Caio.",
     publicId: "caio.teste.contato",
   });
-  const decisions = await Promise.allSettled([
-    decideFriendInvitation(state.caio.id, secondInvitation.request.id, true),
-    decideFriendInvitation(state.caio.id, secondInvitation.request.id, false),
-  ]);
-  assert.equal(decisions.filter((decision) => decision.status === "fulfilled").length, 1);
-  assert.equal(decisions.filter((decision) => decision.status === "rejected").length, 1);
+  assert.equal(secondConversation.request.status, "ATIVA");
+  await createPersonalMessage(state.caio.id, secondConversation.request.id, {
+    message: "Oi, Ana.",
+  });
+
+  const [legacyUserAId, legacyUserBId] = [state.bia.id, state.caio.id]
+    .sort((a, b) => a - b);
+  const legacyPending = await prisma.conversaPessoal.create({
+    data: {
+      solicitado_por_id: state.bia.id,
+      usuario_a_id: legacyUserAId,
+      usuario_b_id: legacyUserBId,
+    },
+  });
+  const legacyList = await listPersonalChats(state.caio.id);
+  assert.equal(
+    legacyList.conversations.some((item) => item.id === legacyPending.id),
+    true,
+  );
+  await createPersonalMessage(state.caio.id, legacyPending.id, {
+    message: "Essa conversa antiga continua funcionando.",
+  });
+  const activatedLegacy = await lookupPersonalContact(state.bia.id, {
+    publicId: "caio.teste.contato",
+  });
+  assert.equal(activatedLegacy.contact.relationship.status, "ATIVA");
+
+  await blockPersonalChat(state.bia.id, conversationId);
+  await assert.rejects(
+    createPersonalMessage(state.ana.id, conversationId, { message: "Ainda esta ai?" }),
+    (error) => error.statusCode === 409,
+  );
+  const afterBlock = await listPersonalChats(state.ana.id);
+  assert.equal(afterBlock.conversations.some((item) => item.id === conversationId), false);
 });

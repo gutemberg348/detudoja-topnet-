@@ -1,4 +1,5 @@
 import {
+  blockPersonalChat,
   createFriendInvitation,
   createPersonalMessage,
   decideFriendInvitation,
@@ -7,6 +8,14 @@ import {
   lookupPersonalContact,
   updateFriendAlias,
 } from "./personal-chats.service.js";
+
+export async function blockPersonalChatController(req, res, next) {
+  try {
+    res.json(await blockPersonalChat(req.auth.user.id, req.params.conversationId));
+  } catch (error) {
+    next(error);
+  }
+}
 
 export async function listPersonalChatsController(req, res, next) {
   try {

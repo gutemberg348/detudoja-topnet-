@@ -15,7 +15,8 @@
     },
     "android": {
       "package": "com.detudoja.mobile",
-      "versionCode": 8,
+      "versionCode": 9,
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#F5FFF8",
         "foregroundImage": "./assets/brasil-cashback-app-icon.png"
