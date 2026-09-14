@@ -124,6 +124,22 @@ export function updateAdminUser(accessToken, userId, user) {
   });
 }
 
+export function approveAdminUserKycWithoutDocuments(accessToken, userId, reason) {
+  return apiRequest(`/api/admin/users/${userId}/kyc/approve-without-documents`, {
+    body: { reason },
+    method: "POST",
+    token: accessToken,
+  });
+}
+
+export function updateAdminUserPassword(accessToken, userId, data) {
+  return apiRequest(`/api/admin/users/${userId}/password`, {
+    body: data,
+    method: "PATCH",
+    token: accessToken,
+  });
+}
+
 export function updateAdminPayoutAccount(accessToken, userId, data) {
   return apiRequest(`/api/admin/users/${userId}/payout-account`, {
     body: data,
@@ -167,6 +183,13 @@ export function updateAdminCourierProfile(accessToken, userId, data) {
 export function addAdminUserService(accessToken, userId, serviceTypeId) {
   return apiRequest(`/api/admin/users/${userId}/seller-services`, {
     body: { serviceTypeId },
+    method: "POST",
+    token: accessToken,
+  });
+}
+
+export function activateAllAdminUserServices(accessToken, userId) {
+  return apiRequest(`/api/admin/users/${userId}/seller-services/activate-all`, {
     method: "POST",
     token: accessToken,
   });

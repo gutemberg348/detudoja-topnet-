@@ -2,13 +2,16 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   Text,
   TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppButton } from "../../components/AppButton";
 import { ChatSystemMessage } from "../../components/ChatSystemMessage";
 import { useRealtimeOrders } from "../../hooks/useRealtimeOrders";
@@ -18,7 +21,7 @@ import {
   sendStoreOrderMessage,
 } from "../../services/seller.api";
 import { formatarDinheiro } from "../../utils/money";
-import { colors } from "../../utils/theme";
+import { colors, spacing } from "../../utils/theme";
 import { sellerStyles as styles } from "./seller.styles";
 import {
   appendUniqueSellerMessage,
@@ -39,6 +42,7 @@ export function StoreOrderChatModal({
   order,
   store,
 }) {
+  const insets = useSafeAreaInsets();
   const chatScrollRef = useRef(null);
   const [chatError, setChatError] = useState("");
   const [chatMessages, setChatMessages] = useState([]);
@@ -184,8 +188,14 @@ export function StoreOrderChatModal({
   }
 
   return (
-    <Modal animationType="fade" transparent visible={open}>
-      <View style={styles.modalBackdrop}>
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={[
+          styles.modalBackdrop,
+          { paddingBottom: Math.max(spacing.lg, insets.bottom + spacing.sm) },
+        ]}
+      >
         <View style={styles.orderChatModal}>
           <View style={styles.orderChatHeader}>
             <View style={styles.orderChatAvatar}>
@@ -303,6 +313,7 @@ export function StoreOrderChatModal({
             <TextInput
               multiline
               onChangeText={setReply}
+              onFocus={() => setTimeout(scrollToLatest, 120)}
               placeholder="Responder ao cliente"
               placeholderTextColor={colors.textWeak}
               style={styles.orderChatInput}
@@ -325,7 +336,7 @@ export function StoreOrderChatModal({
             </Pressable>
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

@@ -137,8 +137,16 @@ test("admin can release a registered payout key and the override is audited", as
 });
 
 test("admin can reverse a rejected KYC after manually reviewing the documents", async () => {
-  const kyc = await prisma.kycUsuario.update({
-    data: { motivo_reprovacao: "Triagem automatica inconclusiva", status: "REPROVADO", validado_em: null },
+  const kyc = await prisma.kycUsuario.upsert({
+    create: {
+      cpf: state.user.cpf,
+      motivo_reprovacao: "Triagem automatica inconclusiva",
+      nome_completo: state.user.nome,
+      status: "REPROVADO",
+      tipo_pessoa: "FISICA",
+      usuario_id: state.user.id,
+    },
+    update: { motivo_reprovacao: "Triagem automatica inconclusiva", status: "REPROVADO", validado_em: null },
     where: { usuario_id: state.user.id },
   });
   await prisma.usuario.update({ data: { nivel_kyc: "REPROVADO" }, where: { id: state.user.id } });

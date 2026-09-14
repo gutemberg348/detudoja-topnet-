@@ -1,16 +1,43 @@
 import {
+  activateAllAdminUserServices,
   adjustAdminUserWallet,
   addAdminUserService,
+  approveAdminUserKycWithoutSubmission,
   getAdminUser,
   listAdminUsers,
   creditAdminUserWallet,
   updateAdminUser,
+  updateAdminUserPassword,
   updateAdminPayoutAccount,
   updateAdminCourierProfile,
   updateAdminSellerProfile,
   updateAdminUserService,
   updateAdminUserStatus,
 } from "./admin-users.service.js";
+
+export async function approveAdminUserKycWithoutSubmissionController(req, res, next) {
+  try {
+    res.json(await approveAdminUserKycWithoutSubmission(req.auth.user.id, req.params.userId, req.body));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateAdminUserPasswordController(req, res, next) {
+  try {
+    res.json(await updateAdminUserPassword(req.auth.user.id, req.params.userId, req.body));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function activateAllAdminUserServicesController(req, res, next) {
+  try {
+    res.json(await activateAllAdminUserServices(req.auth.user.id, req.params.userId));
+  } catch (error) {
+    next(error);
+  }
+}
 
 export async function updateAdminPayoutAccountController(req, res, next) {
   try {

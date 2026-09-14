@@ -110,6 +110,17 @@ export const updateAdminUserStatusSchema = z.object({
   status: z.enum(["ATIVO", "INATIVO", "BLOQUEADO", "PENDENTE"]),
 });
 
+export const approveAdminUserKycSchema = z.object({
+  reason: z.string().trim().min(8, "Explique a liberacao com pelo menos 8 caracteres").max(1000),
+}).strict();
+
+export const updateAdminUserPasswordSchema = z.object({
+  password: z.string().min(8, "A senha precisa ter pelo menos 8 caracteres").max(72)
+    .regex(/[a-z]/i, "A senha precisa conter uma letra")
+    .regex(/\d/, "A senha precisa conter um numero"),
+  reason: z.string().trim().min(8, "Explique a redefinicao com pelo menos 8 caracteres").max(500),
+}).strict();
+
 export const updateAdminPayoutAccountSchema = z.object({
   reason: z.string().trim().min(8, "Explique a alteracao com pelo menos 8 caracteres").max(500),
   status: z.enum(["ATIVA", "INATIVA", "BLOQUEADA", "REPROVADA"]),

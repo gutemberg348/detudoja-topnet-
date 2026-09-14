@@ -2,6 +2,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppButton } from "../components/AppButton";
 import { ChatSystemMessage } from "../components/ChatSystemMessage";
 import { ScreenContainer } from "../components/ScreenContainer";
@@ -209,6 +210,7 @@ function compactOrderCode(value = "") {
 }
 
 export function CustomerOrderDetailsScreen({ navigation, route }) {
+  const insets = useSafeAreaInsets();
   const { session } = useAuthStore();
   const chatScrollRef = useRef(null);
   const [draft, setDraft] = useState("");
@@ -494,7 +496,10 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
 
   return (
     <ScreenContainer
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[
+        styles.content,
+        { paddingBottom: Math.max(spacing.xxxl, insets.bottom + spacing.lg) },
+      ]}
       edges={["left", "right"]}
       onContentSizeChange={scrollToLatest}
       scrollViewRef={chatScrollRef}
@@ -598,6 +603,7 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
           <TextInput
             multiline
             onChangeText={setDraft}
+            onFocus={() => setTimeout(scrollToLatest, 120)}
             placeholder="Escreva uma duvida para a loja"
             placeholderTextColor={colors.textWeak}
             style={styles.questionInput}

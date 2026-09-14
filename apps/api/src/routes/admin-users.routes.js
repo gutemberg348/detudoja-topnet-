@@ -1,11 +1,14 @@
 import { Router } from "express";
 import {
+  activateAllAdminUserServicesController,
   adjustAdminUserWalletController,
   addAdminUserServiceController,
+  approveAdminUserKycWithoutSubmissionController,
   getAdminUserController,
   listAdminUsersController,
   creditAdminUserWalletController,
   updateAdminUserController,
+  updateAdminUserPasswordController,
   updateAdminPayoutAccountController,
   updateAdminCourierProfileController,
   updateAdminSellerProfileController,
@@ -13,6 +16,7 @@ import {
   updateAdminUserStatusController,
 } from "../modules/admin/admin-users.controller.js";
 import {
+  approveAdminUserKycSchema,
   adjustAdminUserWalletSchema,
   creditAdminUserWalletSchema,
   createAdminUserServiceSchema,
@@ -21,6 +25,7 @@ import {
   updateAdminSellerProfileSchema,
   updateAdminUserServiceSchema,
   updateAdminUserStatusSchema,
+  updateAdminUserPasswordSchema,
   updateAdminPayoutAccountSchema,
 } from "../modules/admin/admin.validator.js";
 import { validate } from "../middlewares/validate.middleware.js";
@@ -35,6 +40,18 @@ adminUsersRoutes.patch(
   roleMiddleware("super_admin", "admin", "operacoes"),
   validate(updateAdminUserSchema),
   updateAdminUserController,
+);
+adminUsersRoutes.post(
+  "/:userId/kyc/approve-without-documents",
+  roleMiddleware("super_admin", "admin", "compliance", "kyc"),
+  validate(approveAdminUserKycSchema),
+  approveAdminUserKycWithoutSubmissionController,
+);
+adminUsersRoutes.patch(
+  "/:userId/password",
+  roleMiddleware("super_admin", "admin"),
+  validate(updateAdminUserPasswordSchema),
+  updateAdminUserPasswordController,
 );
 adminUsersRoutes.patch(
   "/:userId/payout-account",
@@ -71,6 +88,11 @@ adminUsersRoutes.post(
   roleMiddleware("super_admin", "admin", "operacoes"),
   validate(createAdminUserServiceSchema),
   addAdminUserServiceController,
+);
+adminUsersRoutes.post(
+  "/:userId/seller-services/activate-all",
+  roleMiddleware("super_admin", "admin", "operacoes"),
+  activateAllAdminUserServicesController,
 );
 adminUsersRoutes.patch(
   "/:userId/seller-services/:sellerServiceId",

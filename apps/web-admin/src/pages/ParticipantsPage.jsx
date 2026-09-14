@@ -1,7 +1,9 @@
 import { BriefcaseBusiness, Check, ChevronLeft, ChevronRight, KeyRound, Minus, Pencil, Plus, Search, ShieldCheck, UserRound, WalletCards, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
+  activateAllAdminUserServices,
   approveAdminKyc,
+  approveAdminUserKycWithoutDocuments,
   getAdminUser,
   getAdminUsers,
   getAdminServiceTypes,
@@ -13,6 +15,7 @@ import {
   updateAdminCourierProfile,
   updateAdminSellerProfile,
   updateAdminUser,
+  updateAdminUserPassword,
   updateAdminUserService,
   updateAdminUserStatus,
 } from "../services/admin.api";
@@ -26,6 +29,7 @@ export function ParticipantsPage({
   accessToken,
   canManageKyc = false,
   canManageParticipantData = false,
+  canManageParticipantPassword = false,
   canManagePayoutAccount = false,
   canManageProviderProfiles = false,
   canManageParticipantStatus = false,
@@ -44,6 +48,7 @@ export function ParticipantsPage({
   const [kycReason, setKycReason] = useState("");
   const [payoutReason, setPayoutReason] = useState("");
   const [payoutStatus, setPayoutStatus] = useState("ATIVA");
+  const [passwordForm, setPasswordForm] = useState({ password: "", reason: "" });
 
   const loadUsers = useCallback(async () => {
     setError("");
@@ -75,6 +80,7 @@ export function ParticipantsPage({
       setKycReason("");
       setPayoutReason("");
       setPayoutStatus(response.user.payoutAccount?.status ?? "ATIVA");
+      setPasswordForm({ password: "", reason: "" });
       if (canManageProviderProfiles) {
         const services = await getAdminServiceTypes(accessToken);
         setServiceTypes(services.serviceTypes?.filter((service) => service.status === "ATIVO") ?? []);
@@ -216,6 +222,51 @@ export function ParticipantsPage({
     }
   }
 
+  async function approveKycWithoutDocuments() {
+    if (!selectedUser) return;
+    if (kycReason.trim().length < 8) {
+      setError("Explique a liberacao KYC com pelo menos 8 caracteres.");
+      return;
+    }
+    setDetailLoading(true);
+    setError("");
+    try {
+      const response = await approveAdminUserKycWithoutDocuments(
+        accessToken,
+        selectedUser.id,
+        kycReason.trim(),
+      );
+      setSelectedUser(response.user);
+      setKycReason("");
+      await loadUsers();
+    } catch (requestError) {
+      setError(requestError.message || "Nao foi possivel liberar o KYC sem documentos.");
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  async function resetParticipantPassword(event) {
+    event.preventDefault();
+    if (!selectedUser) return;
+    setDetailLoading(true);
+    setError("");
+    try {
+      await updateAdminUserPassword(accessToken, selectedUser.id, passwordForm);
+      setPasswordForm({ password: "", reason: "" });
+      await loadUsers();
+    } catch (requestError) {
+      setError(requestError.message || "Nao foi possivel redefinir a senha.");
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  function activateAllServices() {
+    if (!selectedUser) return;
+    return updateProvider(() => activateAllAdminUserServices(accessToken, selectedUser.id));
+  }
+
   async function savePayoutStatus() {
     if (!selectedUser?.payoutAccount) return;
     if (payoutReason.trim().length < 8) {
@@ -315,6 +366,14 @@ export function ParticipantsPage({
               </div>
               <button className="button button--secondary" disabled={detailLoading} onClick={saveUser} type="button"><Pencil size={16} /> Salvar dados</button>
             </section> : null}
+            {canManageParticipantPassword ? <section className="admin-edit-panel">
+              <div className="admin-panel-heading"><div><p className="eyebrow">Seguranca</p><h3>Redefinir senha do participante</h3></div><ShieldCheck size={17} /></div>
+              <form className="admin-edit-grid" onSubmit={resetParticipantPassword}>
+                <label className="admin-edit-grid__wide">Nova senha<input autoComplete="new-password" minLength={8} onChange={(event) => setPasswordForm((current) => ({ ...current, password: event.target.value }))} required type="password" value={passwordForm.password} /><small>Minimo de 8 caracteres, com letra e numero.</small></label>
+                <label className="admin-edit-grid__wide">Motivo<input maxLength={500} minLength={8} onChange={(event) => setPasswordForm((current) => ({ ...current, reason: event.target.value }))} required value={passwordForm.reason} /></label>
+                <button className="button button--secondary admin-edit-grid__wide" disabled={detailLoading} type="submit"><ShieldCheck size={16} /> Redefinir senha e encerrar sessoes</button>
+              </form>
+            </section> : null}
             {canManageKyc ? <section className="admin-edit-panel">
               <div className="admin-panel-heading"><div><p className="eyebrow">Compliance</p><h3>Controle manual do KYC</h3></div><ShieldCheck size={17} /></div>
               {selectedUser.kycSubmission ? <>
@@ -325,7 +384,14 @@ export function ParticipantsPage({
                   {["EM_ANALISE", "REPROVADO"].includes(selectedUser.kycSubmission.status) ? <button className="button button--primary" disabled={detailLoading} onClick={() => decideKyc("approve")} type="button"><Check size={16} /> {selectedUser.kycSubmission.status === "REPROVADO" ? "Reverter e aprovar" : "Aprovar e liberar Tier 2"}</button> : null}
                   {selectedUser.kycSubmission.status === "APROVADO" ? <button className="button button--danger" disabled={detailLoading} onClick={() => decideKyc("revoke")} type="button"><X size={16} /> Revogar e bloquear</button> : null}
                 </div>
-              </> : <div className="kyc-decision"><strong>Sem envio de documentos</strong><p>O participante precisa enviar documento e selfie antes da aprovacao manual.</p></div>}
+              </> : <>
+                <div className="kyc-decision"><strong>Sem envio de documentos</strong><p>Esta sera uma aprovacao administrativa excepcional, sem fotos para conferencia.</p></div>
+                <div className="detail-status"><StatusBadge status={selectedUser.kycStatus} /><span>{selectedUser.kycLevel}</span></div>
+                {selectedUser.kycStatus !== "APROVADO" ? <>
+                  <label className="admin-edit-grid__wide">Motivo da excecao<textarea maxLength={1000} onChange={(event) => setKycReason(event.target.value)} placeholder="Explique por que o KYC sera liberado sem documentos" rows={3} value={kycReason} /></label>
+                  <button className="button button--primary" disabled={detailLoading} onClick={approveKycWithoutDocuments} type="button"><Check size={16} /> Aprovar sem documentos e liberar Tier 2</button>
+                </> : null}
+              </>}
             </section> : null}
             {canManagePayoutAccount ? <section className="admin-edit-panel">
               <div className="admin-panel-heading"><div><p className="eyebrow">Recebimento</p><h3>Chave Pix do participante</h3></div><KeyRound size={17} /></div>
@@ -366,6 +432,7 @@ export function ParticipantsPage({
             {canManageProviderProfiles ? <section className="admin-edit-panel">
               <div className="admin-panel-heading"><div><p className="eyebrow">Operacao comercial</p><h3>Prestador, motoboy e servicos</h3></div><BriefcaseBusiness size={17} /></div>
               <p className="table-secondary">KYC e decidido na fila de documentos. A liberacao aqui respeita conta ativa, KYC aprovado e regras de cada modalidade.</p>
+              <button className="button button--primary" disabled={detailLoading || selectedUser.kycStatus !== "APROVADO" || selectedUser.status !== "ATIVO"} onClick={activateAllServices} type="button"><Check size={16} /> Ativar todos os servicos elegiveis</button>
               {selectedUser.providerProfile ? <>
                 <div className="admin-edit-grid">
                   <label>Status do prestador<select disabled={detailLoading} onChange={(event) => changeSellerStatus(event.target.value)} value={selectedUser.providerProfile.status}><option value="ATIVO">Ativo</option><option value="PAUSADO">Pausado</option><option value="BLOQUEADO">Bloqueado</option><option value="REPROVADO">Reprovado</option></select></label>

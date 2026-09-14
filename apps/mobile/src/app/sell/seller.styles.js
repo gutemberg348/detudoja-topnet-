@@ -1001,7 +1001,7 @@ export const sellerStyles = StyleSheet.create({
     borderRadius: radius.lg,
     borderWidth: 1,
     flexShrink: 1,
-    minHeight: 220,
+    minHeight: 96,
   },
   orderChatSend: {
     alignItems: "center",

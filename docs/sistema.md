@@ -1,5 +1,21 @@
 # Sistema DeTudoJa
 
+## Atualizacao 2026-09-14: overrides completos no participante
+
+No detalhe de `Participantes`, administradores autorizados agora podem:
+
+- aprovar excepcionalmente um KYC sem envio de documento, desde que o cadastro
+  tenha CPF valido. A acao libera `TIER_2` e fica identificada na auditoria
+  como `KYC_APROVADO_SEM_DOCUMENTOS`;
+- redefinir a senha do participante mediante motivo. A senha usa Argon2id e
+  todas as sessoes anteriores sao revogadas;
+- ativar em lote todos os tipos de servico ativos e elegiveis. Servicos de
+  entrega sao ignorados enquanto nao houver motoboy ativo e nenhum servico e
+  colocado online automaticamente.
+
+Essas operacoes sao administrativas e auditadas com autor, alvo, data e
+motivo ou resumo da liberacao.
+
 ## Atualizacao 2026-09-14: cadastro de administradores
 
 O painel ganhou a area `Acessos / Administradores`, visivel somente para

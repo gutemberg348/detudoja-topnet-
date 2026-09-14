@@ -54,6 +54,10 @@ export function canManageParticipantStatus(role) {
   return ["super_admin", "admin", "compliance", "kyc"].includes(String(role ?? "").toLowerCase());
 }
 
+export function canManageParticipantPassword(role) {
+  return ["super_admin", "admin"].includes(String(role ?? "").toLowerCase());
+}
+
 export function canManageKyc(role) {
   return ["super_admin", "admin", "compliance", "kyc"].includes(String(role ?? "").toLowerCase());
 }

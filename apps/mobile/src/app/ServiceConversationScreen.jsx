@@ -14,6 +14,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppButton } from "../components/AppButton";
 import { ChatComposer } from "../components/ChatComposer";
 import { ScreenContainer } from "../components/ScreenContainer";
@@ -65,6 +66,7 @@ const conversationStatusCopy = {
 
 export function ServiceConversationScreen({ navigation, route }) {
   const { session } = useAuthStore();
+  const insets = useSafeAreaInsets();
   const initial = route.params?.conversation;
   const scrollRef = useRef(null);
   const loadPromiseRef = useRef(null);
@@ -649,6 +651,7 @@ export function ServiceConversationScreen({ navigation, route }) {
         placeholder={canChat ? "Escreva uma mensagem" : isAwaitingServiceAcceptance ? "Chat aguardando aceite" : "Atendimento encerrado"}
         sendEnabled={Boolean(draft.trim() || image)}
         sending={sending}
+        style={{ paddingBottom: Math.max(spacing.sm, insets.bottom + spacing.xs) }}
       />
 
       <ProposalModal
@@ -921,7 +924,7 @@ function ProposalModal({ form, isCourierRide, loading, onChange, onClose, onSubm
   return (
     <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={styles.modalOverlay}
       >
         <Pressable onPress={onClose} style={StyleSheet.absoluteFill} />
@@ -1017,7 +1020,7 @@ function ReviewModal({ form, loading, onChange, onClose, onSubmit, open }) {
   return (
     <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={styles.modalOverlay}
       >
         <Pressable onPress={onClose} style={StyleSheet.absoluteFill} />
@@ -1126,7 +1129,7 @@ function ProposalDecisionModal({
   return (
     <Modal animationType="fade" onRequestClose={() => {}} transparent visible={open}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={styles.modalOverlay}
       >
         <View style={styles.decisionModalCard}>

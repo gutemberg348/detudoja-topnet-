@@ -155,7 +155,7 @@ export function PersonalConversationScreen({ navigation, route }) {
   return (
     <SafeAreaView edges={["left", "right"]} style={styles.safeArea}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={0}
         style={styles.keyboard}
       >
@@ -229,7 +229,7 @@ export function PersonalConversationScreen({ navigation, route }) {
       </KeyboardAvoidingView>
 
       <Modal animationType="fade" onRequestClose={() => setAliasOpen(false)} transparent visible={aliasOpen}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalOverlay}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalOverlay}>
           <Pressable onPress={() => setAliasOpen(false)} style={StyleSheet.absoluteFill} />
           <View style={styles.modalCard}>
             <View style={styles.modalIcon}>

@@ -3,7 +3,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
-  Keyboard,
   Modal,
   Platform,
   Pressable,
@@ -12,6 +11,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { StatePanel } from "../components/StatePanel";
 import { ChatComposer } from "../components/ChatComposer";
@@ -38,6 +38,7 @@ import {
 
 export function StoreConversationScreen({ navigation, route }) {
   const { session } = useAuthStore();
+  const insets = useSafeAreaInsets();
   const initialConversation = route.params?.conversation ?? null;
   const initialStore = route.params?.store ?? null;
   const scrollRef = useRef(null);
@@ -45,7 +46,6 @@ export function StoreConversationScreen({ navigation, route }) {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(!initialConversation?.messages);
-  const [keyboardInset, setKeyboardInset] = useState(0);
   const [openingContent, setOpeningContent] = useState("");
   const [sending, setSending] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -90,36 +90,6 @@ export function StoreConversationScreen({ navigation, route }) {
   useEffect(() => {
     load();
   }, [load]);
-
-  useEffect(() => {
-    if (Platform.OS !== "ios") {
-      return undefined;
-    }
-
-    const updateKeyboardInset = (event) => {
-      const keyboardHeight = Number(event?.endCoordinates?.height ?? 0);
-
-      setKeyboardInset(Math.max(0, keyboardHeight));
-      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
-    };
-    const changeSubscription = Keyboard.addListener(
-      "keyboardWillChangeFrame",
-      updateKeyboardInset,
-    );
-    const showSubscription = Keyboard.addListener(
-      "keyboardWillShow",
-      updateKeyboardInset,
-    );
-    const hideSubscription = Keyboard.addListener("keyboardWillHide", () => {
-      setKeyboardInset(0);
-    });
-
-    return () => {
-      changeSubscription.remove();
-      showSubscription.remove();
-      hideSubscription.remove();
-    };
-  }, []);
 
   const refreshConversation = useCallback(() => {
     load({ silent: true });
@@ -288,12 +258,8 @@ export function StoreConversationScreen({ navigation, route }) {
 
   return (
     <ScreenContainer
-      contentContainerStyle={[
-        styles.content,
-        keyboardInset > 0 && { paddingBottom: keyboardInset },
-      ]}
+      contentContainerStyle={styles.content}
       edges={["left", "right"]}
-      keyboardAvoiding={Platform.OS !== "ios"}
       padded={false}
       scroll={false}
     >
@@ -395,6 +361,7 @@ export function StoreConversationScreen({ navigation, route }) {
             : "Escreva sua duvida para a loja"
         }
         sending={sending}
+        style={{ paddingBottom: Math.max(spacing.sm, insets.bottom + spacing.xs) }}
         submitOnEnter
       />
 

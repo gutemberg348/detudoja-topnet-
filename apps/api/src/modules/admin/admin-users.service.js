@@ -1,4 +1,6 @@
+import argon2 from "argon2";
 import { AppError } from "../../utils/errors.js";
+import { isValidCpf } from "../../utils/cpf.js";
 import { parsePositiveId } from "../../utils/ids.js";
 import { getPagination } from "../../utils/pagination.js";
 import { serializeAdminUser } from "./admin.serializer.js";
@@ -152,6 +154,93 @@ export async function updateAdminUser(userId, data) {
   });
 
   return getAdminUser(parsedUserId);
+}
+
+export async function approveAdminUserKycWithoutSubmission(adminId, userId, data) {
+  const parsedUserId = parsePositiveId(userId, "Participante invalido");
+  await adminUsersRepository.transaction(async (database) => {
+    const user = await database.usuario.findFirst({
+      include: { kyc: { include: { solicitacoes: { select: { id: true }, take: 1 } } } },
+      where: { ...participantWhere, id: parsedUserId },
+    });
+    if (!user) throw new AppError("Participante nao encontrado", 404);
+    if (user.kyc?.solicitacoes.length) {
+      throw new AppError("Este participante possui documentos; use a decisao do envio KYC", 409);
+    }
+    if (!user.cpf || !isValidCpf(user.cpf)) {
+      throw new AppError("Cadastre um CPF valido antes de liberar o KYC", 428);
+    }
+    const now = new Date();
+    await database.kycUsuario.upsert({
+      create: {
+        cpf: user.cpf,
+        nome_completo: user.nome,
+        status: "APROVADO",
+        tipo_pessoa: "FISICA",
+        usuario_id: user.id,
+        validado_em: now,
+      },
+      update: {
+        cpf: user.cpf,
+        motivo_reprovacao: null,
+        nome_completo: user.nome,
+        status: "APROVADO",
+        validado_em: now,
+      },
+      where: { usuario_id: user.id },
+    });
+    await Promise.all([
+      database.usuario.update({ data: { nivel_kyc: "TIER_2" }, where: { id: user.id } }),
+      database.lojista.updateMany({
+        data: { status: "ATIVO", status_kyc: "APROVADO" },
+        where: { tipo_pessoa: "FISICA", usuario_id: user.id },
+      }),
+      database.vendedor.updateMany({
+        data: { status: "ATIVO", status_kyc: "APROVADO" },
+        where: { tipo_pessoa: "FISICA", usuario_id: user.id },
+      }),
+      database.indicacao.updateMany({
+        data: { status: "ATIVA" },
+        where: { indicado_usuario_id: user.id, status: "PENDENTE" },
+      }),
+    ]);
+    await adminUsersRepository.createAudit(database, {
+      acao: "KYC_APROVADO_SEM_DOCUMENTOS",
+      administrador_id: adminId,
+      dados_json: { motivo: data.reason, tier: "TIER_2" },
+      usuario_alvo_id: user.id,
+    });
+  });
+  return getAdminUser(parsedUserId);
+}
+
+export async function updateAdminUserPassword(adminId, userId, data) {
+  const parsedUserId = parsePositiveId(userId, "Participante invalido");
+  const passwordHash = await argon2.hash(data.password, {
+    memoryCost: 19456,
+    parallelism: 1,
+    timeCost: 2,
+    type: argon2.argon2id,
+  });
+  await adminUsersRepository.transaction(async (database) => {
+    const user = await database.usuario.findFirst({ where: { ...participantWhere, id: parsedUserId } });
+    if (!user) throw new AppError("Participante nao encontrado", 404);
+    const now = new Date();
+    await Promise.all([
+      database.usuario.update({ data: { senha_hash: passwordHash }, where: { id: user.id } }),
+      database.sessaoAutenticacao.updateMany({
+        data: { revogada_em: now },
+        where: { revogada_em: null, usuario_id: user.id },
+      }),
+    ]);
+    await adminUsersRepository.createAudit(database, {
+      acao: "SENHA_PARTICIPANTE_REDEFINIDA",
+      administrador_id: adminId,
+      dados_json: { motivo: data.reason, sessoesRevogadasEm: now.toISOString() },
+      usuario_alvo_id: user.id,
+    });
+  });
+  return { updated: true };
 }
 
 export async function updateAdminPayoutAccount(adminId, userId, data) {
@@ -343,6 +432,76 @@ export async function addAdminUserService(adminId, userId, data) {
       acao: "SERVICO_PRESTADOR_LIBERADO",
       administrador_id: adminId,
       dados_json: { tipoServicoId: type.id, vendedorId: seller.id },
+      usuario_alvo_id: user.id,
+    });
+  });
+  return getAdminUser(parsedUserId);
+}
+
+export async function activateAllAdminUserServices(adminId, userId) {
+  const parsedUserId = parsePositiveId(userId, "Participante invalido");
+  await adminUsersRepository.transaction(async (database) => {
+    const user = await findProviderParticipant(database, parsedUserId);
+    assertProviderEligible(user);
+    if (!user.cpf) throw new AppError("Informe o CPF antes de liberar servicos", 428);
+
+    const serviceTypes = await database.tipoServico.findMany({
+      orderBy: [{ ordem: "asc" }, { nome: "asc" }],
+      where: { excluido_em: null, segmento_venda_id: { not: null }, status: "ATIVO" },
+    });
+    if (!serviceTypes.length) throw new AppError("Nenhum servico ativo foi encontrado", 409);
+
+    let seller = user.vendedor;
+    const courierActive = seller?.motoboy?.status === "ATIVO";
+    const eligibleTypes = serviceTypes.filter(
+      (type) => type.tipo_operacao !== "ENTREGA_LOCAL" || courierActive,
+    );
+    if (!eligibleTypes.length) {
+      throw new AppError("Ative o cadastro de motoboy antes de liberar os servicos de entrega", 409);
+    }
+    if (!seller || seller.excluido_em) {
+      seller = await database.vendedor.create({
+        data: {
+          cpf: user.cpf,
+          nome_publico: user.nome,
+          segmento_venda_id: eligibleTypes[0].segmento_venda_id,
+          status: "ATIVO",
+          status_kyc: "APROVADO",
+          tipo_pessoa: "FISICA",
+          usuario_id: user.id,
+        },
+        include: { motoboy: true },
+      });
+    } else {
+      seller = await database.vendedor.update({
+        data: { status: "ATIVO", status_kyc: "APROVADO" },
+        include: { motoboy: true },
+        where: { id: seller.id },
+      });
+    }
+
+    for (const type of eligibleTypes) {
+      await database.servicoVendedor.upsert({
+        create: {
+          categoria: type.nome,
+          disponivel_agora: false,
+          nome: type.nome,
+          status: "ATIVO",
+          tipo_servico_id: type.id,
+          vendedor_id: seller.id,
+        },
+        update: { disponivel_agora: false, excluido_em: null, status: "ATIVO" },
+        where: { vendedor_id_tipo_servico_id: { tipo_servico_id: type.id, vendedor_id: seller.id } },
+      });
+    }
+    await adminUsersRepository.createAudit(database, {
+      acao: "TODOS_SERVICOS_PRESTADOR_LIBERADOS",
+      administrador_id: adminId,
+      dados_json: {
+        liberados: eligibleTypes.length,
+        entregasIgnoradasSemMotoboy: serviceTypes.length - eligibleTypes.length,
+        vendedorId: seller.id,
+      },
       usuario_alvo_id: user.id,
     });
   });

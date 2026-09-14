@@ -35,6 +35,7 @@ import {
   canManageParticipantData,
   canManageProviderProfiles,
   canManageParticipantStatus,
+  canManageParticipantPassword,
   canManageKyc,
   canManagePayoutAccount,
   canManageWallet,
@@ -210,6 +211,7 @@ export function AppShell({ onLogout, session }) {
             canManageParticipantData={canManageParticipantData(session.user.role)}
             canManageProviderProfiles={canManageProviderProfiles(session.user.role)}
             canManageParticipantStatus={canManageParticipantStatus(session.user.role)}
+            canManageParticipantPassword={canManageParticipantPassword(session.user.role)}
             canManageKyc={canManageKyc(session.user.role)}
             canManagePayoutAccount={canManagePayoutAccount(session.user.role)}
             canManageSupport={canManageSupport(session.user.role)}
