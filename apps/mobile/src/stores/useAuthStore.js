@@ -310,7 +310,7 @@ export function AuthStoreProvider({ children }) {
     setSession(null);
   }
 
-  function updateSessionUser(user) {
+  const updateSessionUser = useCallback((user) => {
     setSession((currentSession) => {
       if (!currentSession) return currentSession;
 
@@ -322,7 +322,7 @@ export function AuthStoreProvider({ children }) {
       persistTokens(nextSession).catch(() => {});
       return nextSession;
     });
-  }
+  }, []);
 
   const value = useMemo(
     () => ({

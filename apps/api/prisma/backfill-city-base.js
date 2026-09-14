@@ -4,6 +4,7 @@ const patosPbAddress = {
   bairro: "Centro",
   cep: "58700000",
   cidade: "Patos",
+  cidade_normalizada: "patos",
   estado: "PB",
   numero: "0",
   rua: "Centro",

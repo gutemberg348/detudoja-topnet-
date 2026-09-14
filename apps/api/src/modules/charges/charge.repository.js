@@ -1,5 +1,6 @@
 import { prisma } from "../../config/prisma.js";
 import { requireUserCpf } from "../../utils/cpf-required.js";
+import { requireCommercialTier2 } from "../../utils/commercial-access.js";
 
 export function createChargeRepository(database = prisma) {
   return {
@@ -14,6 +15,7 @@ export function createChargeRepository(database = prisma) {
     findStore(args) { return database.loja.findFirst(args); },
     findUniqueCharge(args) { return database.cobranca.findUnique(args); },
     findWallets(args) { return database.carteira.findMany(args); },
+    requireCommercialTier2(userId) { return requireCommercialTier2(database, userId); },
     requireUserCpf(userId) { return requireUserCpf(database, userId); },
     transaction(work) { return database.$transaction(work); },
     updateAutonomousSale(args) { return database.vendaAutonoma.update(args); },

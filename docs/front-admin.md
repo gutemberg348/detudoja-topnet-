@@ -371,10 +371,11 @@ Mesmo que alguem force uma URL ou chamada manual do navegador, a API responde
 ## Auditoria KYC documental - 2026-09-03
 
 O menu `KYC` lista solicitacoes por status e permite buscar por nome, e-mail ou
-CPF. O detalhe abre documento e selfie por chamadas autenticadas e apresenta
-OCR, nome, comparacao facial, antisspoof, liveness e motivos da decisao
-automatica. Os botoes manuais existem apenas para registros legados ainda em
-`EM_ANALISE`; arquivos nao possuem URL publica.
+CPF. O detalhe abre frente, verso e selfie por chamadas autenticadas, permite
+ampliar cada imagem e apresenta OCR, nome, comparacao facial, antisspoof,
+liveness e motivos da decisao automatica. Todo resultado inconclusivo permanece
+em `EM_ANALISE` e pode ser aprovado ou reprovado com justificativa. Arquivos nao
+possuem URL publica e a imagem ampliada usa apenas uma URL temporaria em memoria.
 
 ## Saques Pix e tesouraria - 2026-08-27
 

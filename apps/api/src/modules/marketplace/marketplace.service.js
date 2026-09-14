@@ -5,7 +5,6 @@ import {
   getSegmentCommissionDistribution,
   resolvePaymentPolicy,
 } from "../earnings/order-earnings.config.js";
-import { defaultDeliveryFeeCents } from "../orders/orders.config.js";
 import {
   createCacheKey,
   getOrSetJsonCache,
@@ -216,7 +215,7 @@ function serializeStore(
       available: deliveryAvailable,
       estimatedMinutes: estimatedDeliveryMinutes,
       feeCents: deliveryAvailable
-        ? cents(store.taxa_entrega_centavos ?? defaultDeliveryFeeCents)
+        ? cents(store.taxa_entrega_centavos)
         : null,
       pickupAvailable,
     },

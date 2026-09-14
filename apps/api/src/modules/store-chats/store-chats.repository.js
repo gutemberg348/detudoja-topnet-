@@ -1,4 +1,5 @@
 import { prisma } from "../../config/prisma.js";
+import { commercialTier2UserWhere } from "../../utils/commercial-access.js";
 
 const storeSelect = {
   banner_url: true,
@@ -145,6 +146,13 @@ export const storeChatsRepository = {
       where: {
         excluido_em: null,
         id: storeId,
+        lojista: {
+          is: {
+            status: "ATIVO",
+            status_kyc: "APROVADO",
+            usuario: { is: commercialTier2UserWhere },
+          },
+        },
         status: "ATIVA",
         visivel_no_app: true,
       },

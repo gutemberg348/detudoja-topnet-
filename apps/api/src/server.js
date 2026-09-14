@@ -33,6 +33,10 @@ import {
   stopServiceTimeoutWorker,
 } from "./modules/service-chats/service-timeout.worker.js";
 import {
+  startKycAnalysisWorker,
+  stopKycAnalysisWorker,
+} from "./modules/kyc/kyc-analysis.worker.js";
+import {
   closeRealtimeServer,
   initRealtimeServer,
 } from "./realtime/socket.server.js";
@@ -67,6 +71,7 @@ async function shutdown(signal) {
   await stopAsaasReconciliationWorker();
   await stopPayoutWorker();
   await stopWithdrawalWorker();
+  await stopKycAnalysisWorker();
   await closeRealtimeServer();
   await closeRedis();
   await prisma.$disconnect();
@@ -88,6 +93,7 @@ async function startServer() {
   startAsaasReconciliationWorker();
   startPayoutWorker();
   startWithdrawalWorker();
+  startKycAnalysisWorker();
 
   server.listen(env.port, env.host, () => {
     recordComponentSuccess("api", { host: env.host, port: env.port });

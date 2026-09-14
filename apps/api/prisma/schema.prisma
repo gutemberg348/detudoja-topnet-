@@ -628,6 +628,8 @@ model Usuario {
   email_verificado        Boolean          @default(false)
   telefone_verificado     Boolean          @default(false)
   ultimo_login_em         DateTime?        @db.Timestamptz(3)
+  cidade_busca            String?          @db.VarChar(120)
+  estado_busca            String?          @db.Char(2)
   criado_em               DateTime         @default(now()) @db.Timestamptz(3)
   atualizado_em           DateTime         @updatedAt @db.Timestamptz(3)
   excluido_em             DateTime?        @db.Timestamptz(3)
@@ -678,6 +680,7 @@ model Usuario {
   @@index([tipo_conta])
   @@index([nivel_kyc])
   @@index([loja_origem_cadastro_id])
+  @@index([estado_busca, cidade_busca])
   @@map("usuarios")
 }
 
@@ -797,29 +800,31 @@ model IdentidadeSocialUsuario {
 }
 
 model EnderecoUsuario {
-  id            Int       @id @default(autoincrement())
-  usuario_id    Int
-  nome_endereco String?   @db.VarChar(80)
-  cep           String    @db.VarChar(9)
-  estado        String    @db.Char(2)
-  cidade        String    @db.VarChar(120)
-  bairro        String    @db.VarChar(120)
-  rua           String    @db.VarChar(180)
-  numero        String    @db.VarChar(30)
-  complemento   String?   @db.VarChar(180)
-  referencia    String?   @db.VarChar(255)
-  latitude      Decimal?  @db.Decimal(10, 7)
-  longitude     Decimal?  @db.Decimal(10, 7)
-  principal     Boolean   @default(false)
-  criado_em     DateTime  @default(now()) @db.Timestamptz(3)
-  atualizado_em DateTime  @updatedAt @db.Timestamptz(3)
-  excluido_em   DateTime? @db.Timestamptz(3)
+  id                 Int       @id @default(autoincrement())
+  usuario_id         Int
+  nome_endereco      String?   @db.VarChar(80)
+  cep                String    @db.VarChar(9)
+  estado             String    @db.Char(2)
+  cidade             String    @db.VarChar(120)
+  cidade_normalizada String?   @db.VarChar(120)
+  bairro             String    @db.VarChar(120)
+  rua                String    @db.VarChar(180)
+  numero             String    @db.VarChar(30)
+  complemento        String?   @db.VarChar(180)
+  referencia         String?   @db.VarChar(255)
+  latitude           Decimal?  @db.Decimal(10, 7)
+  longitude          Decimal?  @db.Decimal(10, 7)
+  principal          Boolean   @default(false)
+  criado_em          DateTime  @default(now()) @db.Timestamptz(3)
+  atualizado_em      DateTime  @updatedAt @db.Timestamptz(3)
+  excluido_em        DateTime? @db.Timestamptz(3)
 
   usuario         Usuario      @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
   pedidos_entrega PedidoLoja[]
 
   @@index([usuario_id])
   @@index([cidade])
+  @@index([estado, cidade_normalizada])
   @@index([estado])
   @@index([principal])
   @@map("enderecos_usuario")
@@ -1050,7 +1055,7 @@ model Loja {
   horarios_funcionamento                   Json?
   aceita_pagamento_online                  Boolean    @default(false)
   aceita_qrcode                            Boolean    @default(false)
-  taxa_entrega_centavos                    BigInt     @default(790) @db.BigInt
+  taxa_entrega_centavos                    BigInt     @default(0) @db.BigInt
   taxa_servico_online_centavos             BigInt?    @db.BigInt
   taxa_processamento_local_centavos        BigInt?    @db.BigInt
   limite_cashback_prioritario_centavos     BigInt?    @db.BigInt
@@ -1171,23 +1176,25 @@ model ProdutoLoja {
 }
 
 model EnderecoLoja {
-  id            Int      @id @default(autoincrement())
-  loja_id       Int      @unique
-  cep           String   @db.VarChar(9)
-  estado        String   @db.Char(2)
-  cidade        String   @db.VarChar(120)
-  bairro        String   @db.VarChar(120)
-  rua           String   @db.VarChar(180)
-  numero        String   @db.VarChar(30)
-  complemento   String?  @db.VarChar(180)
-  referencia    String?  @db.VarChar(255)
-  latitude      Decimal? @db.Decimal(10, 7)
-  longitude     Decimal? @db.Decimal(10, 7)
-  criado_em     DateTime @default(now()) @db.Timestamptz(3)
-  atualizado_em DateTime @updatedAt @db.Timestamptz(3)
+  id                 Int      @id @default(autoincrement())
+  loja_id            Int      @unique
+  cep                String   @db.VarChar(9)
+  estado             String   @db.Char(2)
+  cidade             String   @db.VarChar(120)
+  cidade_normalizada String?  @db.VarChar(120)
+  bairro             String   @db.VarChar(120)
+  rua                String   @db.VarChar(180)
+  numero             String   @db.VarChar(30)
+  complemento        String?  @db.VarChar(180)
+  referencia         String?  @db.VarChar(255)
+  latitude           Decimal? @db.Decimal(10, 7)
+  longitude          Decimal? @db.Decimal(10, 7)
+  criado_em          DateTime @default(now()) @db.Timestamptz(3)
+  atualizado_em      DateTime @updatedAt @db.Timestamptz(3)
 
   loja Loja @relation(fields: [loja_id], references: [id], onDelete: Cascade)
 
+  @@index([estado, cidade_normalizada])
   @@index([loja_id])
   @@index([cidade])
   @@index([estado])

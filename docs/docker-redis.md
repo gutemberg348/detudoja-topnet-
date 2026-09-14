@@ -9,6 +9,8 @@
 - `redis`: cache, limitador compartilhado e adaptador do Socket.IO, com volume `redis_data`;
 - `api-migrate`: aplica as migrations Prisma e encerra;
 - `api`: inicia somente depois da migration e do Redis estarem prontos.
+- `kyc-worker`: processa OCR e biometria KYC fora do processo HTTP, usando o
+  mesmo banco e volume privado de documentos.
 - `web-admin`: compila o painel Vite e o serve por Nginx. O Nginx encaminha
   `/api`, `/socket.io` e `/uploads` para o container da API.
 - `seed-demo`: servico opcional do perfil `seed`; cria dados de vitrine e copia

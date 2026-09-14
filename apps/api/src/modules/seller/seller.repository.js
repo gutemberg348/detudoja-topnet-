@@ -1,6 +1,7 @@
 import { prisma } from "../../config/prisma.js";
 import { requireUserCpf } from "../../utils/cpf-required.js";
 import { requireUserBaseAddress } from "../../utils/location.js";
+import { requireCommercialTier2 } from "../../utils/commercial-access.js";
 
 export function createSellerRepository(database = prisma) {
   return {
@@ -36,6 +37,7 @@ export function createSellerRepository(database = prisma) {
     findUniqueOrder(args) { return database.pedidoLoja.findUnique(args); },
     findUniqueUser(args) { return database.usuario.findUnique(args); },
     getUserBaseAddress(userId) { return requireUserBaseAddress(database, userId); },
+    requireCommercialTier2(userId) { return requireCommercialTier2(database, userId); },
     requireUserCpf(userId) { return requireUserCpf(database, userId); },
     transaction(work) { return database.$transaction(work); },
     updateOrder(args) { return database.pedidoLoja.update(args); },

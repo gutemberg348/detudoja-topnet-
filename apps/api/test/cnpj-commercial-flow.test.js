@@ -25,7 +25,7 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-test("CNPJ valido ativa o cadastro comercial sem KYC documental da pessoa fisica", async () => {
+test("CNPJ valido fica pendente ate o representante concluir o TIER_2", async () => {
   const [user, segment] = await Promise.all([
     prisma.usuario.create({
       data: {
@@ -59,7 +59,33 @@ test("CNPJ valido ativa o cadastro comercial sem KYC documental da pessoa fisica
   });
 
   assert.equal(result.profile.document, "00000000E08G12");
-  assert.equal(result.profile.kycStatus, "APROVADO");
-  assert.equal(result.profile.status, "ATIVO");
+  assert.equal(result.profile.kycStatus, "PENDENTE");
+  assert.equal(result.profile.status, "PENDENTE");
   assert.equal(result.profile.type, "JURIDICA");
+
+  await prisma.$transaction([
+    prisma.kycUsuario.create({
+      data: {
+        cpf: user.cpf,
+        nome_completo: user.nome,
+        status: "APROVADO",
+        tipo_pessoa: "FISICA",
+        usuario_id: user.id,
+        validado_em: new Date(),
+      },
+    }),
+    prisma.usuario.update({
+      data: { nivel_kyc: "TIER_2" },
+      where: { id: user.id },
+    }),
+  ]);
+
+  const approved = await createSellerOnboarding(user.id, {
+    document: "00.000.000/E08G-12",
+    publicName: "Empresa alfanumerica",
+    segmentId: segment.id,
+    type: "JURIDICA",
+  });
+  assert.equal(approved.profile.kycStatus, "APROVADO");
+  assert.equal(approved.profile.status, "ATIVO");
 });

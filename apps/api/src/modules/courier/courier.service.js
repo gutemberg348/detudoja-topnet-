@@ -1,5 +1,6 @@
 import { emitCourierTeamUpdated } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
+import { commercialTier2UserWhere } from "../../utils/commercial-access.js";
 import { isValidCpf, normalizeCpf } from "../../utils/cpf.js";
 import { parsePositiveId } from "../../utils/ids.js";
 import { sameCity } from "../../utils/location.js";
@@ -147,6 +148,7 @@ export async function getCourierProfile(userId) {
 }
 
 export async function updateCourierDispatchScope(userId, { acceptsPlatformCalls }) {
+  await courierRepository.requireCommercialTier2(userId);
   const profile = await courierRepository.findCourier({
     include: { lojas: { where: { ativo: true } } },
     where: {
@@ -173,6 +175,7 @@ export async function updateCourierDispatchScope(userId, { acceptsPlatformCalls 
 }
 
 export async function saveCourierProfile(userId, data) {
+  await courierRepository.requireCommercialTier2(userId);
   const seller = await courierRepository.findSeller({
     include: { usuario: { select: { cpf: true } } },
     where: { excluido_em: null, usuario_id: userId },
@@ -271,7 +274,12 @@ export async function addStoreCourier(userId, storeId, data) {
     where: {
       status: "ATIVO",
       telefone_contato: data.contactPhone,
-      vendedor: { excluido_em: null, status: "ATIVO", status_kyc: "APROVADO" },
+      vendedor: {
+        excluido_em: null,
+        status: "ATIVO",
+        status_kyc: "APROVADO",
+        usuario: { is: commercialTier2UserWhere },
+      },
     },
   });
   if (!courier) {

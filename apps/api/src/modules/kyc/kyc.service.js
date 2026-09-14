@@ -1,7 +1,6 @@
 import { AppError } from "../../utils/errors.js";
 import { parsePositiveId } from "../../utils/ids.js";
 import { env } from "../../config/env.js";
-import { logError } from "../../config/logger.js";
 import { getCurrentUser } from "../users/users.service.js";
 import {
   prepareKycImage,
@@ -9,7 +8,6 @@ import {
   removeKycDirectory,
   savePreparedKycImages,
 } from "./kyc-image.service.js";
-import { analyzeKycSubmission } from "./kyc-recognition.service.js";
 import { kycRepository } from "./kyc.repository.js";
 
 const fileLabels = {
@@ -29,6 +27,7 @@ function serializeSubmission(submission, { admin = false } = {}) {
     decisionReason: submission.motivo_decisao,
     documentType: submission.tipo_documento,
     id: submission.id,
+    processingStatus: submission.triagem_json?.processingStatus ?? null,
     status: submission.status,
     submittedAt: submission.enviado_em.toISOString(),
   };
@@ -92,12 +91,6 @@ function requiredFiles(files, documentType) {
   ];
 }
 
-function automaticDecision(triage) {
-  if (triage.automaticResult === "APROVADO") return "APROVADO";
-  if (triage.automaticResult === "REPROVADO") return "REPROVADO";
-  return "EM_ANALISE";
-}
-
 export async function getCurrentKyc(userId) {
   const user = await kycRepository.findUser(userId);
   if (!user) throw new AppError("Usuario nao encontrado", 404);
@@ -131,18 +124,15 @@ export async function submitCurrentUserKyc(userId, { documentType, files }) {
   let triage;
 
   if (env.kyc.mode === "automatic") {
-    try {
-      triage = await analyzeKycSubmission({
-        cpf: user.cpf,
-        documentType,
-        images: prepared,
-        name: user.nome,
-        reusedByAnotherUser,
-      });
-    } catch (error) {
-      logError("kyc.automatic_analysis_failed", error, { userId: user.id });
-      throw new AppError("Nao foi possivel analisar as fotos agora. Tente novamente em instantes.", 503);
-    }
+    triage = {
+      automaticResult: "EM_ANALISE",
+      checksPerformed: ["FORMATO_REAL", "DIMENSOES", "ILUMINACAO", "CONTRASTE", "ARQUIVOS_REPETIDOS"],
+      decisionReason: "Documentos recebidos e aguardando processamento automatico.",
+      imageWarnings: Object.fromEntries(prepared.map((file) => [file.kind, file.warnings])),
+      processingStatus: "PENDENTE",
+      reusedByAnotherUser,
+      version: 5,
+    };
   } else {
     const warnings = prepared.flatMap((file) => [
       ...file.warnings.map((warning) => ({ file: file.kind, warning })),
@@ -152,6 +142,7 @@ export async function submitCurrentUserKyc(userId, { documentType, files }) {
       automaticResult: warnings.length ? "REVISAR_COM_ATENCAO" : "APTO_PARA_ANALISE",
       checksPerformed: ["FORMATO_REAL", "DIMENSOES", "ILUMINACAO", "CONTRASTE", "ARQUIVOS_REPETIDOS"],
       manualChecksRequired: ["AUTENTICIDADE_DOCUMENTO", "DADOS_DO_TITULAR", "ROSTO_DA_SELFIE"],
+      processingStatus: "REVISAO_MANUAL",
       version: 1,
       warnings,
     };
@@ -168,22 +159,7 @@ export async function submitCurrentUserKyc(userId, { documentType, files }) {
         throw new AppError("Ja existe um envio KYC mais recente", 409);
       }
       const kyc = await repository.setKycUnderReview(currentUser);
-      const submission = await repository.createSubmission(kyc.id, documentType, triage, stored.files);
-      if (env.kyc.mode === "automatic") {
-        const outcome = automaticDecision(triage);
-        const decision = {
-          adminId: null,
-          reason: triage.decisionReason,
-          submissionId: submission.id,
-          userId: user.id,
-        };
-        if (outcome === "APROVADO") {
-          await repository.markKycApproved(decision);
-          await repository.activateIndication(user.id);
-        } else if (outcome === "REPROVADO") {
-          await repository.markKycRejected(decision);
-        }
-      }
+      await repository.createSubmission(kyc.id, documentType, triage, stored.files);
     });
   } catch (error) {
     await removeKycDirectory(stored.directory);

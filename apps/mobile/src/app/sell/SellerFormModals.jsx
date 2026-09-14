@@ -38,6 +38,12 @@ function hasValidStoreAddress(address = {}) {
   );
 }
 
+function hasValidDeliveryFee(value) {
+  const normalized = String(value ?? "").trim();
+  return /^\d+(?:[.,]\d{1,2})?$/.test(normalized)
+    && parseMoneyToCents(normalized) <= 100000;
+}
+
 function ImagePickerField({
   currentUrl,
   helper,
@@ -504,7 +510,7 @@ export function StoreModal({
               onChangeText={(value) =>
                 onChange((current) => ({ ...current, deliveryFee: value }))
               }
-              placeholder="Ex.: 7,90"
+              placeholder="Obrigatorio. Ex.: 7,90 ou 0,00"
               value={form.deliveryFee}
             />
             <View style={styles.documentHint}>
@@ -531,6 +537,7 @@ export function StoreModal({
                   !hasValidStoreAddress(form.address) ||
                   !form.categoryId ||
                   !form.segmentId ||
+                  !hasValidDeliveryFee(form.deliveryFee) ||
                   (isCompany && !isValidCnpj(form.document)) ||
                   !hasValidStoreOpeningHours(form.openingHours)
                 }
@@ -770,7 +777,7 @@ export function StoreEditModal({
               onChangeText={(value) =>
                 onChange((current) => ({ ...current, deliveryFee: value }))
               }
-              placeholder="Ex.: 7,90"
+              placeholder="Ex.: 7,90 ou 0,00 para gratis"
               value={form.deliveryFee}
             />
             <View style={styles.documentHint}>
@@ -796,6 +803,7 @@ export function StoreEditModal({
                   !form.name.trim() ||
                   !form.categoryId ||
                   !form.segmentId ||
+                  !hasValidDeliveryFee(form.deliveryFee) ||
                   !hasValidStoreOpeningHours(form.openingHours)
                 }
                 loading={isSaving}

@@ -184,9 +184,19 @@ async function createUser(key, city = "Patos") {
         },
       },
       nome: name,
+      nivel_kyc: "TIER_2",
       senha_hash: "not-used-by-courier-tests",
       status: "ATIVO",
       telefone: phone,
+      kyc: {
+        create: {
+          cpf,
+          nome_completo: name,
+          status: "APROVADO",
+          tipo_pessoa: "FISICA",
+          validado_em: new Date(),
+        },
+      },
     },
   });
 }
@@ -643,15 +653,15 @@ test("service registration reuses an equivalent category instead of creating a d
   assert.equal(services, 1);
 });
 
-test("motoboy sem KYC aprovado nao consegue aceitar uma corrida", async () => {
+test("motoboy TIER_1 nao consegue aceitar uma corrida", async () => {
   const created = await createCustomerCourierRequest(state.customer.id, {
     description: "Teste de bloqueio por KYC",
     serviceTypeId: state.deliveryType.id,
   });
 
-  await prisma.vendedor.update({
-    data: { status_kyc: "PENDENTE" },
-    where: { id: state.publicCourier.seller.id },
+  await prisma.usuario.update({
+    data: { nivel_kyc: "TIER_1" },
+    where: { id: state.publicCourier.seller.usuario_id },
   });
   try {
     await assert.rejects(
@@ -659,9 +669,9 @@ test("motoboy sem KYC aprovado nao consegue aceitar uma corrida", async () => {
       (error) => error.statusCode === 428,
     );
   } finally {
-    await prisma.vendedor.update({
-      data: { status_kyc: "APROVADO" },
-      where: { id: state.publicCourier.seller.id },
+    await prisma.usuario.update({
+      data: { nivel_kyc: "TIER_2" },
+      where: { id: state.publicCourier.seller.usuario_id },
     });
     await prisma.solicitacaoMotoboy.update({
       data: { cancelado_em: new Date(), status: "CANCELADA" },

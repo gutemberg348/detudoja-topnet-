@@ -1,5 +1,6 @@
 import { prisma } from "../../config/prisma.js";
 import { requireUserCpf } from "../../utils/cpf-required.js";
+import { requireUserMarketplaceLocation } from "../../utils/location.js";
 
 export function createOrdersRepository(database = prisma) {
   return {
@@ -49,6 +50,9 @@ export function createOrdersRepository(database = prisma) {
       return database.$queryRaw`SELECT pg_advisory_xact_lock(71428, ${orderId}::int)::text AS lock_result`;
     },
     requireUserCpf(userId) { return requireUserCpf(database, userId); },
+    requireUserMarketplaceLocation(userId) {
+      return requireUserMarketplaceLocation(database, userId);
+    },
     transaction(work) {
       return database.$transaction(work);
     },

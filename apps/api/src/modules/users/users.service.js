@@ -46,6 +46,9 @@ function serializeUser(user, accountLevel) {
     kycLevel: user.nivel_kyc,
     kycStatus: user.kyc?.status ?? "PENDENTE",
     lastLoginAt: user.ultimo_login_em?.toISOString() ?? null,
+    marketplaceLocation: user.cidade_busca && user.estado_busca
+      ? { city: user.cidade_busca, state: user.estado_busca }
+      : null,
     name: user.nome,
     phone: user.telefone,
     phoneVerified: user.telefone_verificado,
@@ -94,15 +97,23 @@ export async function getCurrentUser(userId) {
 }
 
 export async function listCurrentUserAddresses(userId) {
-  const addresses = await usersRepository.findAddresses(userId);
+  const [addresses, location] = await Promise.all([
+    usersRepository.findAddresses(userId),
+    usersRepository.findMarketplaceLocation(userId),
+  ]);
 
-  return { addresses: addresses.map(serializeAddress) };
+  return {
+    addresses: addresses.map(serializeAddress),
+    marketplaceLocation: location?.cidade_busca && location?.estado_busca
+      ? { city: location.cidade_busca, state: location.estado_busca }
+      : null,
+  };
 }
 
 export async function updateCurrentUser(userId, data) {
   try {
     await usersRepository.transaction(async (repository) => {
-      const currentAddress = data.address || data.location
+      const currentAddress = data.address
         ? await repository.findCurrentAddress(userId)
         : null;
 
@@ -110,6 +121,9 @@ export async function updateCurrentUser(userId, data) {
         ...(data.email ? { email: data.email } : {}),
         ...(data.name ? { nome: data.name } : {}),
         ...(data.phone ? { telefone: data.phone } : {}),
+        ...(data.location
+          ? { cidade_busca: data.location.city, estado_busca: data.location.state }
+          : {}),
       };
 
       if (Object.keys(userData).length) {
@@ -123,17 +137,6 @@ export async function updateCurrentUser(userId, data) {
         } else {
           await repository.createMainAddress(userId, savedAddress);
         }
-      } else if (data.location && !currentAddress) {
-        await repository.createMainAddress(userId, {
-          bairro: "",
-          cep: "",
-          cidade: data.location.city,
-          complemento: null,
-          estado: data.location.state,
-          numero: "",
-          referencia: null,
-          rua: "",
-        });
       }
     });
   } catch (error) {

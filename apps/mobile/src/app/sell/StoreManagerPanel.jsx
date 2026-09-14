@@ -184,7 +184,7 @@ export function StoreManagerPanel({
           </View>
           <View style={styles.managerBadge}>
             <Text style={styles.managerBadgeText}>
-              Entrega {formatarDinheiro(store.deliveryFeeCents ?? 790)}
+              Entrega {formatarDinheiro(store.deliveryFeeCents ?? 0)}
             </Text>
           </View>
         </View>

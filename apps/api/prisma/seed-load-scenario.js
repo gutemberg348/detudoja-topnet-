@@ -11,6 +11,7 @@ const state = "PB";
 function customerData(index, passwordHash) {
   const suffix = String(index).padStart(2, "0");
   return {
+    cidade_busca: city,
     cpf: `6199901${String(index).padStart(4, "0")}`,
     email: `${marker}-cliente-${suffix}@detudoja.local`,
     enderecos: {
@@ -18,6 +19,7 @@ function customerData(index, passwordHash) {
         bairro: "Centro",
         cep: "58700000",
         cidade: city,
+        cidade_normalizada: city.toLowerCase(),
         estado: state,
         nome_endereco: "Endereco principal",
         numero: String(100 + index),
@@ -35,7 +37,9 @@ function customerData(index, passwordHash) {
       },
     },
     nome: `Cliente Carga ${suffix}`,
+    nivel_kyc: "TIER_2",
     senha_hash: passwordHash,
+    estado_busca: state,
     status: "ATIVO",
     telefone: `839950${String(index).padStart(5, "0")}`,
   };
@@ -148,6 +152,7 @@ async function main() {
 
   const owner = await prisma.usuario.create({
     data: {
+      cidade_busca: city,
       cpf: "61999000001",
       email: `${marker}-lojista@detudoja.local`,
       enderecos: {
@@ -155,6 +160,7 @@ async function main() {
           bairro: "Centro",
           cep: "58700000",
           cidade: city,
+          cidade_normalizada: city.toLowerCase(),
           estado: state,
           nome_endereco: "Endereco principal",
           numero: "1",
@@ -164,7 +170,9 @@ async function main() {
       },
       kyc: { create: { cpf: "61999000001", nome_completo: "Lojista Carga", status: "APROVADO", tipo_pessoa: "FISICA", validado_em: new Date() } },
       nome: "Lojista Carga",
+      nivel_kyc: "TIER_2",
       senha_hash: passwordHash,
+      estado_busca: state,
       status: "ATIVO",
       telefone: "83993000001",
     },
@@ -240,12 +248,15 @@ async function main() {
     const cpf = `6199902${String(index).padStart(4, "0")}`;
     const user = await prisma.usuario.create({
       data: {
+        cidade_busca: city,
         cpf,
         email: `${marker}-motoboy-${suffix}@detudoja.local`,
-        enderecos: { create: { bairro: "Centro", cep: "58700000", cidade: city, estado: state, nome_endereco: "Endereco principal", numero: String(200 + index), principal: true, rua: "Rua da Carga" } },
+        enderecos: { create: { bairro: "Centro", cep: "58700000", cidade: city, cidade_normalizada: city.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase(), estado: state, nome_endereco: "Endereco principal", numero: String(200 + index), principal: true, rua: "Rua da Carga" } },
         kyc: { create: { cpf, nome_completo: `Motoboy Carga ${suffix}`, status: "APROVADO", tipo_pessoa: "FISICA", validado_em: new Date() } },
         nome: `Motoboy Carga ${suffix}`,
+        nivel_kyc: "TIER_2",
         senha_hash: passwordHash,
+        estado_busca: state,
         status: "ATIVO",
         telefone: `839940${String(index).padStart(5, "0")}`,
       },

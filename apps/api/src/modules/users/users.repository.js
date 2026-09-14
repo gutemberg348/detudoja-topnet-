@@ -49,6 +49,13 @@ export function createUsersRepository(database = prisma) {
       });
     },
 
+    findMarketplaceLocation(userId) {
+      return database.usuario.findUnique({
+        select: { cidade_busca: true, estado_busca: true },
+        where: { id: userId },
+      });
+    },
+
     findUser(userId) {
       return database.usuario.findUnique({
         include: userInclude,

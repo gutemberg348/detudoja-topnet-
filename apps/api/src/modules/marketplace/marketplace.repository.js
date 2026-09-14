@@ -1,5 +1,6 @@
 import { prisma } from "../../config/prisma.js";
-import { cityAddressWhere, requireUserBaseAddress } from "../../utils/location.js";
+import { commercialTier2UserWhere } from "../../utils/commercial-access.js";
+import { cityAddressWhere, requireUserMarketplaceLocation } from "../../utils/location.js";
 import {
   getOrderEarningsDistribution,
   getPaymentPolicy,
@@ -12,7 +13,7 @@ const publicStoreWhere = {
     is: {
       status: "ATIVO",
       status_kyc: "APROVADO",
-      usuario: { is: { excluido_em: null, status: "ATIVO" } },
+      usuario: { is: commercialTier2UserWhere },
     },
   },
   status: "ATIVA",
@@ -39,7 +40,7 @@ function idsFromRows(rows) {
 
 export const marketplaceRepository = {
   getBaseAddress(userId) {
-    return requireUserBaseAddress(prisma, userId);
+    return requireUserMarketplaceLocation(prisma, userId);
   },
 
   getEarningsDistribution() {
@@ -201,8 +202,11 @@ export const marketplaceRepository = {
                 status: { in: publicSellerStatuses },
                 status_kyc: "APROVADO",
                 usuario: {
-                  enderecos: {
-                    some: cityAddressWhere(baseAddress, { userAddress: true }),
+                  is: {
+                    ...commercialTier2UserWhere,
+                    enderecos: {
+                      some: cityAddressWhere(baseAddress, { userAddress: true }),
+                    },
                   },
                 },
               },

@@ -100,7 +100,9 @@ services:
       # raw preserva o "$" inicial das chaves Asaas, sem interpolacao do Compose.
       - path: apps/api/.env
         format: raw
-    environment: *api_environment
+    environment:
+      <<: *api_environment
+      KYC_WORKER_ENABLED: "false"
     ports:
       - "127.0.0.1:${API_HOST_PORT:-3333}:3333"
     volumes:
@@ -117,6 +119,24 @@ services:
       timeout: 5s
       start_period: 35s
       retries: 3
+
+  kyc-worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: apps/api/.env
+        format: raw
+    environment:
+      <<: *api_environment
+      KYC_WORKER_ENABLED: "true"
+    command: npm run start:kyc-worker -w apps/api
+    volumes:
+      - kyc_private_data:/app/storage/private/kyc
+    depends_on:
+      api-migrate:
+        condition: service_completed_successfully
 
   seed-demo:
     profiles: ["seed"]

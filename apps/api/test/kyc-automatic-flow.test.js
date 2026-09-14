@@ -19,6 +19,8 @@ const account = {
 };
 
 let baseUrl;
+let previousAutomaticApprovalEnabled;
+let previousCalibrationSampleRate;
 let previousMode;
 let server;
 
@@ -62,10 +64,24 @@ async function documentImage(label) {
   return sharp(Buffer.from(svg)).jpeg().toBuffer();
 }
 
+async function waitForKycProcessingStatus(token, expectedStatus, timeoutMs = 120_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const response = await request("/api/app/kyc", { token });
+    if (response.data.kyc.submission?.processingStatus === expectedStatus) return response.data;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`KYC nao chegou ao processamento ${expectedStatus} no prazo esperado`);
+}
+
 before(async () => {
   await prisma.$connect();
   await cleanup();
+  previousAutomaticApprovalEnabled = env.kyc.automaticApprovalEnabled;
+  previousCalibrationSampleRate = env.kyc.calibrationSampleRate;
   previousMode = env.kyc.mode;
+  env.kyc.automaticApprovalEnabled = true;
+  env.kyc.calibrationSampleRate = 0;
   env.kyc.mode = "automatic";
   await new Promise((resolve) => {
     server = app.listen(0, "127.0.0.1", () => {
@@ -76,6 +92,8 @@ before(async () => {
 });
 
 after(async () => {
+  env.kyc.automaticApprovalEnabled = previousAutomaticApprovalEnabled;
+  env.kyc.calibrationSampleRate = previousCalibrationSampleRate;
   env.kyc.mode = previousMode;
   await cleanup();
   await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -90,10 +108,11 @@ test("comparacao de nome tolera um erro pequeno do OCR sem aceitar palavra difer
 test("KYC automatico nao libera TIER_2 quando a calibracao pede validacao adicional", () => {
   assert.equal(decideAutomaticKycOutcome({}), "APROVADO");
   assert.equal(decideAutomaticKycOutcome({ manualChecksRequired: ["AMOSTRA_DE_CALIBRACAO"] }), "EM_ANALISE");
+  assert.equal(decideAutomaticKycOutcome({ manualChecksRequired: ["ROSTO_AUSENTE_NA_SELFIE"] }), "EM_ANALISE");
   assert.equal(decideAutomaticKycOutcome({ failures: [{ code: "SELFIE_NAO_REAL" }] }), "REPROVADO");
 });
 
-test("KYC automatico recusa selfie sem rosto sem liberar TIER_2", async () => {
+test("KYC automatico envia selfie sem rosto para revisao manual sem liberar TIER_2", async () => {
   const registration = await request("/api/app/auth/register", { body: {
     address: account.address,
     email: account.email,
@@ -117,19 +136,23 @@ test("KYC automatico recusa selfie sem rosto sem liberar TIER_2", async () => {
   form.append("selfie", new Blob([selfie], { type: "image/jpeg" }), "selfie.jpg");
 
   const response = await request("/api/app/kyc/submissions", { body: form, token });
-  assert.equal(response.status, 201);
-  assert.equal(response.data.kyc.status, "REPROVADO");
-  assert.deepEqual(response.data.kyc.submission.automaticReview, { result: "REPROVADO" });
+  assert.equal(response.status, 202);
+  assert.equal(response.data.kyc.status, "EM_ANALISE");
+  assert.equal(response.data.kyc.submission.processingStatus, "PENDENTE");
+
+  const analyzed = await waitForKycProcessingStatus(token, "CONCLUIDO");
+  assert.equal(analyzed.kyc.status, "EM_ANALISE");
+  assert.deepEqual(analyzed.kyc.submission.automaticReview, { result: "EM_ANALISE" });
 
   const stored = await prisma.usuario.findUnique({ include: { kyc: true }, where: { email: account.email } });
-  assert.equal(stored.kyc.status, "REPROVADO");
-  assert.equal(stored.nivel_kyc, "REPROVADO");
+  assert.equal(stored.kyc.status, "EM_ANALISE");
+  assert.equal(stored.nivel_kyc, "TIER_1");
   const storedSubmission = await prisma.solicitacaoKyc.findFirst({
     orderBy: { enviado_em: "desc" },
     where: { kyc_usuario_id: stored.kyc.id },
   });
-  assert.equal(storedSubmission.triagem_json.version, 3);
+  assert.equal(storedSubmission.triagem_json.version, 5);
   assert.equal(storedSubmission.triagem_json.engine, "LOCAL_HUMAN_TESSERACT");
-  assert.ok(storedSubmission.triagem_json.failures.some((item) => item.code === "ROSTO_AUSENTE_NA_SELFIE"));
-  assert.equal(await prisma.solicitacaoKyc.count({ where: { kyc_usuario_id: stored.kyc.id, status: "EM_ANALISE" } }), 0);
+  assert.ok(storedSubmission.triagem_json.manualChecksRequired.includes("ROSTO_AUSENTE_NA_SELFIE"));
+  assert.equal(await prisma.solicitacaoKyc.count({ where: { kyc_usuario_id: stored.kyc.id, status: "EM_ANALISE" } }), 1);
 });

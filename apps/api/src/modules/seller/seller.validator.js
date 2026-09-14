@@ -136,7 +136,11 @@ export const createSellerStoreSchema = z
     categoryId: positiveIntId("Categoria invalida"),
     address: storeAddressSchema,
     description: z.string().trim().max(1000).optional().or(z.literal("")),
-    deliveryFeeCents: z.coerce.number().int().min(0).max(100000).default(790),
+    deliveryFeeCents: z.coerce
+      .number({ invalid_type_error: "Informe a taxa de entrega da loja" })
+      .int()
+      .min(0)
+      .max(100000),
     document: z.string().trim().max(18).optional().or(z.literal("")),
     email: z.string().trim().email("E-mail invalido").optional().or(z.literal("")),
     name: z.string().trim().min(2, "Informe o nome da loja").max(180),

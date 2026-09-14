@@ -68,7 +68,7 @@ function stateCode(value = "") {
     : stateCodes[normalized] ?? "";
 }
 
-export function MarketplaceLocationModal({ onConfirm, visible }) {
+export function MarketplaceLocationModal({ canDismiss = false, initialLocation, onConfirm, onDismiss, visible }) {
   const [cep, setCep] = useState("");
   const [city, setCity] = useState("");
   const [error, setError] = useState("");
@@ -78,8 +78,10 @@ export function MarketplaceLocationModal({ onConfirm, visible }) {
   useEffect(() => {
     if (visible) {
       setError("");
+      setCity(initialLocation?.city ?? "");
+      setState(initialLocation?.state ?? "");
     }
-  }, [visible]);
+  }, [initialLocation?.city, initialLocation?.state, visible]);
 
   async function confirmLocation(nextLocation = { city, state }) {
     const nextState = stateCode(nextLocation.state);
@@ -163,7 +165,9 @@ export function MarketplaceLocationModal({ onConfirm, visible }) {
   return (
     <Modal
       animationType="fade"
-      onRequestClose={() => {}}
+      onRequestClose={() => {
+        if (canDismiss) onDismiss?.();
+      }}
       statusBarTranslucent
       transparent
       visible={visible}
@@ -173,6 +177,16 @@ export function MarketplaceLocationModal({ onConfirm, visible }) {
         style={styles.backdrop}
       >
         <View style={styles.card}>
+          {canDismiss ? (
+            <AppButton
+              accessibilityLabel="Fechar selecao de cidade"
+              icon="close"
+              onPress={onDismiss}
+              style={styles.closeButton}
+              title="Fechar"
+              variant="neutral"
+            />
+          ) : null}
           <View style={styles.iconShell}>
             <Ionicons color={colors.primaryDark} name="location-outline" size={28} />
           </View>
@@ -272,6 +286,7 @@ const styles = StyleSheet.create({
   cepRow: { alignItems: "flex-start", flexDirection: "row", gap: spacing.sm },
   cityInput: { flex: 1 },
   cityRow: { flexDirection: "row", gap: spacing.sm },
+  closeButton: { alignSelf: "flex-end", minHeight: 40 },
   divider: { backgroundColor: colors.border, flex: 1, height: 1 },
   dividerRow: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
   dividerText: { color: colors.textMuted, fontFamily: fonts.medium, fontSize: typography.caption },

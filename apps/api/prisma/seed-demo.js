@@ -17,6 +17,7 @@ const demoCityAddress = {
   bairro: "Centro",
   cep: "58700000",
   cidade: "Patos",
+  cidade_normalizada: "patos",
   estado: "PB",
   numero: "100",
   rua: "Rua Principal",

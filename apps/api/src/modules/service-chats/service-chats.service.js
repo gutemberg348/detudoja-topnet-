@@ -6,6 +6,7 @@ import {
   emitWalletUpdated,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
+import { commercialTier2UserWhere } from "../../utils/commercial-access.js";
 import { parsePositiveId } from "../../utils/ids.js";
 import { cityAddressWhere, sameCity } from "../../utils/location.js";
 import { formatMoney } from "../../utils/money.js";
@@ -374,6 +375,7 @@ async function assertSellerCanOperateConversation(repository, conversation, user
       id: conversation.vendedor_id,
       status: "ATIVO",
       status_kyc: "APROVADO",
+      usuario: { is: commercialTier2UserWhere },
       usuario_id: userId,
     },
   });
@@ -436,8 +438,11 @@ export async function listServiceTypes(userId, query = {}) {
     status: { in: publicSellerStatuses },
     status_kyc: "APROVADO",
     usuario: {
-      enderecos: {
-        some: cityAddressWhere(requesterAddress, { userAddress: true }),
+      is: {
+        ...commercialTier2UserWhere,
+        enderecos: {
+          some: cityAddressWhere(requesterAddress, { userAddress: true }),
+        },
       },
     },
   };
@@ -564,8 +569,11 @@ export async function listOnlineServiceProviders(userId, serviceTypeId, { storeI
         status_kyc: "APROVADO",
         usuario_id: { not: userId },
         usuario: {
-          enderecos: {
-            some: cityAddressWhere(serviceCity, { userAddress: true }),
+          is: {
+            ...commercialTier2UserWhere,
+            enderecos: {
+              some: cityAddressWhere(serviceCity, { userAddress: true }),
+            },
           },
         },
       },
@@ -596,6 +604,7 @@ export async function listOnlineServiceProviders(userId, serviceTypeId, { storeI
 }
 
 export async function updateSellerService(userId, data) {
+  await serviceChatsRepository.requireCommercialTier2(userId);
   const seller = await serviceChatsRepository.findSeller({ include: { motoboy: true }, where: { excluido_em: null, usuario_id: userId } });
   if (!seller) throw new AppError("Crie seu perfil de vendedor antes de ativar servicos", 428);
   if (seller.status !== "ATIVO" || seller.status_kyc !== "APROVADO") {
@@ -634,7 +643,13 @@ export async function updateSellerService(userId, data) {
 export async function heartbeatSellerServices(userId) {
   const seller = await serviceChatsRepository.findSeller({
     select: { id: true },
-    where: { excluido_em: null, status: "ATIVO", status_kyc: "APROVADO", usuario_id: userId },
+    where: {
+      excluido_em: null,
+      status: "ATIVO",
+      status_kyc: "APROVADO",
+      usuario: { is: commercialTier2UserWhere },
+      usuario_id: userId,
+    },
   });
   if (!seller) return { activeServices: 0 };
 
@@ -651,6 +666,7 @@ export async function heartbeatSellerServices(userId) {
 }
 
 export async function registerSellerService(userId, data) {
+  await serviceChatsRepository.requireCommercialTier2(userId);
   const seller = await serviceChatsRepository.findSeller({
     include: { segmento_venda: true },
     where: { excluido_em: null, usuario_id: userId },
@@ -773,7 +789,12 @@ export async function createServiceConversation(userId, data) {
       id: sellerServiceId,
       status: "ATIVO",
       tipo_servico: { excluido_em: null, modo_atendimento: "NEGOCIACAO_CHAT", status: "ATIVO" },
-      vendedor: { excluido_em: null, status: { in: publicSellerStatuses }, status_kyc: "APROVADO" },
+      vendedor: {
+        excluido_em: null,
+        status: { in: publicSellerStatuses },
+        status_kyc: "APROVADO",
+        usuario: { is: commercialTier2UserWhere },
+      },
     },
   });
 
@@ -1063,6 +1084,7 @@ export async function acceptServiceProposal(userId, conversationId, proposalId, 
 
   const result = await serviceChatsRepository.transaction(async (database) => {
     const repository = createServiceChatsRepository(database);
+    await repository.requireCommercialTier2(conversation.vendedor.usuario_id);
     const claim = await repository.updateProposals({
       data: {
         ...(data.paymentMode ? { forma_pagamento: data.paymentMode } : {}),

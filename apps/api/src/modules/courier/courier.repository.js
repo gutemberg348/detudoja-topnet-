@@ -1,5 +1,6 @@
 import { prisma } from "../../config/prisma.js";
 import { requireUserBaseAddress } from "../../utils/location.js";
+import { requireCommercialTier2 } from "../../utils/commercial-access.js";
 
 export function createCourierRepository(database = prisma) {
   return {
@@ -23,6 +24,7 @@ export function createCourierRepository(database = prisma) {
     findTeamMemberById(args) { return database.motoboyLoja.findUnique(args); },
     findTeamMembers(args) { return database.motoboyLoja.findMany(args); },
     getUserBaseAddress(userId) { return requireUserBaseAddress(database, userId); },
+    requireCommercialTier2(userId) { return requireCommercialTier2(database, userId); },
     lockCourier(courierId) {
       return database.$queryRaw`SELECT pg_advisory_xact_lock(71427, ${courierId}::int)::text AS lock_result`;
     },

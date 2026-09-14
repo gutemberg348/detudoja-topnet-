@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
+    "start:kyc-worker": "node src/kyc-worker.js",
     "test": "node --import ./test.setup.js --test --test-concurrency=1",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",

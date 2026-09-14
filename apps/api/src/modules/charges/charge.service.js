@@ -6,6 +6,7 @@ import {
   emitWalletUpdated,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
+import { commercialTier2UserWhere } from "../../utils/commercial-access.js";
 import { chargeRepository, createChargeRepository } from "./charge.repository.js";
 import {
   getStoreCommissionDistribution,
@@ -44,6 +45,7 @@ const chargeInclude = {
       id: true,
       limite_cashback_prioritario_centavos: true,
       logo_url: true,
+      lojista: { select: { usuario_id: true } },
       nome: true,
       segmento_venda: true,
       status: true,
@@ -383,7 +385,10 @@ async function findAccessibleStoreForCharges(userId, storeId) {
 }
 
 export async function createStoreQrCharge(userId, storeId, data) {
-  await chargeRepository.requireUserCpf(userId);
+  await Promise.all([
+    chargeRepository.requireCommercialTier2(userId),
+    chargeRepository.requireUserCpf(userId),
+  ]);
   const parsedStoreId = Number(storeId);
   const store = await chargeRepository.findStore({
     select: {
@@ -395,6 +400,13 @@ export async function createStoreQrCharge(userId, storeId, data) {
     where: {
       excluido_em: null,
       id: parsedStoreId,
+      lojista: {
+        is: {
+          status: "ATIVO",
+          status_kyc: "APROVADO",
+          usuario: { is: commercialTier2UserWhere },
+        },
+      },
       status: "ATIVA",
       OR: [
         { lojista: { usuario_id: userId } },
@@ -681,6 +693,12 @@ export async function payChargeWithWallet(userId, rawCode) {
 
     if (charge.criador_usuario_id === userId) {
       throw new AppError("Nao e possivel pagar uma cobranca criada por voce", 409);
+    }
+
+    const commercialReceiverUserId = charge.loja?.lojista?.usuario_id
+      ?? charge.vendedor?.usuario_id;
+    if (commercialReceiverUserId) {
+      await repository.requireCommercialTier2(commercialReceiverUserId);
     }
 
     if (charge.loja_id) {

@@ -1,4 +1,4 @@
-import { Check, ChevronLeft, ChevronRight, Eye, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, Eye, RefreshCw, Search, ShieldCheck, X, ZoomIn } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { PageError, PageLoading } from "../components/PageState";
 import { StatusBadge } from "../components/StatusBadge";
@@ -20,14 +20,22 @@ const warningLabels = {
 const manualCheckLabels = {
   AMOSTRA_DE_CALIBRACAO: "Amostra para calibracao",
   APROVACAO_AUTOMATICA_DESABILITADA: "Aprovacao automatica ainda nao foi liberada",
+  BAIXA_CONFIANCA_ROSTO_DOCUMENTO: "Baixa confianca no rosto do documento",
+  BAIXA_CONFIANCA_ROSTO_SELFIE: "Baixa confianca no rosto da selfie",
+  CPF_NAO_CONFIRMADO_PELO_OCR: "CPF nao confirmado pelo OCR",
+  FALHA_TECNICA_NA_ANALISE_AUTOMATICA: "Falha tecnica no motor automatico",
+  NOME_NAO_CONFIRMADO_PELO_OCR: "Nome nao confirmado pelo OCR",
   OCR_COM_BAIXA_CONFIANCA: "OCR com baixa confianca",
   QUALIDADE_DA_IMAGEM: "Qualidade da imagem exige validacao",
+  ROSTO_AUSENTE_NA_SELFIE: "Rosto nao localizado com seguranca na selfie",
+  ROSTO_AUSENTE_NO_DOCUMENTO: "Rosto nao localizado com seguranca no documento",
+  ROSTO_DISTANTE: "Rosto distante na selfie",
   TIPO_DOCUMENTO_NAO_CONFIRMADO: "Tipo de documento nao confirmado pelo OCR",
 };
 
 function triageLabel(review) {
   if (review.automaticResult === "APROVADO") return "Aprovado pelo motor";
-  if (review.automaticResult === "EM_ANALISE") return "Fila de calibracao";
+  if (review.automaticResult === "EM_ANALISE") return "Revisao manual";
   if (review.automaticResult === "APTO_PARA_ANALISE") return "Sem alerta tecnico";
   if (review.version >= 2) return "Recusado pelo motor";
   return "Revisar legado";
@@ -43,6 +51,7 @@ function formatCpf(value = "") {
 function KycFile({ accessToken, file }) {
   const [source, setSource] = useState("");
   const [error, setError] = useState("");
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -60,16 +69,34 @@ function KycFile({ accessToken, file }) {
     };
   }, [accessToken, file.url]);
 
+  useEffect(() => {
+    if (!expanded) return undefined;
+    const closeOnEscape = (event) => event.key === "Escape" && setExpanded(false);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [expanded]);
+
   return (
     <figure className="kyc-file">
-      <div className="kyc-file__preview">
+      <button className="kyc-file__preview" disabled={!source} onClick={() => setExpanded(true)} type="button">
         {source ? <img alt={file.label} src={source} /> : error ? <span>{error}</span> : <span>Carregando imagem...</span>}
-      </div>
+        {source ? <span className="kyc-file__zoom"><ZoomIn size={15} /> Ampliar</span> : null}
+      </button>
       <figcaption>
         <strong>{file.label}</strong>
         <span>{file.width} x {file.height} px</span>
+        <small>{file.mimeType} · {(file.sizeBytes / 1024).toFixed(0)} KB</small>
         <small>Iluminacao {file.brightness.toFixed(0)} / contraste {file.contrast.toFixed(0)}</small>
       </figcaption>
+      {expanded && source ? (
+        <div className="kyc-image-viewer" onMouseDown={(event) => { event.stopPropagation(); setExpanded(false); }}>
+          <section aria-label={file.label} aria-modal="true" className="kyc-image-viewer__content" onMouseDown={(event) => event.stopPropagation()} role="dialog">
+            <header><strong>{file.label}</strong><button className="icon-button" onClick={() => setExpanded(false)} title="Fechar imagem" type="button"><X size={20} /></button></header>
+            <img alt={file.label} src={source} />
+            <small>Imagem privada · exibida somente nesta sessao administrativa</small>
+          </section>
+        </div>
+      ) : null}
     </figure>
   );
 }
@@ -126,9 +153,14 @@ export function KycPage({ accessToken }) {
   return (
     <div className="page-content kyc-page">
       <header className="page-heading page-heading--actions">
-        <div><p className="eyebrow">COMPLIANCE</p><h1>Auditoria KYC</h1><p>Acompanhe as decisoes automaticas de OCR, comparacao facial e prova de vida.</p></div>
+        <div><p className="eyebrow">COMPLIANCE</p><h1>Auditoria KYC</h1><p>Aprovacao automatica para casos seguros e revisao humana obrigatoria para resultados inconclusivos.</p></div>
         <button className="button button--secondary" onClick={load} type="button"><RefreshCw size={16} /> Atualizar</button>
       </header>
+
+      <section className="kyc-policy">
+        <ShieldCheck size={21} />
+        <div><strong>Politica de decisao</strong><p>Consistente: aprova automaticamente. Inconclusivo ou falha tecnica: permanece em analise. Divergencia forte ou fraude detectada: reprova automaticamente.</p></div>
+      </section>
 
       <section className="toolbar">
         <form className="search-field" onSubmit={applySearch}>
@@ -184,6 +216,7 @@ export function KycPage({ accessToken }) {
               {selected.automaticReview.metrics ? <p>OCR {selected.automaticReview.metrics.ocrConfidence}% · nome {Math.round(selected.automaticReview.metrics.nameMatch * 100)}% · rosto {Math.round(selected.automaticReview.metrics.faceMatch * 100)}% · real {Math.round(selected.automaticReview.metrics.selfieReal * 100)}% · vida {Math.round(selected.automaticReview.metrics.selfieLive * 100)}%</p> : <p>Registro legado criado antes da verificacao facial automatica.</p>}
             </section>
             {selected.status === "EM_ANALISE" ? <>
+              <div className="kyc-manual-alert"><AlertTriangle size={18} /><p><strong>Decisao humana necessaria.</strong> Amplie as imagens, confira documento, CPF, titular e selfie antes de aprovar ou reprovar.</p></div>
               <label className="kyc-reason">Justificativa da decisao<textarea maxLength={1000} onChange={(event) => setReason(event.target.value)} placeholder="Registre o que foi conferido ou o motivo da recusa" rows={3} value={reason} /></label>
               <div className="modal__actions"><button className="button button--danger" disabled={processing} onClick={() => decide("reject")} type="button"><X size={16} /> Reprovar</button><button className="button button--primary" disabled={processing} onClick={() => decide("approve")} type="button"><Check size={16} /> Aprovar KYC</button></div>
             </> : <div className="kyc-decision"><strong>Decisao registrada</strong><p>{selected.decisionReason}</p><small>{selected.analyzedBy?.name ?? (selected.automaticReview.version >= 2 ? "Motor automatico" : "Administrador")} · {selected.analyzedAt ? dateFormatter.format(new Date(selected.analyzedAt)) : "-"}</small></div>}

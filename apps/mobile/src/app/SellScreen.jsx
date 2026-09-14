@@ -481,7 +481,7 @@ export function SellScreen() {
       },
       categoryId: category?.id ?? "",
       description: store.description ?? "",
-      deliveryFee: centsToInput(store.deliveryFeeCents ?? 790),
+      deliveryFee: centsToInput(store.deliveryFeeCents ?? 0),
       email: store.email ?? "",
       name: store.name ?? "",
       openForOrders: store.openForOrders !== false,

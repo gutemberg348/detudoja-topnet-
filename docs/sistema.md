@@ -386,15 +386,17 @@ Na tela Vender, o fluxo foi separado em dois caminhos:
 - `Cadastrar loja`: cria lojas vinculadas ao usuario usando as tabelas
   existentes `Lojista`, `Loja`, `UsuarioLoja` e `CategoriaLoja`. Um usuario
   pode ter mais de uma loja; cada loja nasce ativa para gestao do dono e
-  visivel na busca. Logo, banner e produtos completam a vitrine, mas nao
-  bloqueiam a listagem. O
-  registro em `lojistas` fica `ATIVO` e `status_kyc = APROVADO` quando o CPF ou
-  CNPJ passar pela validacao dos digitos verificadores. CNPJs numericos e
-  alfanumericos sao aceitos. Loja por CPF recebe limite mensal inicial de
+  so fica visivel e apta a vender quando o titular estiver `TIER_2`, com KYC
+  `APROVADO`. Logo, banner e produtos completam a vitrine, mas nao substituem
+  a verificacao. CPF e CNPJ continuam passando pela validacao dos digitos;
+  CNPJs numericos e alfanumericos sao aceitos, mas o cadastro empresarial fica
+  `PENDENTE` ate o representante concluir o `TIER_2`. Loja por CPF recebe limite mensal inicial de
   R$ 5.000,00 em `limite_faturamento_mensal_centavos`; loja por CNPJ fica sem
   limite travado nesta etapa.
 - `Vendedor autonomo`: cria/atualiza o registro em `Vendedor` e vendas autonomas avulsas,
-  sem loja.
+  sem loja. Gerar venda, QR, proposta, atender pedido, prestar servico ou
+  aceitar corrida exige `usuarios.nivel_kyc = TIER_2` e KYC `APROVADO` no
+  momento da operacao. A API repete essa verificacao mesmo para membros da loja.
 
 O usuario base continua em `usuarios` como consumidor. A capacidade comercial
 vem das tabelas separadas: `lojistas` para lojas e `vendedores` para vendas
@@ -1152,14 +1154,15 @@ substituído por refresh tokens persistidos e revogáveis.
 | `kyc.repository.js` | toda persistencia de KYC, solicitacoes, arquivos e sincronizacao |
 | `kyc-image.service.js` | assinatura, normalizacao, metricas, hash e storage privado |
 | `kyc-recognition.service.js` | OCR portugues, deteccao/comparacao facial, antisspoof, liveness e decisao automatica serializada |
+| `kyc-analysis.worker.js` | processa de forma assincrona os envios persistidos e recupera trabalhos interrompidos |
 | `kyc.validator.js` | valida tipo documental, filtros e motivo da decisao |
 
 Após o cadastro, uma etapa bloqueante salva o CPF válido e cria/atualiza o KYC
-pendente. `POST /api/app/kyc/submissions` recebe documento e selfie, executa
-Tesseract OCR e Human/TensorFlow.js WASM e grava `APROVADO` ou `REPROVADO` na
-mesma transacao. `EM_ANALISE` e o modo manual ficam reservados a legado e
-contingencia. O liveness passivo atual nao substitui prova ativa por video nem
-documentoscopia homologada.
+pendente. `POST /api/app/kyc/submissions` recebe documento e selfie, persiste o
+envio e responde `202`. O worker executa Tesseract OCR e Human/TensorFlow.js
+WASM em segundo plano e grava a decisao transacionalmente. Casos inconclusivos
+ficam `EM_ANALISE` para revisao. O liveness passivo atual nao substitui prova
+ativa por video nem documentoscopia homologada.
 
 #### Módulo `merchant`
 
@@ -2077,18 +2080,23 @@ visual nao e a unica protecao.
 
 ### Cidade-base do usuario e comercio
 
-O municipio e uma regra da plataforma inteira. Cada usuario possui um endereco
-principal em `enderecos_usuario`, criado no cadastro a partir de CEP, rua,
-numero, bairro, cidade e UF. Esse endereco define a cidade-base da conta.
+O municipio e uma regra da plataforma inteira. A cidade escolhida para busca
+fica em `usuarios.cidade_busca` e `usuarios.estado_busca`; ela nao cria nem
+altera o endereco de entrega. No mobile, a cidade/UF permanece visivel acima
+da busca e funciona como botao para trocar a localizacao por cidade, CEP ou GPS.
 
 Lojas, produtos, sugestoes da busca e prestadores online sao retornados apenas
-quando pertencem a mesma cidade/UF da conta autenticada. O backend tambem
-valida a cidade ao criar loja, cadastrar motoboy e iniciar conversa de servico;
-portanto nao existe atalho pela API para atender ou comprar em outro municipio.
+quando pertencem a cidade/UF escolhida pela conta autenticada. Detalhes de loja
+e checkout repetem essa validacao no backend, portanto uma chamada direta a API
+nao permite comprar de loja de outro municipio. Na entrega, o endereco completo
+tambem deve pertencer a cidade da loja.
 
-Usuarios antigos podem completar a localizacao em `Perfil > editar`. A rota
-`PATCH /api/app/users/me` atualiza ou cria o endereco principal. Nao houve
-alteracao de schema ou migration porque `EnderecoUsuario` ja existe.
+`EnderecoLoja` continua obrigatorio para a loja aparecer. As colunas
+`cidade_normalizada` em `enderecos_loja` e `enderecos_usuario` permitem comparar
+nomes com ou sem acento, como `Sao Paulo` e `São Paulo`. A migration
+`20260914120000_marketplace_search_location` cria e preenche essas colunas,
+cria os campos da localizacao de busca e aproveita o endereco principal como
+valor inicial para contas antigas.
 
 Para regularizar os registros antigos de desenvolvimento, execute
 `npm run backfill:city-base`. Ele inclui Patos/PB, CEP `58700-000`, apenas em
@@ -2421,9 +2429,10 @@ aplicada no banco local. Os testes cobrem as fronteiras de 99, 115, 140, 199,
 
 ### Entrega da loja e pagamento do motoboy
 
-`lojas.taxa_entrega_centavos` permite que cada comercio configure sua entrega,
-com R$ 7,90 como valor inicial. Retirada sempre grava taxa zero. Ao concluir um
-pedido online, a API calcula comissao e pool exclusivamente sobre
+`lojas.taxa_entrega_centavos` permite que cada comercio configure sua entrega.
+O cadastro exige que o valor seja informado explicitamente e aceita zero para
+entrega gratis; nao existe mais fallback fixo de R$ 7,90. Retirada sempre grava
+taxa zero. Ao concluir um pedido online, a API calcula comissao e pool exclusivamente sobre
 `pedido.subtotal_centavos`; a entrega e somada integralmente ao recebivel e ao
 credito pendente da carteira `Vendas` do lojista.
 
@@ -2433,6 +2442,8 @@ loja pagar um motoboy pelo app, a proposta da corrida constitui outra transacao:
 aplica a comissao do segmento de entrega, padrao 10%, e mantem o liquido retido
 por 24 horas depois da confirmacao do cliente. A migration
 `20260908143000_entrega_integral_lojista` esta aplicada no banco local.
+A migration `20260914160000_store_delivery_fee_configured` troca apenas o valor
+padrao tecnico do banco para zero; lojas existentes preservam a taxa cadastrada.
 
 ## Servicos: KYC e custodia (2026-09-04)
 

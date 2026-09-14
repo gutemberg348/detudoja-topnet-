@@ -27,5 +27,10 @@ export function submitKycDocuments(accessToken, { documentBack, documentFront, d
   appendImage(body, "documentFront", documentFront);
   appendImage(body, "documentBack", documentBack);
   appendImage(body, "selfie", selfie);
-  return apiRequest("/api/app/kyc/submissions", { body, method: "POST", token: accessToken });
+  return apiRequest("/api/app/kyc/submissions", {
+    body,
+    method: "POST",
+    timeoutMs: 90_000,
+    token: accessToken,
+  });
 }

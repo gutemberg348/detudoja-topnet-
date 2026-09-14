@@ -1194,7 +1194,10 @@ abre apenas na primeira visita por usuario e continua acessivel pelo botao
 
 ## Experiencia do motoboy
 
-Na criacao e edicao da loja, o lojista configura a taxa de entrega. O formulario
+Na criacao e edicao da loja, o lojista precisa informar explicitamente a taxa
+de entrega; o campo nao vem mais preenchido com valor generico. `0,00` registra
+entrega gratis. A mesma taxa salva em `lojas.taxa_entrega_centavos` aparece no
+topo da loja, entra no resumo/checkout e e congelada no pedido. O formulario
 informa que esse valor entra integralmente na carteira `Vendas` e que eventual
 pagamento de motoboy pelo aplicativo e uma operacao separada.
 

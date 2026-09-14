@@ -143,9 +143,9 @@ test("modo KYC legado permite decisao humana e protege os arquivos", async () =>
     request("/api/app/kyc/submissions", { body: kycForm(front, back, selfie), token }),
     request("/api/app/kyc/submissions", { body: kycForm(front, back, selfie), token }),
   ]);
-  assert.deepEqual(simultaneous.map((item) => item.status).sort(), [201, 409]);
-  const submission = simultaneous.find((item) => item.status === 201);
-  assert.equal(submission.status, 201);
+  assert.deepEqual(simultaneous.map((item) => item.status).sort(), [202, 409]);
+  const submission = simultaneous.find((item) => item.status === 202);
+  assert.equal(submission.status, 202);
   assert.equal(submission.data.kyc.status, "EM_ANALISE");
   assert.equal(submission.data.user.kycStatus, "EM_ANALISE");
   assert.deepEqual(Object.keys(submission.data.kyc.submission.automaticReview), ["result"]);

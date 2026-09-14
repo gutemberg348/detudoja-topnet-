@@ -17,7 +17,6 @@ import { getMarketplaceStore } from "../services/marketplace.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { resolveMediaUrl } from "../utils/media";
 import { formatarDinheiro } from "../utils/money";
-import { storeUsesChatNegotiation } from "../utils/storeOrderFlow";
 import {
   colors,
   fonts,
@@ -98,7 +97,6 @@ export function StoreDetailsScreen({ navigation, route }) {
   const logoUrl = resolveMediaUrl(store.logoUrl);
   const isOpen = store.openForOrders !== false;
   const isManagedByViewer = store.isManagedByViewer === true;
-  const negotiatesByChat = storeUsesChatNegotiation(store);
   const products = store.products ?? [];
   const filteredProducts = products.filter((product) => {
     const search = productSearch.trim().toLowerCase();
@@ -112,7 +110,6 @@ export function StoreDetailsScreen({ navigation, route }) {
       .includes(search);
   });
   const featuredProduct = products.find((product) => product.featured) ?? products[0];
-  const canStartOrder = isOpen && Boolean(featuredProduct);
   const cashbackPercent = Number(store.cashbackPercent ?? 0);
   const delivery = store.delivery ?? {};
   const deliveryFeeLabel = delivery.available
@@ -120,13 +117,9 @@ export function StoreDetailsScreen({ navigation, route }) {
       ? formatarDinheiro(delivery.feeCents)
       : "Gratis"
     : "Indisponivel";
-  const deliveryTimeLabel = delivery.available
-    ? formatEstimatedTime(delivery.estimatedMinutes)
-    : "Somente retirada";
-
-  function payAtStore() {
-    navigation.navigate("ChargeScan");
-  }
+  const deliveryMetaLabel = delivery.available
+    ? `Entrega ${deliveryFeeLabel}`
+    : "Sem entrega";
 
   function openSellerHub() {
     navigation.navigate("Main", { screen: "Vender" });
@@ -197,6 +190,7 @@ export function StoreDetailsScreen({ navigation, route }) {
             <View style={styles.heroMeta}>
               <MetaPill icon="pricetag-outline" text={store.category?.name ?? "Loja"} />
               <MetaPill icon="time-outline" text={formatTodayHours(store.openingHours, isOpen)} />
+              <MetaPill icon="bicycle-outline" text={deliveryMetaLabel} />
             </View>
           </View>
         </View>
@@ -298,66 +292,6 @@ export function StoreDetailsScreen({ navigation, route }) {
           </Pressable>
         )}
 
-        <View style={styles.actionsRow}>
-          <Pressable
-            disabled={!canStartOrder}
-            onPress={() => featuredProduct && openProduct(featuredProduct)}
-            style={[styles.primaryAction, !canStartOrder && styles.primaryActionDisabled]}
-          >
-            <View style={styles.primaryActionIcon}>
-              <Ionicons color={colors.card} name={negotiatesByChat ? "chatbubbles-outline" : "bag-check-outline"} size={22} />
-            </View>
-            <View style={styles.actionCopy}>
-              <Text style={styles.primaryActionTitle}>
-                {isOpen
-                  ? !featuredProduct
-                    ? "Catalogo em preparacao"
-                    : negotiatesByChat
-                    ? "Montar pedido pelo chat"
-                    : "Comecar meu pedido"
-                  : "Loja fechada"}
-              </Text>
-              <Text style={styles.primaryActionText}>
-                {isOpen
-                  ? !featuredProduct
-                    ? "Novos produtos serao publicados em breve"
-                    : negotiatesByChat
-                    ? "Escolha os produtos e receba a proposta"
-                    : "Escolha os itens e finalize online"
-                  : "Consulte os produtos e volte no horario"}
-              </Text>
-            </View>
-            <Ionicons color={colors.card} name="arrow-forward" size={19} />
-          </Pressable>
-
-          <Pressable onPress={payAtStore} style={styles.secondaryAction}>
-            <View style={styles.secondaryActionIcon}>
-              <Ionicons color={colors.primaryDark} name="qr-code-outline" size={23} />
-            </View>
-            <Text style={styles.secondaryActionTitle}>Pagar na loja</Text>
-          </Pressable>
-        </View>
-
-        <View style={styles.factsRow}>
-          <StoreFact icon="time-outline" label="Entrega" value={deliveryTimeLabel} />
-          <View style={styles.factDivider} />
-          <StoreFact icon="bicycle-outline" label="Taxa" value={deliveryFeeLabel} />
-          <View style={styles.factDivider} />
-          <StoreFact icon="bag-check-outline" label="Retirada" value={delivery.pickupAvailable ? "Disponivel" : "Nao disponivel"} />
-        </View>
-
-        <View style={styles.descriptionBlock}>
-          <View style={styles.descriptionHeading}>
-            <View style={styles.descriptionIcon}>
-              <Ionicons color={colors.primaryDark} name="storefront-outline" size={19} />
-            </View>
-            <Text style={styles.descriptionTitle}>Sobre {store.name}</Text>
-          </View>
-          <Text style={styles.description}>
-            {store.description || "Loja preparada para venda online e venda local pelo Brasil Cashback."}
-          </Text>
-        </View>
-
         {featuredProduct ? (
           <FeaturedProductCard onPress={() => openProduct(featuredProduct)} product={featuredProduct} />
         ) : null}
@@ -406,16 +340,6 @@ export function StoreDetailsScreen({ navigation, route }) {
       </View>
 
     </ScreenContainer>
-  );
-}
-
-function StoreFact({ icon, label, value }) {
-  return (
-    <View style={styles.fact}>
-      <Ionicons color={colors.primaryDark} name={icon} size={18} />
-      <Text style={styles.factValue} numberOfLines={1}>{value}</Text>
-      <Text style={styles.factLabel}>{label}</Text>
-    </View>
   );
 }
 
@@ -570,14 +494,6 @@ function formatTodayHours(openingHours, isOpen) {
 }
 
 const styles = StyleSheet.create({
-  actionCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  actionsRow: {
-    flexDirection: "row",
-    gap: spacing.md,
-  },
   benefitBanner: {
     alignItems: "center",
     backgroundColor: "#E5F9EF",
@@ -624,37 +540,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     paddingBottom: spacing.xxxl,
   },
-  description: {
-    color: colors.textSecondary,
-    fontFamily: fonts.regular,
-    fontSize: typography.small,
-    lineHeight: 20,
-  },
-  descriptionBlock: {
-    borderTopColor: colors.border,
-    borderTopWidth: 1,
-    gap: spacing.sm,
-    paddingTop: spacing.lg,
-  },
-  descriptionHeading: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: spacing.sm,
-  },
-  descriptionIcon: {
-    alignItems: "center",
-    backgroundColor: colors.primarySoft,
-    borderRadius: radius.round,
-    height: 38,
-    justifyContent: "center",
-    width: 38,
-  },
-  descriptionTitle: {
-    color: colors.textPrimary,
-    fontFamily: fonts.extraBold,
-    fontSize: typography.h3,
-    fontWeight: "800",
-  },
   emptyProducts: {
     alignItems: "center",
     backgroundColor: colors.card,
@@ -666,11 +551,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: spacing.lg,
   },
-  fact: { alignItems: "center", flex: 1, gap: 3, minWidth: 0, paddingHorizontal: spacing.xs },
-  factDivider: { backgroundColor: colors.border, height: 38, width: 1 },
-  factLabel: { color: colors.textMuted, fontFamily: fonts.medium, fontSize: 10 },
-  factsRow: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", minHeight: 88, padding: spacing.sm },
-  factValue: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.caption, fontWeight: "700", maxWidth: "100%", textAlign: "center" },
   featuredCopy: {
     flex: 1,
     gap: 5,
@@ -886,29 +766,6 @@ const styles = StyleSheet.create({
     fontSize: typography.small,
     fontWeight: "700",
   },
-  primaryAction: {
-    alignItems: "center",
-    backgroundColor: colors.primaryDark,
-    borderRadius: radius.lg,
-    flex: 1,
-    flexDirection: "row",
-    gap: spacing.md,
-    minHeight: 76,
-    padding: spacing.md,
-  },
-  primaryActionDisabled: { backgroundColor: colors.textMuted },
-  primaryActionIcon: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.14)", borderRadius: radius.round, height: 42, justifyContent: "center", width: 42 },
-  primaryActionText: {
-    color: "rgba(255,255,255,0.78)",
-    fontFamily: fonts.medium,
-    fontSize: typography.caption,
-  },
-  primaryActionTitle: {
-    color: colors.card,
-    fontFamily: fonts.extraBold,
-    fontSize: typography.small,
-    fontWeight: "800",
-  },
   productCard: {
     backgroundColor: colors.card,
     borderColor: colors.border,
@@ -1010,26 +867,6 @@ const styles = StyleSheet.create({
   },
   products: {
     gap: spacing.md,
-  },
-  secondaryAction: {
-    alignItems: "center",
-    backgroundColor: colors.card,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    gap: spacing.xs,
-    justifyContent: "center",
-    minHeight: 76,
-    padding: spacing.md,
-    width: 112,
-  },
-  secondaryActionIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 38, justifyContent: "center", width: 38 },
-  secondaryActionTitle: {
-    color: colors.textPrimary,
-    fontFamily: fonts.extraBold,
-    fontSize: typography.caption,
-    fontWeight: "800",
-    textAlign: "center",
   },
   section: {
     gap: spacing.lg,

@@ -1,5 +1,6 @@
 import { prisma } from "../../config/prisma.js";
-import { requireUserBaseAddress } from "../../utils/location.js";
+import { requireUserMarketplaceLocation } from "../../utils/location.js";
+import { requireCommercialTier2 } from "../../utils/commercial-access.js";
 
 export function createServiceChatsRepository(database = prisma) {
   return {
@@ -19,7 +20,8 @@ export function createServiceChatsRepository(database = prisma) {
     findServiceType(args) { return database.tipoServico.findFirst(args); },
     findServiceTypes(args) { return database.tipoServico.findMany(args); },
     findStore(args) { return database.loja.findFirst(args); },
-    getUserBaseAddress(userId) { return requireUserBaseAddress(database, userId); },
+    getUserBaseAddress(userId) { return requireUserMarketplaceLocation(database, userId); },
+    requireCommercialTier2(userId) { return requireCommercialTier2(database, userId); },
     lockServiceConversation(customerUserId, sellerServiceId) {
       return database.$executeRaw`SELECT pg_advisory_xact_lock(CAST(${customerUserId} AS integer), CAST(${sellerServiceId} AS integer))`;
     },

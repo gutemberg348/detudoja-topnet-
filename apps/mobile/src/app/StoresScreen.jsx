@@ -63,6 +63,9 @@ export function StoresScreen({ navigation, route }) {
   const { suggestions } = useMarketplaceSuggestions(session?.accessToken, search, {
     enabled: Boolean(marketplaceLocation),
     limit: 8,
+    scope: marketplaceLocation
+      ? `${marketplaceLocation.city}|${marketplaceLocation.state}`
+      : "",
   });
   const hasSearch = Boolean(search.trim());
   const hasMarketplaceSearch = Boolean(marketplaceSearch.trim());
@@ -116,10 +119,13 @@ export function StoresScreen({ navigation, route }) {
         const address = (response.addresses ?? []).find(
           (item) => item.cidade && item.estado,
         );
+        const savedLocation = response.marketplaceLocation;
 
         if (!active) return;
 
-        if (address) {
+        if (savedLocation) {
+          setMarketplaceLocation(savedLocation);
+        } else if (address) {
           setMarketplaceLocation({ city: address.cidade, state: address.estado });
         } else {
           setLocationPromptOpen(true);
@@ -360,18 +366,21 @@ export function StoresScreen({ navigation, route }) {
   async function confirmMarketplaceLocation(location) {
     if (!session?.accessToken) return;
 
-    await updateCurrentUser(session.accessToken, { location });
-    setMarketplaceLocation(location);
+    const response = await updateCurrentUser(session.accessToken, { location });
+    setMarketplaceLocation(response.user.marketplaceLocation ?? location);
     setLocationPromptOpen(false);
   }
 
+  const locationLabel = marketplaceLocation
+    ? `${marketplaceLocation.city} - ${marketplaceLocation.state}`
+    : "sua cidade";
   const resultDescription = search.trim()
-    ? `Resultados para "${search.trim()}"`
+    ? `Resultados em ${locationLabel} para "${search.trim()}"`
     : selectedCategory
-      ? `${resultMode === "products" ? "Produtos" : "Lojas"} em ${selectedCategory.name}`
+      ? `${resultMode === "products" ? "Produtos" : "Lojas"} de ${selectedCategory.name} em ${locationLabel}`
       : resultMode === "products"
-        ? "Produtos disponiveis perto de voce"
-        : "Todas as lojas disponiveis";
+        ? `Produtos disponiveis em ${locationLabel}`
+        : `Lojas disponiveis em ${locationLabel}`;
 
   return (
     <ScreenContainer contentContainerStyle={styles.content} padded={false}>
@@ -379,12 +388,19 @@ export function StoresScreen({ navigation, route }) {
         <BrandLogo centered size="large" />
 
         {marketplaceLocation ? (
-          <View style={styles.locationBadge}>
+          <Pressable
+            accessibilityHint="Abre as opcoes para trocar a cidade"
+            accessibilityLabel={`Localizacao atual: ${marketplaceLocation.city}, ${marketplaceLocation.state}`}
+            accessibilityRole="button"
+            onPress={() => setLocationPromptOpen(true)}
+            style={({ pressed }) => [styles.locationBadge, pressed && styles.locationBadgePressed]}
+          >
             <Ionicons color={colors.primaryDark} name="location" size={15} />
             <Text style={styles.locationBadgeText}>
               {marketplaceLocation.city} - {marketplaceLocation.state}
             </Text>
-          </View>
+            <Ionicons color={colors.primaryDark} name="chevron-down" size={14} />
+          </Pressable>
         ) : null}
 
         <View style={styles.searchArea}>
@@ -512,9 +528,9 @@ export function StoresScreen({ navigation, route }) {
           </View>
         ) : !hasSearch ? (
           <StatePanel
-            icon="search-outline"
-            text="Nenhuma loja encontrada. Tente outra busca ou limpe os filtros."
-            title="Nenhum resultado"
+            icon="location-outline"
+            text={`Ainda nao encontramos lojas em ${locationLabel}. Toque na cidade acima para mudar a localizacao.`}
+            title="Nenhuma loja nesta cidade"
           />
         ) : null}
       </View> : null}
@@ -561,9 +577,9 @@ export function StoresScreen({ navigation, route }) {
             </View>
           ) : !hasSearch ? (
             <StatePanel
-              icon="search-outline"
-              text="Nenhum produto encontrado. Tente outra busca ou escolha outra categoria."
-              title="Nenhum resultado"
+              icon="location-outline"
+              text={`Ainda nao encontramos produtos em ${locationLabel}. Toque na cidade acima para mudar a localizacao.`}
+              title="Nenhum produto nesta cidade"
             />
           ) : null}
         </View>
@@ -579,7 +595,10 @@ export function StoresScreen({ navigation, route }) {
       </View>
 
       <MarketplaceLocationModal
+        canDismiss={Boolean(marketplaceLocation)}
+        initialLocation={marketplaceLocation}
         onConfirm={confirmMarketplaceLocation}
+        onDismiss={() => setLocationPromptOpen(false)}
         visible={locationPromptOpen}
       />
     </ScreenContainer>
@@ -922,6 +941,7 @@ const styles = StyleSheet.create({
     fontSize: typography.caption,
     fontWeight: "700",
   },
+  locationBadgePressed: { backgroundColor: colors.primaryLight, opacity: 0.82 },
   modeIcon: {
     alignItems: "center",
     backgroundColor: colors.cardMuted,

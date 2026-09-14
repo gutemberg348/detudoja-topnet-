@@ -89,7 +89,7 @@ export async function apiRequest(
   options = {},
   canRetryAfterRefresh = true,
 ) {
-  const { body, headers: customHeaders, method = "GET", token } = options;
+  const { body, headers: customHeaders, method = "GET", timeoutMs, token } = options;
   const headers = {};
   const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
   let requestToken = token;
@@ -114,15 +114,23 @@ export async function apiRequest(
   Object.assign(headers, customHeaders ?? {});
 
   let response;
+  const controller = timeoutMs ? new AbortController() : null;
+  const timeout = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
 
   try {
     response = await fetch(`${apiBaseUrl}${path}`, {
       body: body ? (isFormData ? body : JSON.stringify(body)) : undefined,
       headers,
       method,
+      signal: controller?.signal,
     });
-  } catch {
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new ApiError("O envio demorou mais que o esperado. Confira sua conexão e tente novamente.", 0, null);
+    }
     throw new ApiError("Não foi possível conectar à API.", 0, null);
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 
   if (response.status === 204) {

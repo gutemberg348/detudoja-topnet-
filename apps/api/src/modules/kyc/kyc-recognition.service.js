@@ -218,6 +218,17 @@ function buildFailure(code, message) {
   return { code, message };
 }
 
+const manualDecisionReasons = {
+  BAIXA_CONFIANCA_ROSTO_DOCUMENTO: "O rosto do documento precisa ser conferido por um analista.",
+  BAIXA_CONFIANCA_ROSTO_SELFIE: "O rosto da selfie precisa ser conferido por um analista.",
+  CPF_NAO_CONFIRMADO_PELO_OCR: "O CPF nao foi lido com seguranca e precisa de conferencia manual.",
+  NOME_NAO_CONFIRMADO_PELO_OCR: "O nome nao foi lido com seguranca e precisa de conferencia manual.",
+  QUALIDADE_DA_IMAGEM: "A qualidade de uma das imagens exige conferencia manual.",
+  ROSTO_AUSENTE_NA_SELFIE: "O motor nao conseguiu localizar com seguranca o rosto na selfie.",
+  ROSTO_AUSENTE_NO_DOCUMENTO: "O motor nao conseguiu localizar com seguranca o rosto no documento.",
+  ROSTO_DISTANTE: "O rosto ficou distante e precisa ser conferido por um analista.",
+};
+
 function isCalibrationSample(images) {
   const rate = env.kyc.calibrationSampleRate;
   if (rate <= 0) return false;
@@ -259,20 +270,25 @@ async function runAnalysis({ cpf, documentType, images, name, reusedByAnotherUse
   const manualChecksRequired = [];
   const documentTypeIsDetected = documentTypeDetected(documentType, normalizedOcr);
   const calibrationSample = isCalibrationSample(images);
+  const ocrIsReliable = ocr.confidence >= env.kyc.ocrConfidenceThreshold;
+  const documentFaceIsReliable = Number(documentFace?.score ?? 0) >= env.kyc.faceDetectionThreshold;
+  const selfieFaceIsReliable = Number(selfieFace?.score ?? 0) >= env.kyc.faceDetectionThreshold;
 
   if (reusedByAnotherUser) failures.push(buildFailure("IMAGEM_REUTILIZADA", "Uma das fotos ja foi usada por outra conta."));
-  if (!cpfMatched) failures.push(buildFailure("CPF_NAO_CONFIRMADO", "Nao conseguimos confirmar o CPF no documento."));
-  if (nameMatch.score < env.kyc.nameMatchThreshold) failures.push(buildFailure("NOME_NAO_CONFIRMADO", "Nao conseguimos confirmar o nome completo no documento."));
-  if (!documentFace) failures.push(buildFailure("ROSTO_AUSENTE_NO_DOCUMENTO", "O rosto nao ficou visivel no documento."));
-  if (selfieFaces.length === 0) failures.push(buildFailure("ROSTO_AUSENTE_NA_SELFIE", "Nenhum rosto foi identificado na selfie."));
+  if (!cpfMatched) manualChecksRequired.push("CPF_NAO_CONFIRMADO_PELO_OCR");
+  if (nameMatch.score < env.kyc.nameMatchThreshold) manualChecksRequired.push("NOME_NAO_CONFIRMADO_PELO_OCR");
+  if (!documentFace) manualChecksRequired.push("ROSTO_AUSENTE_NO_DOCUMENTO");
+  if (selfieFaces.length === 0) manualChecksRequired.push("ROSTO_AUSENTE_NA_SELFIE");
   if (selfieFaces.length > 1) failures.push(buildFailure("MAIS_DE_UM_ROSTO", "A selfie deve mostrar somente o titular."));
-  if (selfieFace && faceArea < env.kyc.minimumFaceArea) failures.push(buildFailure("ROSTO_DISTANTE", "Aproxime o rosto da camera e tente novamente."));
-  if (selfieFace && Number(selfieFace.real ?? 0) < env.kyc.antispoofThreshold) failures.push(buildFailure("SELFIE_NAO_REAL", "A prova de identidade da selfie nao foi suficiente."));
-  if (selfieFace && Number(selfieFace.live ?? 0) < env.kyc.livenessThreshold) failures.push(buildFailure("PROVA_DE_VIDA_INSUFICIENTE", "A prova de vida nao atingiu a seguranca necessaria."));
-  if (documentFace && selfieFace && similarity < env.kyc.faceMatchThreshold) failures.push(buildFailure("ROSTOS_DIVERGENTES", "A selfie nao corresponde ao rosto do documento."));
+  if (selfieFace && faceArea < env.kyc.minimumFaceArea) manualChecksRequired.push("ROSTO_DISTANTE");
+  if (documentFace && !documentFaceIsReliable) manualChecksRequired.push("BAIXA_CONFIANCA_ROSTO_DOCUMENTO");
+  if (selfieFace && !selfieFaceIsReliable) manualChecksRequired.push("BAIXA_CONFIANCA_ROSTO_SELFIE");
+  if (selfieFaceIsReliable && Number(selfieFace.real ?? 0) < env.kyc.antispoofThreshold) failures.push(buildFailure("SELFIE_NAO_REAL", "A prova de identidade da selfie nao foi suficiente."));
+  if (selfieFaceIsReliable && Number(selfieFace.live ?? 0) < env.kyc.livenessThreshold) failures.push(buildFailure("PROVA_DE_VIDA_INSUFICIENTE", "A prova de vida nao atingiu a seguranca necessaria."));
+  if (documentFaceIsReliable && selfieFaceIsReliable && similarity < env.kyc.faceMatchThreshold) failures.push(buildFailure("ROSTOS_DIVERGENTES", "A selfie nao corresponde ao rosto do documento."));
   if (failures.length === 0) {
     if (!documentTypeIsDetected) manualChecksRequired.push("TIPO_DOCUMENTO_NAO_CONFIRMADO");
-    if (ocr.confidence < env.kyc.ocrConfidenceThreshold) manualChecksRequired.push("OCR_COM_BAIXA_CONFIANCA");
+    if (!ocrIsReliable) manualChecksRequired.push("OCR_COM_BAIXA_CONFIANCA");
     if (images.some((image) => image.warnings.length)) manualChecksRequired.push("QUALIDADE_DA_IMAGEM");
     if (calibrationSample) manualChecksRequired.push("AMOSTRA_DE_CALIBRACAO");
     if (!env.kyc.automaticApprovalEnabled) manualChecksRequired.push("APROVACAO_AUTOMATICA_DESABILITADA");
@@ -298,31 +314,36 @@ async function runAnalysis({ cpf, documentType, images, name, reusedByAnotherUse
     ],
     decisionReason: approved
       ? "Identidade aprovada automaticamente por OCR, comparacao facial e prova de vida passiva."
-      : failures[0]?.message ?? "Envio separado para calibracao e validacao adicional antes de liberar limites altos.",
+      : failures[0]?.message
+        ?? manualDecisionReasons[manualChecksRequired[0]]
+        ?? "Envio encaminhado para conferencia manual antes de liberar o TIER 2.",
     engine: "LOCAL_HUMAN_TESSERACT",
     failures,
     manualChecksRequired,
     metrics: {
       cpfMatched,
       documentFaceDetected: Boolean(documentFace),
+      documentFaceScore: round(documentFace?.score),
       documentTypeDetected: documentTypeIsDetected,
       faceMatch: round(similarity),
       nameMatch: nameMatch.score,
       ocrConfidence: ocr.confidence,
       selfieFaceArea: round(faceArea),
+      selfieFaceScore: round(selfieFace?.score),
       selfieFaces: selfieFaces.length,
       selfieLive: round(selfieFace?.live),
       selfieReal: round(selfieFace?.real),
     },
     thresholds: {
       antispoof: env.kyc.antispoofThreshold,
+      faceDetection: env.kyc.faceDetectionThreshold,
       faceMatch: env.kyc.faceMatchThreshold,
       liveness: env.kyc.livenessThreshold,
       minimumFaceArea: env.kyc.minimumFaceArea,
       nameMatch: env.kyc.nameMatchThreshold,
       ocrConfidence: env.kyc.ocrConfidenceThreshold,
     },
-    version: 3,
+    version: 5,
     warnings: [
       ...images.flatMap((image) => image.warnings.map((warning) => ({ file: image.kind, warning }))),
       ...(reusedByAnotherUser ? [{ file: "ENVIO", warning: "IMAGEM_REUTILIZADA" }] : []),

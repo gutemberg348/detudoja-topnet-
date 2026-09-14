@@ -73,6 +73,29 @@ export function createKycRepository(database = prisma) {
       });
     },
 
+    findNextAutomaticSubmission() {
+      return database.solicitacaoKyc.findFirst({
+        include: submissionInclude,
+        orderBy: { enviado_em: "asc" },
+        where: {
+          status: "EM_ANALISE",
+          triagem_json: { equals: "PENDENTE", path: ["processingStatus"] },
+        },
+      });
+    },
+
+    findInterruptedAutomaticSubmissions(before) {
+      return database.solicitacaoKyc.findMany({
+        orderBy: { atualizado_em: "asc" },
+        take: 10,
+        where: {
+          atualizado_em: { lt: before },
+          status: "EM_ANALISE",
+          triagem_json: { equals: "PROCESSANDO", path: ["processingStatus"] },
+        },
+      });
+    },
+
     findUser(userId) {
       return database.usuario.findUnique({
         include: {
@@ -102,6 +125,24 @@ export function createKycRepository(database = prisma) {
 
     async lockUserForKycSubmission(userId) {
       await database.$queryRaw`SELECT "id" FROM "usuarios" WHERE "id" = ${userId} FOR UPDATE`;
+    },
+
+    claimAutomaticSubmission(submissionId, triage) {
+      return database.solicitacaoKyc.updateMany({
+        data: { triagem_json: triage },
+        where: {
+          id: submissionId,
+          status: "EM_ANALISE",
+          triagem_json: { equals: "PENDENTE", path: ["processingStatus"] },
+        },
+      });
+    },
+
+    updateSubmissionTriage(submissionId, triage) {
+      return database.solicitacaoKyc.updateMany({
+        data: { triagem_json: triage },
+        where: { id: submissionId, status: "EM_ANALISE" },
+      });
     },
 
     async markKycApproved({ adminId, reason, submissionId, userId }) {

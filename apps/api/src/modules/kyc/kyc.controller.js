@@ -8,6 +8,7 @@ import {
   revokeKycSubmission,
   submitCurrentUserKyc,
 } from "./kyc.service.js";
+import { requestKycAnalysis } from "./kyc-analysis.worker.js";
 
 export async function getCurrentKycController(req, res, next) {
   try { res.json(await getCurrentKyc(req.auth.user.id)); } catch (error) { next(error); }
@@ -15,10 +16,12 @@ export async function getCurrentKycController(req, res, next) {
 
 export async function submitCurrentUserKycController(req, res, next) {
   try {
-    res.status(201).json(await submitCurrentUserKyc(req.auth.user.id, {
+    const result = await submitCurrentUserKyc(req.auth.user.id, {
       documentType: req.body.documentType,
       files: req.files,
-    }));
+    });
+    res.status(202).json(result);
+    requestKycAnalysis();
   } catch (error) { next(error); }
 }
 

@@ -7,7 +7,7 @@ import { AppError } from "../../utils/errors.js";
 import { isValidCnpj, normalizeCnpj } from "../../utils/cnpj.js";
 import { createSellerRepository, sellerRepository } from "./seller.repository.js";
 import { parsePositiveId } from "../../utils/ids.js";
-import { sameCity } from "../../utils/location.js";
+import { normalizeLocation, sameCity } from "../../utils/location.js";
 import {
   createAutonomousQrCharge,
   serializeChargeWithQr,
@@ -127,12 +127,16 @@ async function assertCommercialDocumentAvailable(repository, {
 }
 
 function isCommercialIdentityApproved(user, type, documentDigits) {
-  if (type === "JURIDICA") {
-    return user?.status === "ATIVO" && isValidCnpj(documentDigits);
+  if (
+    user?.status !== "ATIVO"
+    || user.nivel_kyc !== "TIER_2"
+    || user.kyc?.status !== "APROVADO"
+  ) {
+    return false;
   }
 
-  if (user?.nivel_kyc !== "TIER_2" || user.kyc?.status !== "APROVADO") {
-    return false;
+  if (type === "JURIDICA") {
+    return isValidCnpj(documentDigits);
   }
 
   return onlyDigits(user.cpf) === documentDigits;
@@ -148,6 +152,13 @@ function commercialApprovalData(type, identityApproved) {
 }
 
 function assertAutonomousSellerEligibility(user, seller) {
+  if (user?.nivel_kyc !== "TIER_2" || user.kyc?.status !== "APROVADO") {
+    throw new AppError(
+      "Conclua a verificacao TIER_2 antes de realizar vendas ou prestar servicos",
+      428,
+    );
+  }
+
   const commercialDocument = seller.tipo_pessoa === "JURIDICA"
     ? normalizeCnpj(seller.cnpj)
     : onlyDigits(seller.cpf);
@@ -162,6 +173,22 @@ function assertAutonomousSellerEligibility(user, seller) {
 
   if (seller.status !== "ATIVO" || seller.status_kyc !== "APROVADO") {
     throw new AppError("Seu cadastro comercial ainda esta em validacao", 428);
+  }
+}
+
+function assertStoreMerchantTier2(store) {
+  const merchantUser = store.lojista?.usuario;
+  if (
+    store.lojista?.status !== "ATIVO"
+    || store.lojista?.status_kyc !== "APROVADO"
+    || merchantUser?.status !== "ATIVO"
+    || merchantUser?.nivel_kyc !== "TIER_2"
+    || merchantUser?.kyc?.status !== "APROVADO"
+  ) {
+    throw new AppError(
+      "O titular da loja precisa concluir a verificacao TIER_2 antes de realizar vendas",
+      428,
+    );
   }
 }
 
@@ -303,6 +330,7 @@ function storeAddressData(address) {
     bairro: address.district,
     cep: onlyDigits(address.zipCode),
     cidade: address.city,
+    cidade_normalizada: normalizeLocation(address.city),
     complemento: address.complement || null,
     estado: address.state.toUpperCase(),
     numero: address.number,
@@ -697,7 +725,7 @@ async function findStoreForUser(userId, storeId) {
       categoria: { include: { segmento_venda: true } },
       endereco: true,
       segmento_venda: true,
-      lojista: true,
+      lojista: { include: { usuario: { include: { kyc: true } } } },
       pedidos: {
         include: sellerOrderInclude,
         orderBy: { criado_em: "desc" },
@@ -1131,7 +1159,9 @@ export async function deleteStoreProduct(userId, storeId, productId) {
 }
 
 export async function updateStoreOrderStatus(userId, storeId, orderId, status) {
+  await sellerRepository.requireCommercialTier2(userId);
   const store = await findStoreForUser(userId, storeId);
+  assertStoreMerchantTier2(store);
   const parsedOrderId = parsePositiveId(orderId, "Pedido invalido");
 
   const currentOrder = await sellerRepository.findFirstOrder({
@@ -1316,7 +1346,9 @@ export async function createStoreOrderMessage(userId, storeId, orderId, data) {
 }
 
 export async function createStoreOrderProposal(userId, storeId, orderId, data) {
+  await sellerRepository.requireCommercialTier2(userId);
   const store = await findStoreForUser(userId, storeId);
+  assertStoreMerchantTier2(store);
   const parsedOrderId = parsePositiveId(orderId, "Pedido invalido");
   const currentOrder = await sellerRepository.findFirstOrder({
     select: {

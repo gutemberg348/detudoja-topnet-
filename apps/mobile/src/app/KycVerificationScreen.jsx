@@ -2,6 +2,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useEffect, useMemo, useState } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { AppButton } from "../components/AppButton";
+import { KycSubmissionProgress } from "../components/KycSubmissionProgress";
 import { PageHeader } from "../components/PageHeader";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { getCurrentUser } from "../services/users.api";
@@ -18,9 +19,32 @@ const documentTypes = [
 const statusContent = {
   APROVADO: { icon: "shield-checkmark", title: "Identidade verificada", text: "Documento, dados e selfie foram confirmados." },
   BLOQUEADO: { icon: "alert-circle-outline", title: "Verificacao bloqueada", text: "Seu KYC foi revogado. Entre em contato com o suporte para regularizar a conta." },
-  EM_ANALISE: { icon: "hourglass-outline", title: "Verificacao em validacao", text: "Recebemos suas imagens. Enquanto a validacao adicional estiver aberta, saques e limites altos permanecem bloqueados." },
   REPROVADO: { icon: "refresh-circle-outline", title: "Novo envio necessario", text: "Confira o motivo abaixo e envie fotos novas." },
 };
+
+const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+function underReviewContent(processingStatus) {
+  if (["PENDENTE", "PROCESSANDO"].includes(processingStatus)) {
+    return {
+      icon: "scan-outline",
+      text: "Recebemos suas imagens e a análise automática está acontecendo em segundo plano. Esta tela será atualizada automaticamente.",
+      title: "Análise em andamento",
+    };
+  }
+
+  return {
+    icon: "hourglass-outline",
+    text: "A análise automática terminou e o envio precisa de uma validação adicional segura.",
+    title: "Verificação em análise",
+  };
+}
+
+function kycLevelForStatus(status) {
+  if (status === "APROVADO") return "TIER_2";
+  if (["BLOQUEADO", "REPROVADO"].includes(status)) return status;
+  return null;
+}
 
 function CaptureField({ image, label, onPress, optional = false }) {
   return (
@@ -45,12 +69,15 @@ export function KycVerificationScreen() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [submissionStage, setSubmissionStage] = useState(null);
 
   const canSubmit = useMemo(() => Boolean(
     images.documentFront && images.selfie && (documentType === "CNH" || images.documentBack),
   ), [documentType, images]);
   const locked = ["APROVADO", "BLOQUEADO", "EM_ANALISE"].includes(kyc?.status);
-  const currentStatus = statusContent[kyc?.status];
+  const currentStatus = kyc?.status === "EM_ANALISE"
+    ? underReviewContent(kyc?.submission?.processingStatus)
+    : statusContent[kyc?.status];
 
   async function load() {
     if (!session?.accessToken) return;
@@ -73,6 +100,24 @@ export function KycVerificationScreen() {
   }
 
   useEffect(() => { load(); }, [session?.accessToken]);
+
+  useEffect(() => {
+    if (kyc?.status !== "EM_ANALISE" || !session?.accessToken) return undefined;
+    const timer = setInterval(async () => {
+      try {
+        const response = await getKycStatus(session.accessToken);
+        setKyc(response.kyc);
+        const kycLevel = kycLevelForStatus(response.kyc.status);
+        updateSessionUser({
+          kycStatus: response.kyc.status,
+          ...(kycLevel ? { kycLevel } : {}),
+        });
+      } catch {
+        // Mantem o ultimo estado conhecido e tenta novamente no proximo ciclo.
+      }
+    }, 4_000);
+    return () => clearInterval(timer);
+  }, [kyc?.status, session?.accessToken, updateSessionUser]);
 
   async function captureImage(field) {
     const Picker = await import("expo-image-picker");
@@ -97,22 +142,54 @@ export function KycVerificationScreen() {
 
   async function submit() {
     if (!canSubmit || isSaving) return;
+    const previousSubmissionId = kyc?.submission?.id ?? null;
     setError("");
     setIsSaving(true);
+    setSubmissionStage("UPLOADING");
     try {
       const response = await submitKycDocuments(session.accessToken, { ...images, documentType });
       setKyc(response.kyc);
       updateSessionUser({ kycLevel: response.user.kycLevel, kycStatus: response.user.kycStatus });
       setImages({ documentBack: null, documentFront: null, selfie: null });
+      setSubmissionStage("SENT");
+      await wait(900);
+      setSubmissionStage("ANALYZING");
+      await wait(1_500);
     } catch (requestError) {
+      try {
+        const recovered = await getKycStatus(session.accessToken);
+        if (
+          recovered.kyc?.submission
+          && recovered.kyc.submission.id !== previousSubmissionId
+          && ["EM_ANALISE", "APROVADO", "REPROVADO"].includes(recovered.kyc.status)
+        ) {
+          setKyc(recovered.kyc);
+          const kycLevel = kycLevelForStatus(recovered.kyc.status);
+          updateSessionUser({
+            kycStatus: recovered.kyc.status,
+            ...(kycLevel ? { kycLevel } : {}),
+          });
+          setImages({ documentBack: null, documentFront: null, selfie: null });
+          setSubmissionStage("SENT");
+          await wait(900);
+          setSubmissionStage("ANALYZING");
+          await wait(1_500);
+          return;
+        }
+      } catch {
+        // Usa abaixo o erro original do envio.
+      }
+      setSubmissionStage(null);
       setError(requestError.message ?? "Nao foi possivel enviar os documentos.");
     } finally {
+      setSubmissionStage(null);
       setIsSaving(false);
     }
   }
 
   return (
     <ScreenContainer contentContainerStyle={styles.content} edges={["left", "right"]}>
+      <KycSubmissionProgress stage={submissionStage} />
       <PageHeader eyebrow="Seguranca da conta" title="Verificar identidade" subtitle="Fotografe seu documento e rosto. A verificacao acontece automaticamente." />
 
       {isLoading ? <View style={styles.notice}><Text style={styles.noticeText}>Carregando situacao...</Text></View> : null}

@@ -47,6 +47,8 @@ import {
   creditUserWallet,
   ensureUserWallets,
 } from "../src/modules/wallet/wallet.service.js";
+import { listMarketplaceStores } from "../src/modules/marketplace/marketplace.service.js";
+import { updateCurrentUser } from "../src/modules/users/users.service.js";
 
 const marker = "audit-business-flow";
 const state = {};
@@ -168,6 +170,8 @@ before(async () => {
       data: {
         cpf: "39053344705",
         email: `seller@${marker}.local`,
+        cidade_busca: "Patos",
+        estado_busca: "PB",
         nome: "Audit Seller",
         senha_hash: "not-used-by-business-flow-tests",
         status: "ATIVO",
@@ -178,6 +182,8 @@ before(async () => {
       data: {
         cpf: "86288366757",
         email: `buyer@${marker}.local`,
+        cidade_busca: "Patos",
+        estado_busca: "PB",
         nome: "Audit Buyer",
         senha_hash: "not-used-by-business-flow-tests",
         status: "ATIVO",
@@ -188,6 +194,8 @@ before(async () => {
       data: {
         cpf: "15350946056",
         email: `outsider@${marker}.local`,
+        cidade_busca: "Patos",
+        estado_busca: "PB",
         nome: "Audit Outsider",
         senha_hash: "not-used-by-business-flow-tests",
         status: "ATIVO",
@@ -260,6 +268,17 @@ before(async () => {
       aceita_qrcode: true,
       aberta_para_pedidos: true,
       categoria_id: category.id,
+      endereco: {
+        create: {
+          bairro: "Centro",
+          cep: "58700000",
+          cidade: "Patos",
+          cidade_normalizada: "patos",
+          estado: "PB",
+          numero: "100",
+          rua: "Rua da Loja",
+        },
+      },
       lojista_id: merchant.id,
       nome: "Audit Store",
       segmento_venda_id: segment.id,
@@ -297,6 +316,68 @@ before(async () => {
 after(async () => {
   await cleanup();
   await prisma.$disconnect();
+});
+
+test("marketplace usa a cidade escolhida sem alterar o endereco de entrega", async () => {
+  await prisma.enderecoUsuario.create({
+    data: {
+      bairro: "Centro",
+      cep: "58700000",
+      cidade: "Patos",
+      cidade_normalizada: "patos",
+      estado: "PB",
+      nome_endereco: "Principal",
+      numero: "20",
+      principal: true,
+      rua: "Rua do Comprador",
+      usuario_id: state.buyer.id,
+    },
+  });
+
+  try {
+    await prisma.enderecoLoja.update({
+      data: { cidade: "São Paulo", cidade_normalizada: "sao paulo", estado: "SP" },
+      where: { loja_id: state.store.id },
+    });
+    await updateCurrentUser(state.buyer.id, {
+      location: { city: "Sao Paulo", state: "SP" },
+    });
+
+    const matching = await listMarketplaceStores(state.buyer.id);
+    assert.ok(matching.stores.some((store) => store.id === state.store.id));
+
+    const deliveryAddress = await prisma.enderecoUsuario.findFirst({
+      where: { usuario_id: state.buyer.id },
+    });
+    assert.equal(deliveryAddress.cidade, "Patos");
+    assert.equal(deliveryAddress.estado, "PB");
+
+    await updateCurrentUser(state.buyer.id, {
+      location: { city: "Campina Grande", state: "PB" },
+    });
+    const otherCity = await listMarketplaceStores(state.buyer.id);
+    assert.equal(otherCity.stores.some((store) => store.id === state.store.id), false);
+    await assert.rejects(
+      () => createCheckoutOrder(state.buyer.id, {
+        address: null,
+        addressId: null,
+        deliveryMode: "pickup",
+        items: [{ notes: "", productId: state.product.id, quantity: 1 }],
+        payment: { balanceUsedCents: 1099, useBalance: true },
+        storeId: state.store.id,
+      }),
+      (error) => error?.statusCode === 409 && error.message.includes("outra cidade"),
+    );
+  } finally {
+    await prisma.enderecoUsuario.deleteMany({ where: { usuario_id: state.buyer.id } });
+    await prisma.enderecoLoja.update({
+      data: { cidade: "Patos", cidade_normalizada: "patos", estado: "PB" },
+      where: { loja_id: state.store.id },
+    });
+    await updateCurrentUser(state.buyer.id, {
+      location: { city: "Patos", state: "PB" },
+    });
+  }
 });
 
 test("CPF monthly limit is shared by stores and autonomous sales and reserves pending Asaas Pix", async () => {
@@ -1141,37 +1222,49 @@ test("autonomous QR sale settles immediately and creates its Pix payout", async 
   assert.equal(transaction.repasse_pix.status, "FALHOU");
 });
 
-test("autonomous sale refuses an active seller whose identity is no longer approved", async () => {
-  await prisma.$transaction([
-    prisma.kycUsuario.update({
-      data: { status: "PENDENTE", validado_em: null },
-      where: { usuario_id: state.seller.id },
-    }),
-    prisma.usuario.update({
-      data: { nivel_kyc: "TIER_1" },
-      where: { id: state.seller.id },
-    }),
-  ]);
+test("TIER_1 nao consegue gerar venda autonoma nem cobranca da loja", async () => {
+  const previouslyCreatedCharge = await createStoreQrCharge(state.seller.id, state.store.id, {
+    amountCents: 1000,
+    title: "Cobranca criada antes da perda do Tier 2",
+  });
+  await prisma.usuario.update({
+    data: { nivel_kyc: "TIER_1" },
+    where: { id: state.seller.id },
+  });
 
-  await assert.rejects(
-    () => createAutonomousSale(state.seller.id, {
-      amountCents: 1000,
-      title: "Blocked autonomous sale",
-    }),
-    (error) => error?.statusCode === 428
-      && error.message.includes("verificacao de identidade"),
-  );
+  try {
+    const marketplace = await listMarketplaceStores(state.buyer.id);
+    assert.equal(
+      marketplace.stores.some((store) => store.id === state.store.id),
+      false,
+    );
 
-  await prisma.$transaction([
-    prisma.kycUsuario.update({
-      data: { status: "APROVADO", validado_em: new Date() },
-      where: { usuario_id: state.seller.id },
-    }),
-    prisma.usuario.update({
+    await assert.rejects(
+      () => createAutonomousSale(state.seller.id, {
+        amountCents: 1000,
+        title: "Blocked autonomous sale",
+      }),
+      (error) => error?.statusCode === 428 && error.message.includes("TIER_2"),
+    );
+
+    await assert.rejects(
+      () => createStoreQrCharge(state.seller.id, state.store.id, {
+        amountCents: 1000,
+        title: "Cobranca bloqueada por Tier 1",
+      }),
+      (error) => error?.statusCode === 428 && error.message.includes("TIER_2"),
+    );
+
+    await assert.rejects(
+      () => payChargeWithWallet(state.buyer.id, previouslyCreatedCharge.charge.code),
+      (error) => error?.statusCode === 428 && error.message.includes("TIER_2"),
+    );
+  } finally {
+    await prisma.usuario.update({
       data: { nivel_kyc: "TIER_2" },
       where: { id: state.seller.id },
-    }),
-  ]);
+    });
+  }
 });
 
 test("commercial earnings stay pending for 24 hours and release only once", async () => {

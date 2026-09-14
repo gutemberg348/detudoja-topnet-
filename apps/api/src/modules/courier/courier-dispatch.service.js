@@ -5,6 +5,7 @@ import {
   emitServiceChatCreated,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
+import { commercialTier2UserWhere } from "../../utils/commercial-access.js";
 import { sameCity } from "../../utils/location.js";
 import { getServiceConversation } from "../service-chats/service-chats.service.js";
 import {
@@ -167,6 +168,7 @@ async function onlineCandidates(address, typeId, { requestingStoreId = null } = 
         },
         status: "ATIVO",
         status_kyc: "APROVADO",
+        usuario: { is: commercialTier2UserWhere },
       },
     },
   });
@@ -402,7 +404,13 @@ export async function listCourierRequests(userId) {
     include: { lojas: { where: { ativo: true }, select: { ativo: true, loja_id: true } }, vendedor: { include: { servicos: true } } },
     where: {
       status: "ATIVO",
-      vendedor: { excluido_em: null, status: "ATIVO", status_kyc: "APROVADO", usuario_id: userId },
+      vendedor: {
+        excluido_em: null,
+        status: "ATIVO",
+        status_kyc: "APROVADO",
+        usuario: { is: commercialTier2UserWhere },
+        usuario_id: userId,
+      },
     },
   });
   if (!courier) return { dashboard: null, requests: [] };
@@ -511,13 +519,20 @@ export async function listCourierRequests(userId) {
 }
 
 export async function acceptCourierRequest(userId, requestId) {
+  await courierRepository.requireCommercialTier2(userId);
   const id = parseId(requestId, "Chamada invalida");
   await expireCourierRequests({ id });
   const courier = await courierRepository.findCourier({
     include: { lojas: { where: { ativo: true }, select: { ativo: true, loja_id: true } }, vendedor: { include: { servicos: { include: { tipo_servico: { include: { segmento_venda: true } } } } } } },
     where: {
       status: "ATIVO",
-      vendedor: { excluido_em: null, status: "ATIVO", status_kyc: "APROVADO", usuario_id: userId },
+      vendedor: {
+        excluido_em: null,
+        status: "ATIVO",
+        status_kyc: "APROVADO",
+        usuario: { is: commercialTier2UserWhere },
+        usuario_id: userId,
+      },
     },
   });
   if (!courier) throw new AppError("Cadastre seu perfil de motoboy", 428);

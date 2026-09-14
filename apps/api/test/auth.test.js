@@ -266,9 +266,15 @@ test("app registration allows phone and address to be completed later", async ()
 
   assert.equal(locationResponse.status, 200);
   assert.equal(addressesResponse.status, 200);
-  assert.equal(addressesResponse.data.addresses[0].cidade, "Patos");
-  assert.equal(addressesResponse.data.addresses[0].estado, "PB");
-  assert.equal(addressesResponse.data.addresses[0].complete, false);
+  assert.equal(addressesResponse.data.addresses.length, 0);
+  assert.deepEqual(addressesResponse.data.marketplaceLocation, {
+    city: "Patos",
+    state: "PB",
+  });
+  assert.deepEqual(locationResponse.data.user.marketplaceLocation, {
+    city: "Patos",
+    state: "PB",
+  });
 });
 
 test("app login accepts a database user email", async () => {

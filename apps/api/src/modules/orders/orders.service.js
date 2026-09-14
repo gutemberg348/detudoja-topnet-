@@ -9,6 +9,8 @@ import { AppError } from "../../utils/errors.js";
 import { createOrdersRepository, ordersRepository } from "./orders.repository.js";
 import { parsePositiveId } from "../../utils/ids.js";
 import { formatMoney } from "../../utils/money.js";
+import { normalizeLocation, sameCity } from "../../utils/location.js";
+import { commercialTier2UserWhere } from "../../utils/commercial-access.js";
 import { settleCompletedStoreOrderEarnings } from "../earnings/order-earnings.service.js";
 import { assertStoreMonthlyCpfLimit } from "../earnings/commercial-limit.service.js";
 import {
@@ -30,7 +32,6 @@ import {
   serializeOrder,
   serializeOrderMessage,
 } from "./orders.serializer.js";
-import { defaultDeliveryFeeCents } from "./orders.config.js";
 import { assertStoreCanReceiveOrders } from "./store-opening-hours.js";
 import {
   getPaymentPolicy,
@@ -195,6 +196,7 @@ async function resolveDeliveryAddress(database, userId, data) {
         bairro: address.bairro,
         cep: formatCep(address.cep),
         cidade: address.cidade,
+        cidade_normalizada: normalizeLocation(address.cidade),
         complemento: address.complemento || null,
         estado: address.estado,
         nome_endereco: "Principal",
@@ -224,6 +226,7 @@ async function resolveDeliveryAddress(database, userId, data) {
       bairro: address.bairro,
       cep: formatCep(address.cep),
       cidade: address.cidade,
+      cidade_normalizada: normalizeLocation(address.cidade),
       complemento: address.complemento || null,
       estado: address.estado,
       nome_endereco: shouldBeMain ? "Principal" : "Entrega",
@@ -240,6 +243,7 @@ async function resolveStoreAndItems(storeId, requestedItems) {
   const productIds = [...new Set(requestedItems.map((item) => item.productId))];
   const store = await ordersRepository.findStore({
     include: {
+      endereco: true,
       categoria: {
         select: {
           negocia_pedido_por_chat: true,
@@ -280,7 +284,7 @@ async function resolveStoreAndItems(storeId, requestedItems) {
         is: {
           status: "ATIVO",
           status_kyc: "APROVADO",
-          usuario: { is: { excluido_em: null, status: "ATIVO" } },
+          usuario: { is: commercialTier2UserWhere },
         },
       },
       status: "ATIVA",
@@ -346,9 +350,17 @@ function assertUserCanBuyFromStore(userId, store) {
   }
 }
 
+function assertStoreMatchesLocation(store, location) {
+  if (!store.endereco || !sameCity(store.endereco, location)) {
+    throw new AppError("Esta loja atende outra cidade. Atualize sua localizacao de busca.", 409);
+  }
+}
+
 export async function createOnlineOrderRequest(userId, data, { idempotencyKey = null } = {}) {
   await ordersRepository.requireUserCpf(userId);
   const { items, store } = await resolveStoreAndItems(data.storeId, data.items);
+  const marketplaceLocation = await ordersRepository.requireUserMarketplaceLocation(userId);
+  assertStoreMatchesLocation(store, marketplaceLocation);
   assertUserCanBuyFromStore(userId, store);
   assertItemsSupportDeliveryMode(items, data.deliveryMode);
 
@@ -362,7 +374,7 @@ export async function createOnlineOrderRequest(userId, data, { idempotencyKey = 
 
   const subtotalCents = items.reduce((total, item) => total + item.totalCents, 0);
   const deliveryCents = data.deliveryMode === "delivery"
-    ? cents(store.taxa_entrega_centavos ?? defaultDeliveryFeeCents)
+    ? cents(store.taxa_entrega_centavos)
     : 0;
   const paymentPolicy = resolvePaymentPolicy({
     globalPolicy: await getPaymentPolicy(),
@@ -385,6 +397,7 @@ export async function createOnlineOrderRequest(userId, data, { idempotencyKey = 
     }
 
     const deliveryAddress = await resolveDeliveryAddress(database, userId, data);
+    if (deliveryAddress) assertStoreMatchesLocation(store, deliveryAddress);
     const snapshot = addressSnapshot(deliveryAddress, data.address?.referencia ?? "");
     await reserveOrderStock(database, items);
 
@@ -453,6 +466,7 @@ export async function createCheckoutOrder(userId, data, { idempotencyKey = null 
   const productIds = [...new Set(data.items.map((item) => item.productId))];
   const store = await ordersRepository.findStore({
     include: {
+      endereco: true,
       categoria: {
         select: {
           negocia_pedido_por_chat: true,
@@ -493,7 +507,7 @@ export async function createCheckoutOrder(userId, data, { idempotencyKey = null 
         is: {
           status: "ATIVO",
           status_kyc: "APROVADO",
-          usuario: { is: { excluido_em: null, status: "ATIVO" } },
+          usuario: { is: commercialTier2UserWhere },
         },
       },
       status: "ATIVA",
@@ -511,6 +525,8 @@ export async function createCheckoutOrder(userId, data, { idempotencyKey = null 
   }
 
   assertUserCanBuyFromStore(userId, store);
+  const marketplaceLocation = await ordersRepository.requireUserMarketplaceLocation(userId);
+  assertStoreMatchesLocation(store, marketplaceLocation);
 
   const negotiatesByChat = store.segmento_venda?.negocia_pedido_por_chat
     ?? store.categoria?.negocia_pedido_por_chat
@@ -545,7 +561,7 @@ export async function createCheckoutOrder(userId, data, { idempotencyKey = null 
   assertItemsSupportDeliveryMode(items, data.deliveryMode);
   const subtotalCents = items.reduce((total, item) => total + item.totalCents, 0);
   const deliveryCents = data.deliveryMode === "delivery"
-    ? cents(store.taxa_entrega_centavos ?? defaultDeliveryFeeCents)
+    ? cents(store.taxa_entrega_centavos)
     : 0;
   const paymentPolicy = resolvePaymentPolicy({
     globalPolicy: await getPaymentPolicy(),
@@ -595,6 +611,7 @@ export async function createCheckoutOrder(userId, data, { idempotencyKey = null 
     }
 
     const deliveryAddress = await resolveDeliveryAddress(database, userId, data);
+    if (deliveryAddress) assertStoreMatchesLocation(store, deliveryAddress);
     const snapshot = addressSnapshot(deliveryAddress, data.address?.referencia ?? "");
     await reserveOrderStock(database, items);
     await assertStoreMonthlyCpfLimit(database, store.id, totalCents);

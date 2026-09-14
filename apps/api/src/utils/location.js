@@ -27,6 +27,7 @@ export function addressData(address) {
     bairro: address.district,
     cep: String(address.zipCode ?? "").replace(/\D/g, ""),
     cidade: address.city.trim(),
+    cidade_normalizada: normalizeLocation(address.city),
     complemento: address.complement?.trim() || null,
     estado: address.state.trim().toUpperCase(),
     numero: address.number.trim(),
@@ -55,9 +56,29 @@ export async function requireUserBaseAddress(database, userId) {
   return address;
 }
 
+export async function requireUserMarketplaceLocation(database, userId) {
+  const user = await database.usuario.findUnique({
+    select: { cidade_busca: true, estado_busca: true },
+    where: { id: userId },
+  });
+
+  if (user?.cidade_busca && user?.estado_busca) {
+    return { cidade: user.cidade_busca, estado: user.estado_busca };
+  }
+
+  const address = await getUserBaseAddress(database, userId);
+  if (address?.cidade && address?.estado) return address;
+
+  throw new AppError("Escolha sua cidade para ver lojas e servicos disponiveis", 428);
+}
+
 export function cityAddressWhere(address, { userAddress = false } = {}) {
+  const city = String(address.cidade ?? address.city ?? "").trim();
   return {
-    cidade: { equals: address.cidade, mode: "insensitive" },
+    OR: [
+      { cidade_normalizada: normalizeLocation(city) },
+      { cidade: { equals: city, mode: "insensitive" } },
+    ],
     estado: String(address.estado).trim().toUpperCase(),
     ...(userAddress ? { excluido_em: null } : {}),
   };
