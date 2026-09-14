@@ -17,6 +17,26 @@ export function getAdminDashboard(accessToken) {
   return apiGet("/api/admin/dashboard", accessToken);
 }
 
+export function getAdministrators(accessToken) {
+  return apiGet("/api/admin/administrators", accessToken);
+}
+
+export function createAdministrator(accessToken, administrator) {
+  return apiRequest("/api/admin/administrators", {
+    body: administrator,
+    method: "POST",
+    token: accessToken,
+  });
+}
+
+export function updateAdministratorStatus(accessToken, administratorId, status) {
+  return apiRequest(`/api/admin/administrators/${administratorId}/status`, {
+    body: { status },
+    method: "PATCH",
+    token: accessToken,
+  });
+}
+
 export function getAdminKycSubmissions(accessToken, params) {
   return apiGet(withQuery("/api/admin/kyc/submissions", params), accessToken);
 }
@@ -99,6 +119,14 @@ export function updateAdminUserStatus(accessToken, userId, status) {
 export function updateAdminUser(accessToken, userId, user) {
   return apiRequest(`/api/admin/users/${userId}`, {
     body: user,
+    method: "PATCH",
+    token: accessToken,
+  });
+}
+
+export function updateAdminPayoutAccount(accessToken, userId, data) {
+  return apiRequest(`/api/admin/users/${userId}/payout-account`, {
+    body: data,
     method: "PATCH",
     token: accessToken,
   });

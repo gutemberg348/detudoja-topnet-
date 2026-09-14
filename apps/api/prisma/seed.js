@@ -92,6 +92,32 @@ async function seedAdmin() {
   });
 
   if (existingAdmin) {
+    if (process.env.ADMIN_SEED_UPDATE_EXISTING === "true") {
+      const passwordHash = await argon2.hash(password, {
+        memoryCost: 19456,
+        parallelism: 1,
+        timeCost: 2,
+        type: argon2.argon2id,
+      });
+      await prisma.$transaction([
+        prisma.administrador.update({
+          data: {
+            nome: name,
+            papel: "SUPER_ADMIN",
+            senha_hash: passwordHash,
+            status: "ATIVO",
+            telefone: phone,
+          },
+          where: { id: existingAdmin.id },
+        }),
+        prisma.sessaoAutenticacao.updateMany({
+          data: { revogada_em: new Date() },
+          where: { administrador_id: existingAdmin.id, revogada_em: null },
+        }),
+      ]);
+      console.log(`Administrador ${email} atualizado e sessoes anteriores revogadas.`);
+      return;
+    }
     console.log(`Administrador ${email} ja existe. Nenhuma senha foi alterada.`);
     return;
   }

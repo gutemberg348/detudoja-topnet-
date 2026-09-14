@@ -1,11 +1,15 @@
-import { BriefcaseBusiness, ChevronLeft, ChevronRight, Minus, Pencil, Plus, Search, ShieldCheck, UserRound, WalletCards, X } from "lucide-react";
+import { BriefcaseBusiness, Check, ChevronLeft, ChevronRight, KeyRound, Minus, Pencil, Plus, Search, ShieldCheck, UserRound, WalletCards, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
+  approveAdminKyc,
   getAdminUser,
   getAdminUsers,
   getAdminServiceTypes,
   addAdminUserService,
   adjustAdminUserWallet,
+  rejectAdminKyc,
+  revokeAdminKyc,
+  updateAdminPayoutAccount,
   updateAdminCourierProfile,
   updateAdminSellerProfile,
   updateAdminUser,
@@ -20,7 +24,9 @@ const dateFormatter = new Intl.DateTimeFormat("pt-BR", { dateStyle: "medium", ti
 
 export function ParticipantsPage({
   accessToken,
+  canManageKyc = false,
   canManageParticipantData = false,
+  canManagePayoutAccount = false,
   canManageProviderProfiles = false,
   canManageParticipantStatus = false,
   canManageWallet = false,
@@ -35,6 +41,9 @@ export function ParticipantsPage({
   const [creditForm, setCreditForm] = useState({ description: "Ajuste manual autorizado pelo administrador", operation: "CREDIT", value: "", walletCode: "saldo_pix" });
   const [serviceTypes, setServiceTypes] = useState([]);
   const [selectedServiceType, setSelectedServiceType] = useState("");
+  const [kycReason, setKycReason] = useState("");
+  const [payoutReason, setPayoutReason] = useState("");
+  const [payoutStatus, setPayoutStatus] = useState("ATIVA");
 
   const loadUsers = useCallback(async () => {
     setError("");
@@ -63,6 +72,9 @@ export function ParticipantsPage({
       setEditForm({ cpf: response.user.cpfValue ?? "", email: response.user.email ?? "", name: response.user.name ?? "", phone: response.user.phone ?? "" });
       setCreditForm({ description: "Ajuste manual autorizado pelo administrador", operation: "CREDIT", value: "", walletCode: "saldo_pix" });
       setSelectedServiceType("");
+      setKycReason("");
+      setPayoutReason("");
+      setPayoutStatus(response.user.payoutAccount?.status ?? "ATIVA");
       if (canManageProviderProfiles) {
         const services = await getAdminServiceTypes(accessToken);
         setServiceTypes(services.serviceTypes?.filter((service) => service.status === "ATIVO") ?? []);
@@ -170,6 +182,63 @@ export function ParticipantsPage({
     });
   }
 
+  async function refreshParticipant() {
+    const response = await getAdminUser(accessToken, selectedUser.id);
+    setSelectedUser(response.user);
+    setPayoutStatus(response.user.payoutAccount?.status ?? "ATIVA");
+    await loadUsers();
+  }
+
+  async function decideKyc(action) {
+    if (!selectedUser?.kycSubmission) {
+      setError("O participante ainda nao enviou os documentos KYC.");
+      return;
+    }
+    if (kycReason.trim().length < 8) {
+      setError("Explique a decisao KYC com pelo menos 8 caracteres.");
+      return;
+    }
+    setDetailLoading(true);
+    setError("");
+    try {
+      const work = action === "approve"
+        ? approveAdminKyc
+        : action === "revoke"
+          ? revokeAdminKyc
+          : rejectAdminKyc;
+      await work(accessToken, selectedUser.kycSubmission.id, kycReason.trim());
+      setKycReason("");
+      await refreshParticipant();
+    } catch (requestError) {
+      setError(requestError.message || "Nao foi possivel alterar o KYC.");
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  async function savePayoutStatus() {
+    if (!selectedUser?.payoutAccount) return;
+    if (payoutReason.trim().length < 8) {
+      setError("Explique a alteracao da chave Pix com pelo menos 8 caracteres.");
+      return;
+    }
+    setDetailLoading(true);
+    setError("");
+    try {
+      const response = await updateAdminPayoutAccount(accessToken, selectedUser.id, {
+        reason: payoutReason.trim(),
+        status: payoutStatus,
+      });
+      setSelectedUser(response.user);
+      setPayoutReason("");
+      await loadUsers();
+    } catch (requestError) {
+      setError(requestError.message || "Nao foi possivel alterar a chave Pix.");
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
   return (
     <div className="page-content">
       <header className="page-heading">
@@ -229,6 +298,7 @@ export function ParticipantsPage({
           <aside className="detail-drawer" onMouseDown={(event) => event.stopPropagation()}>
             <div className="drawer-header"><div><p className="eyebrow">Cadastro completo</p><h2>{selectedUser.name}</h2></div><button className="icon-button" onClick={() => setSelectedUser(null)} title="Fechar" type="button"><X size={19} /></button></div>
             <div className="detail-status"><StatusBadge status={selectedUser.status} /><StatusBadge status={selectedUser.kycStatus} /></div>
+            {error ? <div className="inline-error" role="alert">{error}</div> : null}
             <dl className="detail-list">
               <div><dt>E-mail</dt><dd>{selectedUser.email}</dd></div><div><dt>Telefone</dt><dd>{selectedUser.phone || "Não informado"}</dd></div>
               <div><dt>CPF</dt><dd>{selectedUser.cpf || "Não informado"}</dd></div><div><dt>Tipo de conta</dt><dd>{selectedUser.accountType}</dd></div>
@@ -244,6 +314,35 @@ export function ParticipantsPage({
                 <label>CPF<input onChange={(event) => setEditForm((current) => ({ ...current, cpf: event.target.value }))} value={editForm.cpf} /></label>
               </div>
               <button className="button button--secondary" disabled={detailLoading} onClick={saveUser} type="button"><Pencil size={16} /> Salvar dados</button>
+            </section> : null}
+            {canManageKyc ? <section className="admin-edit-panel">
+              <div className="admin-panel-heading"><div><p className="eyebrow">Compliance</p><h3>Controle manual do KYC</h3></div><ShieldCheck size={17} /></div>
+              {selectedUser.kycSubmission ? <>
+                <div className="detail-status"><StatusBadge status={selectedUser.kycSubmission.status} /><span>Envio #{selectedUser.kycSubmission.id}</span></div>
+                <label className="admin-edit-grid__wide">Motivo da decisao<textarea maxLength={1000} onChange={(event) => setKycReason(event.target.value)} placeholder="Descreva o que foi conferido ou o motivo do bloqueio" rows={3} value={kycReason} /></label>
+                <div className="modal__actions">
+                  {selectedUser.kycSubmission.status === "EM_ANALISE" ? <button className="button button--danger" disabled={detailLoading} onClick={() => decideKyc("reject")} type="button"><X size={16} /> Reprovar</button> : null}
+                  {["EM_ANALISE", "REPROVADO"].includes(selectedUser.kycSubmission.status) ? <button className="button button--primary" disabled={detailLoading} onClick={() => decideKyc("approve")} type="button"><Check size={16} /> {selectedUser.kycSubmission.status === "REPROVADO" ? "Reverter e aprovar" : "Aprovar e liberar Tier 2"}</button> : null}
+                  {selectedUser.kycSubmission.status === "APROVADO" ? <button className="button button--danger" disabled={detailLoading} onClick={() => decideKyc("revoke")} type="button"><X size={16} /> Revogar e bloquear</button> : null}
+                </div>
+              </> : <div className="kyc-decision"><strong>Sem envio de documentos</strong><p>O participante precisa enviar documento e selfie antes da aprovacao manual.</p></div>}
+            </section> : null}
+            {canManagePayoutAccount ? <section className="admin-edit-panel">
+              <div className="admin-panel-heading"><div><p className="eyebrow">Recebimento</p><h3>Chave Pix do participante</h3></div><KeyRound size={17} /></div>
+              {selectedUser.payoutAccount ? <>
+                <dl className="detail-list">
+                  <div><dt>Chave</dt><dd>{selectedUser.payoutAccount.keyValue || selectedUser.payoutAccount.keyMasked}</dd></div>
+                  <div><dt>Tipo</dt><dd>{selectedUser.payoutAccount.keyType}</dd></div>
+                  <div><dt>Titular</dt><dd>{selectedUser.payoutAccount.holderName}</dd></div>
+                  <div><dt>Status atual</dt><dd><StatusBadge status={selectedUser.payoutAccount.status} /></dd></div>
+                </dl>
+                <div className="admin-edit-grid">
+                  <label>Status<select disabled={detailLoading} onChange={(event) => setPayoutStatus(event.target.value)} value={payoutStatus}><option value="ATIVA">Ativa / liberada</option><option value="INATIVA">Inativa</option><option value="BLOQUEADA">Bloqueada</option><option value="REPROVADA">Reprovada</option></select></label>
+                  <label className="admin-edit-grid__wide">Motivo<input maxLength={500} onChange={(event) => setPayoutReason(event.target.value)} placeholder="Motivo da liberacao ou bloqueio" value={payoutReason} /></label>
+                  <button className="button button--secondary admin-edit-grid__wide" disabled={detailLoading} onClick={savePayoutStatus} type="button"><Check size={16} /> Salvar situacao da chave</button>
+                </div>
+                <p className="table-secondary">A liberacao manual fica registrada com administrador, data e motivo. Ela nao substitui o KYC Tier 2 exigido para vender.</p>
+              </> : <div className="kyc-decision"><strong>Nenhuma chave cadastrada</strong><p>O participante deve cadastrar a chave no aplicativo; depois ela podera ser liberada aqui.</p></div>}
             </section> : null}
             {canManageWallet ? <section className="admin-edit-panel admin-edit-panel--credit">
               <div className="admin-panel-heading"><div><p className="eyebrow">Financeiro auditado</p><h3>Ajustar saldo</h3></div><WalletCards size={17} /></div>

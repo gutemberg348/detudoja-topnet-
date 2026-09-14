@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { adminAuthRoutes } from "./admin-auth.routes.js";
+import { adminAdministratorsRoutes } from "./admin-administrators.routes.js";
 import { adminBonusRoutes } from "./admin-bonus.routes.js";
 import { adminCategoriesRoutes } from "./admin-categories.routes.js";
 import { adminDashboardRoutes } from "./admin-dashboard.routes.js";
@@ -30,6 +31,7 @@ const financialRoles = ["super_admin", "admin", "financeiro"];
 const complianceRoles = ["super_admin", "admin", "compliance", "kyc"];
 
 adminRoutes.use("/dashboard", roleMiddleware(...anyActiveAdmin), adminDashboardRoutes);
+adminRoutes.use("/administrators", roleMiddleware("super_admin"), adminAdministratorsRoutes);
 adminRoutes.use("/users", roleMiddleware(...operationsRoles, "financeiro", "compliance", "kyc"), adminUsersRoutes);
 adminRoutes.use("/categories", roleMiddleware(...operationsRoles), adminCategoriesRoutes);
 adminRoutes.use("/segments", roleMiddleware(...operationsRoles), adminSegmentsRoutes);

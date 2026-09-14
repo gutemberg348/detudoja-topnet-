@@ -178,6 +178,7 @@ categorias de loja e nao transformam toda a area comercial em chat.
 | `src/pages/CategoriesPage.jsx` | CRUD de categorias |
 | `src/pages/SegmentsPage.jsx` | CRUD de segmentos de venda |
 | `src/pages/SettingsPage.jsx` | suporte e ganhos/taxas da plataforma |
+| `src/pages/AdministratorsPage.jsx` | cadastro e bloqueio de acessos administrativos pelo super admin |
 | `src/components/Brand.jsx` | marca reutilizavel |
 | `src/components/StatusBadge.jsx` | badges de situacao |
 | `src/components/PageState.jsx` | carregamento e erro |

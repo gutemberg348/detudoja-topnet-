@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { prisma } from "../src/config/prisma.js";
+import { approveKycSubmission } from "../src/modules/kyc/kyc.service.js";
 import {
   addAdminUserService,
+  updateAdminPayoutAccount,
   updateAdminSellerProfile,
   updateAdminUserService,
 } from "../src/modules/admin/admin-users.service.js";
@@ -19,6 +21,7 @@ async function cleanup() {
   await prisma.$transaction(async (database) => {
     if (admin) await database.auditoriaAdministrativa.deleteMany({ where: { administrador_id: admin.id } });
     if (user) {
+      await database.contaBancaria.deleteMany({ where: { usuario_id: user.id } });
       await database.servicoVendedor.deleteMany({ where: { vendedor: { usuario_id: user.id } } });
       await database.vendedor.deleteMany({ where: { usuario_id: user.id } });
       await database.kycUsuario.deleteMany({ where: { usuario_id: user.id } });
@@ -98,4 +101,65 @@ test("admin only releases a provider service after KYC and records every operati
     "SERVICO_PRESTADOR_ATUALIZADO",
     "PERFIL_PRESTADOR_ATUALIZADO",
   ]);
+});
+
+test("admin can release a registered payout key and the override is audited", async () => {
+  const account = await prisma.contaBancaria.create({
+    data: {
+      chave_pix: state.user.cpf,
+      documento_titular: state.user.cpf,
+      nome_titular: state.user.nome,
+      principal: true,
+      status: "PENDENTE",
+      tipo_chave: "CPF",
+      usuario_id: state.user.id,
+    },
+  });
+
+  const result = await updateAdminPayoutAccount(state.admin.id, state.user.id, {
+    reason: "Titularidade conferida manualmente pelo financeiro.",
+    status: "ATIVA",
+  });
+
+  assert.equal(result.user.payoutAccount.status, "ATIVA");
+  assert.equal(result.user.payoutAccount.validationProvider, "ADMIN_MANUAL");
+  const stored = await prisma.contaBancaria.findUniqueOrThrow({ where: { id: account.id } });
+  assert.equal(stored.status, "ATIVA");
+  assert.ok(stored.validado_em);
+
+  const audit = await prisma.auditoriaAdministrativa.findFirst({
+    orderBy: { id: "desc" },
+    where: { acao: "CHAVE_PIX_STATUS_ATUALIZADO", usuario_alvo_id: state.user.id },
+  });
+  assert.equal(audit.administrador_id, state.admin.id);
+  assert.equal(audit.dados_json.statusAnterior, "PENDENTE");
+  assert.equal(audit.dados_json.statusNovo, "ATIVA");
+});
+
+test("admin can reverse a rejected KYC after manually reviewing the documents", async () => {
+  const kyc = await prisma.kycUsuario.update({
+    data: { motivo_reprovacao: "Triagem automatica inconclusiva", status: "REPROVADO", validado_em: null },
+    where: { usuario_id: state.user.id },
+  });
+  await prisma.usuario.update({ data: { nivel_kyc: "REPROVADO" }, where: { id: state.user.id } });
+  const submission = await prisma.solicitacaoKyc.create({
+    data: {
+      kyc_usuario_id: kyc.id,
+      motivo_decisao: "Reprovado automaticamente para revisao.",
+      status: "REPROVADO",
+      tipo_documento: "RG",
+      triagem_json: { automaticResult: "REPROVADO", processingStatus: "CONCLUIDO", version: 5 },
+    },
+  });
+
+  const result = await approveKycSubmission(
+    state.admin.id,
+    submission.id,
+    "Documentos e titularidade revisados manualmente.",
+  );
+  assert.equal(result.submission.status, "APROVADO");
+
+  const user = await prisma.usuario.findUniqueOrThrow({ include: { kyc: true }, where: { id: state.user.id } });
+  assert.equal(user.kyc.status, "APROVADO");
+  assert.equal(user.nivel_kyc, "TIER_2");
 });

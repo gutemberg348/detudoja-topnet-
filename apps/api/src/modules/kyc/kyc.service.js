@@ -227,10 +227,18 @@ async function decideSubmission(adminId, submissionValue, reason, status) {
   await kycRepository.transaction(async (repository) => {
     const submission = await repository.findSubmission(submissionId);
     if (!submission) throw new AppError("Solicitacao KYC nao encontrada", 404);
-    if (submission.status !== "EM_ANALISE") throw new AppError("Esta solicitacao ja foi analisada", 409);
+    const allowedStatuses = status === "APROVADO"
+      ? ["EM_ANALISE", "REPROVADO"]
+      : ["EM_ANALISE"];
+    if (!allowedStatuses.includes(submission.status)) {
+      throw new AppError("Esta solicitacao nao permite essa decisao", 409);
+    }
     const data = { adminId, reason, submissionId, userId: submission.kyc_usuario.usuario.id };
     if (status === "APROVADO") {
-      const decided = await repository.markKycApproved(data);
+      const decided = await repository.markKycApproved({
+        ...data,
+        allowedStatuses,
+      });
       if (!decided) throw new AppError("Esta solicitacao ja foi analisada", 409);
       await repository.activateIndication(data.userId);
     } else {

@@ -2,9 +2,26 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   adjustAdminUserWalletSchema,
+  createAdministratorSchema,
   moveAdminNetworkPlacementSchema,
   updateAdminWalletTypeSchema,
 } from "../src/modules/admin/admin.validator.js";
+
+test("administrator registration requires a valid role and strong initial password", () => {
+  assert.equal(createAdministratorSchema.safeParse({
+    email: "novo-admin@brasilcashback.local",
+    name: "Novo Administrador",
+    password: "senha-inicial-segura",
+    phone: "11999990000",
+    role: "FINANCEIRO",
+  }).success, true);
+  assert.equal(createAdministratorSchema.safeParse({
+    email: "email-invalido",
+    name: "Admin",
+    password: "curta",
+    role: "DONO",
+  }).success, false);
+});
 
 test("admin wallet adjustment requires an explicit operation and reason", () => {
   const debit = adjustAdminUserWalletSchema.safeParse({

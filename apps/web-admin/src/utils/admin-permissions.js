@@ -1,4 +1,5 @@
 const permissionsByPage = {
+  administrators: ["super_admin"],
   categories: ["super_admin", "admin", "operacoes"],
   dashboard: ["super_admin", "admin", "operacoes", "suporte", "financeiro", "compliance", "kyc"],
   kyc: ["super_admin", "admin", "compliance", "kyc"],
@@ -51,4 +52,12 @@ export function canManageProviderProfiles(role) {
 
 export function canManageParticipantStatus(role) {
   return ["super_admin", "admin", "compliance", "kyc"].includes(String(role ?? "").toLowerCase());
+}
+
+export function canManageKyc(role) {
+  return ["super_admin", "admin", "compliance", "kyc"].includes(String(role ?? "").toLowerCase());
+}
+
+export function canManagePayoutAccount(role) {
+  return ["super_admin", "admin", "financeiro"].includes(String(role ?? "").toLowerCase());
 }

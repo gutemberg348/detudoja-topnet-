@@ -6,6 +6,7 @@ import {
   listAdminUsersController,
   creditAdminUserWalletController,
   updateAdminUserController,
+  updateAdminPayoutAccountController,
   updateAdminCourierProfileController,
   updateAdminSellerProfileController,
   updateAdminUserServiceController,
@@ -20,6 +21,7 @@ import {
   updateAdminSellerProfileSchema,
   updateAdminUserServiceSchema,
   updateAdminUserStatusSchema,
+  updateAdminPayoutAccountSchema,
 } from "../modules/admin/admin.validator.js";
 import { validate } from "../middlewares/validate.middleware.js";
 import { roleMiddleware } from "../middlewares/role.middleware.js";
@@ -33,6 +35,12 @@ adminUsersRoutes.patch(
   roleMiddleware("super_admin", "admin", "operacoes"),
   validate(updateAdminUserSchema),
   updateAdminUserController,
+);
+adminUsersRoutes.patch(
+  "/:userId/payout-account",
+  roleMiddleware("super_admin", "admin", "financeiro"),
+  validate(updateAdminPayoutAccountSchema),
+  updateAdminPayoutAccountController,
 );
 adminUsersRoutes.post(
   "/:userId/wallet-adjustment",

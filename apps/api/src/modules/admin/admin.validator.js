@@ -1,5 +1,17 @@
 import { z } from "zod";
 
+export const createAdministratorSchema = z.object({
+  email: z.string().trim().email("Informe um e-mail valido").max(255),
+  name: z.string().trim().min(2, "Informe o nome do administrador").max(160),
+  password: z.string().min(12, "A senha inicial precisa ter pelo menos 12 caracteres").max(128),
+  phone: z.string().trim().max(30).optional().or(z.literal("")),
+  role: z.enum(["SUPER_ADMIN", "ADMIN", "OPERACOES", "SUPORTE", "FINANCEIRO", "COMPLIANCE", "KYC"]),
+}).strict();
+
+export const updateAdministratorStatusSchema = z.object({
+  status: z.enum(["ATIVO", "INATIVO", "BLOQUEADO"]),
+}).strict();
+
 const feePercentSchema = z.coerce
   .number()
   .min(0, "A taxa nao pode ser negativa")
@@ -97,6 +109,11 @@ export const updateAdminServiceTypeSchema = z
 export const updateAdminUserStatusSchema = z.object({
   status: z.enum(["ATIVO", "INATIVO", "BLOQUEADO", "PENDENTE"]),
 });
+
+export const updateAdminPayoutAccountSchema = z.object({
+  reason: z.string().trim().min(8, "Explique a alteracao com pelo menos 8 caracteres").max(500),
+  status: z.enum(["ATIVA", "INATIVA", "BLOQUEADA", "REPROVADA"]),
+}).strict();
 
 export const updateAdminUserSchema = z
   .object({

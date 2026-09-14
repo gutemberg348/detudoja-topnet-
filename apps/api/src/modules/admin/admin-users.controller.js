@@ -5,11 +5,20 @@ import {
   listAdminUsers,
   creditAdminUserWallet,
   updateAdminUser,
+  updateAdminPayoutAccount,
   updateAdminCourierProfile,
   updateAdminSellerProfile,
   updateAdminUserService,
   updateAdminUserStatus,
 } from "./admin-users.service.js";
+
+export async function updateAdminPayoutAccountController(req, res, next) {
+  try {
+    res.json(await updateAdminPayoutAccount(req.auth.user.id, req.params.userId, req.body));
+  } catch (error) {
+    next(error);
+  }
+}
 
 export async function adjustAdminUserWalletController(req, res, next) {
   try {

@@ -12,6 +12,19 @@ function maskCpf(cpf) {
   return `***.***.***-${cpf.slice(-2)}`;
 }
 
+function maskPixKey(type, value) {
+  if (!value) return null;
+  if (["CPF", "CNPJ", "TELEFONE"].includes(type)) {
+    const digits = value.replace(/\D/g, "");
+    return digits.length > 4 ? `${"*".repeat(digits.length - 4)}${digits.slice(-4)}` : value;
+  }
+  if (type === "EMAIL") {
+    const [name, domain] = value.split("@");
+    return domain ? `${name.slice(0, 2)}***@${domain}` : value;
+  }
+  return value.length > 8 ? `${value.slice(0, 4)}...${value.slice(-4)}` : value;
+}
+
 function sumWalletBalance(wallets) {
   return wallets.reduce(
     (total, wallet) =>
@@ -24,6 +37,8 @@ function sumWalletBalance(wallets) {
 }
 
 export function serializeAdminUser(user, { includeSensitive = false } = {}) {
+  const payoutAccount = user.contas_bancarias?.[0] ?? null;
+  const latestKycSubmission = user.kyc?.solicitacoes?.[0] ?? null;
   return {
     accountType: user.tipo_conta,
     adminActions: (user.auditorias_administrativas ?? []).map((audit) => ({
@@ -42,10 +57,31 @@ export function serializeAdminUser(user, { includeSensitive = false } = {}) {
     id: user.id,
     kycLevel: user.nivel_kyc,
     kycStatus: user.kyc?.status ?? "PENDENTE",
+    kycSubmission: latestKycSubmission
+      ? {
+          analyzedAt: latestKycSubmission.analisado_em?.toISOString() ?? null,
+          id: latestKycSubmission.id,
+          status: latestKycSubmission.status,
+          submittedAt: latestKycSubmission.enviado_em.toISOString(),
+        }
+      : null,
     lastLoginAt: user.ultimo_login_em?.toISOString() ?? null,
     name: user.nome,
     phone: user.telefone,
     phoneVerified: user.telefone_verificado,
+    payoutAccount: payoutAccount
+      ? {
+          holderDocument: maskCpf(payoutAccount.documento_titular),
+          holderName: payoutAccount.nome_titular,
+          id: payoutAccount.id,
+          keyMasked: maskPixKey(payoutAccount.tipo_chave, payoutAccount.chave_pix),
+          ...(includeSensitive ? { keyValue: payoutAccount.chave_pix } : {}),
+          keyType: payoutAccount.tipo_chave,
+          status: payoutAccount.status,
+          validatedAt: payoutAccount.validado_em?.toISOString() ?? null,
+          validationProvider: payoutAccount.provedor_validacao,
+        }
+      : null,
     providerProfile: serializeProviderProfile(user),
     profiles: deriveUserProfiles(user),
     status: user.status,

@@ -78,7 +78,7 @@ TransacaoComercial
 ### `auditorias_administrativas`
 
 - Finalidade: trilha imutavel das acoes operacionais do painel sobre um
-  participante: conta, prestador, motoboy e servicos.
+  participante: conta, chave Pix, prestador, motoboy e servicos.
 - Chave primaria: `id` inteiro auto-incremental.
 - FKs: `administrador_id -> administradores` com `Restrict`; `usuario_alvo_id
   -> usuarios` com `SetNull`, para preservar o registro se uma conta for

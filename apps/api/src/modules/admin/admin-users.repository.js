@@ -7,7 +7,19 @@ const userInclude = {
     take: 12,
   },
   carteiras: { include: { tipo_carteira: true } },
-  kyc: true,
+  contas_bancarias: {
+    orderBy: [{ principal: "desc" }, { atualizado_em: "desc" }],
+    take: 1,
+    where: { excluido_em: null },
+  },
+  kyc: {
+    include: {
+      solicitacoes: {
+        orderBy: { enviado_em: "desc" },
+        take: 1,
+      },
+    },
+  },
   lojista: true,
   vendedor: {
     include: {

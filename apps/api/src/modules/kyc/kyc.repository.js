@@ -145,11 +145,11 @@ export function createKycRepository(database = prisma) {
       });
     },
 
-    async markKycApproved({ adminId, reason, submissionId, userId }) {
+    async markKycApproved({ adminId, allowedStatuses = ["EM_ANALISE"], reason, submissionId, userId }) {
       const now = new Date();
       const decision = await database.solicitacaoKyc.updateMany({
           data: { analisado_em: now, analisado_por_admin_id: adminId, motivo_decisao: reason, status: "APROVADO" },
-          where: { id: submissionId, status: "EM_ANALISE" },
+          where: { id: submissionId, status: { in: allowedStatuses } },
         });
       if (decision.count === 0) return false;
       await Promise.all([

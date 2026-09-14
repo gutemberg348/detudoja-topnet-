@@ -154,6 +154,51 @@ export async function updateAdminUser(userId, data) {
   return getAdminUser(parsedUserId);
 }
 
+export async function updateAdminPayoutAccount(adminId, userId, data) {
+  const parsedUserId = parsePositiveId(userId, "Participante invalido");
+  await adminUsersRepository.transaction(async (database) => {
+    const user = await findProviderParticipant(database, parsedUserId);
+    const account = await database.contaBancaria.findFirst({
+      orderBy: [{ principal: "desc" }, { atualizado_em: "desc" }],
+      where: { excluido_em: null, usuario_id: user.id },
+    });
+    if (!account?.chave_pix || !account.tipo_chave) {
+      throw new AppError("O participante ainda nao cadastrou uma chave Pix", 409);
+    }
+    if (data.status === "ATIVA" && user.status !== "ATIVO") {
+      throw new AppError("Ative a conta do participante antes de liberar a chave Pix", 409);
+    }
+
+    if (data.status === "ATIVA") {
+      await database.contaBancaria.updateMany({
+        data: { principal: false },
+        where: { id: { not: account.id }, principal: true, usuario_id: user.id },
+      });
+    }
+    await database.contaBancaria.update({
+      data: {
+        principal: true,
+        provedor_validacao: data.status === "ATIVA" ? "ADMIN_MANUAL" : account.provedor_validacao,
+        status: data.status,
+        validado_em: data.status === "ATIVA" ? new Date() : null,
+      },
+      where: { id: account.id },
+    });
+    await adminUsersRepository.createAudit(database, {
+      acao: "CHAVE_PIX_STATUS_ATUALIZADO",
+      administrador_id: adminId,
+      dados_json: {
+        contaBancariaId: account.id,
+        motivo: data.reason,
+        statusAnterior: account.status,
+        statusNovo: data.status,
+      },
+      usuario_alvo_id: user.id,
+    });
+  });
+  return getAdminUser(parsedUserId);
+}
+
 export async function creditAdminUserWallet(adminId, userId, data) {
   return adjustAdminUserWallet(adminId, userId, { ...data, operation: "CREDIT" });
 }

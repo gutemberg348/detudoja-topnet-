@@ -1,5 +1,33 @@
 # Sistema DeTudoJa
 
+## Atualizacao 2026-09-14: cadastro de administradores
+
+O painel ganhou a area `Acessos / Administradores`, visivel somente para
+`SUPER_ADMIN`. Ela permite criar uma conta administrativa com nome, e-mail,
+telefone opcional, senha inicial e papel, alem de ativar, inativar ou bloquear
+outros administradores. Nao existe cadastro publico de admin.
+
+As senhas sao armazenadas com Argon2id, e-mail e telefone duplicados recebem
+mensagens especificas, a propria conta nao pode ser desativada e o bloqueio
+revoga as sessoes abertas. Criacao e mudanca de status ficam registradas em
+`auditorias_administrativas`.
+
+## Atualizacao 2026-09-14: KYC e chave Pix no cadastro administrativo
+
+O detalhe do participante no painel agora permite que os papeis autorizados:
+
+- aprovem ou reprovem um envio KYC em analise, revoguem um KYC aprovado e
+  revertam uma rejeicao depois da conferencia manual; a aprovacao sincroniza o
+  usuario em `TIER_2` e os perfis comerciais;
+- consultem a chave Pix cadastrada e alterem sua situacao para ativa, inativa,
+  bloqueada ou reprovada. A ativacao manual exige conta de usuario ativa;
+- registrem uma justificativa de pelo menos oito caracteres. Mudancas da chave
+  geram `CHAVE_PIX_STATUS_ATUALIZADO` em `auditorias_administrativas`.
+
+A chave continua sendo cadastrada pelo titular no aplicativo. O override
+administrativo libera somente uma chave existente e nao remove a exigencia de
+KYC `TIER_2` para vendas e prestacao de servicos.
+
 ## Atualizacao 2026-09-04: controle operacional de participantes no admin
 
 O detalhe de cada participante no painel administrativo passou a concentrar
@@ -16,10 +44,9 @@ cadastro, carteiras e perfil comercial. Os comandos sao separados por papel:
 - Liberar um servico exige conta ativa, CPF e KYC `APROVADO`. Servico de
   entrega local exige tambem perfil de motoboy ativo. A liberacao nao coloca o
   profissional online: ele ainda precisa enviar heartbeat pelo app.
-- KYC continua decidido exclusivamente na fila `Compliance / KYC`, com os
-  documentos, justificativa e administrador responsavel. A decisao sincroniza
-  o status KYC de lojista e vendedor; ela nao pode ser substituida por um
-  simples botao operacional.
+- KYC e decidido na fila `Compliance / KYC` ou no controle do detalhe do
+  participante, sempre sobre um envio de documentos existente e com
+  justificativa. A decisao sincroniza o status KYC de lojista e vendedor.
 
 A tabela `auditorias_administrativas` registra alteracoes de conta, prestador,
 motoboy e servicos com administrador, participante, acao, dados e data. A

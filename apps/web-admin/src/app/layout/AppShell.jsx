@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { Brand } from "../../components/Brand";
+import { AdministratorsPage } from "../../pages/AdministratorsPage";
 import { CategoriesPage } from "../../pages/CategoriesPage";
 import { DashboardPage } from "../../pages/DashboardPage";
 import { KycPage } from "../../pages/KycPage";
@@ -34,6 +35,8 @@ import {
   canManageParticipantData,
   canManageProviderProfiles,
   canManageParticipantStatus,
+  canManageKyc,
+  canManagePayoutAccount,
   canManageWallet,
   canManageNetwork,
   canRefundPayments,
@@ -42,6 +45,7 @@ import {
 } from "../../utils/admin-permissions";
 
 const pages = {
+  administrators: { component: AdministratorsPage, context: "Sistema", icon: UsersRound, label: "Administradores" },
   categories: { component: CategoriesPage, context: "Comercial", icon: Tags, label: "Categorias" },
   payments: { component: PaymentsPage, context: "Financeiro", icon: ReceiptText, label: "Pagamentos" },
   dashboard: { component: DashboardPage, context: "Operação", icon: LayoutDashboard, label: "Visão geral" },
@@ -82,6 +86,10 @@ const navigationGroups = [
       { icon: WalletCards, id: "wallets", label: "Carteiras" },
       { icon: WalletCards, id: "withdrawals", label: "Saques" },
     ],
+  },
+  {
+    label: "Acessos",
+    items: [{ icon: UsersRound, id: "administrators", label: "Administradores" }],
   },
   {
     label: "Sistema",
@@ -194,6 +202,7 @@ export function AppShell({ onLogout, session }) {
         <main>
       <ActivePage
             accessToken={session.accessToken}
+            currentAdminId={session.user.id}
             canManageWallet={canManageWallet(session.user.role)}
             canManageNetwork={canManageNetwork(session.user.role)}
             canRefundPayments={canRefundPayments(session.user.role)}
@@ -201,6 +210,8 @@ export function AppShell({ onLogout, session }) {
             canManageParticipantData={canManageParticipantData(session.user.role)}
             canManageProviderProfiles={canManageProviderProfiles(session.user.role)}
             canManageParticipantStatus={canManageParticipantStatus(session.user.role)}
+            canManageKyc={canManageKyc(session.user.role)}
+            canManagePayoutAccount={canManagePayoutAccount(session.user.role)}
             canManageSupport={canManageSupport(session.user.role)}
             canManageWithdrawals={canManageWithdrawals(session.user.role)}
             onNavigate={navigate}
