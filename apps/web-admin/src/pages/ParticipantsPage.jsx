@@ -1,4 +1,4 @@
-import { BriefcaseBusiness, Check, ChevronLeft, ChevronRight, KeyRound, Minus, Pencil, Plus, Search, ShieldCheck, UserRound, WalletCards, X } from "lucide-react";
+import { BriefcaseBusiness, Check, ChevronLeft, ChevronRight, KeyRound, Minus, Pencil, Plus, Search, ShieldAlert, ShieldCheck, UserRound, WalletCards, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
   activateAllAdminUserServices,
@@ -374,23 +374,33 @@ export function ParticipantsPage({
                 <button className="button button--secondary admin-edit-grid__wide" disabled={detailLoading} type="submit"><ShieldCheck size={16} /> Redefinir senha e encerrar sessoes</button>
               </form>
             </section> : null}
-            {canManageKyc ? <section className="admin-edit-panel">
+            {canManageKyc ? <section className="admin-edit-panel admin-edit-panel--kyc">
               <div className="admin-panel-heading"><div><p className="eyebrow">Compliance</p><h3>Controle manual do KYC</h3></div><ShieldCheck size={17} /></div>
               {selectedUser.kycSubmission ? <>
                 <div className="detail-status"><StatusBadge status={selectedUser.kycSubmission.status} /><span>Envio #{selectedUser.kycSubmission.id}</span></div>
-                <label className="admin-edit-grid__wide">Motivo da decisao<textarea maxLength={1000} onChange={(event) => setKycReason(event.target.value)} placeholder="Descreva o que foi conferido ou o motivo do bloqueio" rows={3} value={kycReason} /></label>
+                <label className="kyc-reason">Motivo da decisao<textarea maxLength={1000} onChange={(event) => setKycReason(event.target.value)} placeholder="Descreva o que foi conferido ou o motivo do bloqueio" rows={3} value={kycReason} /></label>
                 <div className="modal__actions">
                   {selectedUser.kycSubmission.status === "EM_ANALISE" ? <button className="button button--danger" disabled={detailLoading} onClick={() => decideKyc("reject")} type="button"><X size={16} /> Reprovar</button> : null}
                   {["EM_ANALISE", "REPROVADO"].includes(selectedUser.kycSubmission.status) ? <button className="button button--primary" disabled={detailLoading} onClick={() => decideKyc("approve")} type="button"><Check size={16} /> {selectedUser.kycSubmission.status === "REPROVADO" ? "Reverter e aprovar" : "Aprovar e liberar Tier 2"}</button> : null}
                   {selectedUser.kycSubmission.status === "APROVADO" ? <button className="button button--danger" disabled={detailLoading} onClick={() => decideKyc("revoke")} type="button"><X size={16} /> Revogar e bloquear</button> : null}
                 </div>
               </> : <>
-                <div className="kyc-decision"><strong>Sem envio de documentos</strong><p>Esta sera uma aprovacao administrativa excepcional, sem fotos para conferencia.</p></div>
-                <div className="detail-status"><StatusBadge status={selectedUser.kycStatus} /><span>{selectedUser.kycLevel}</span></div>
-                {selectedUser.kycStatus !== "APROVADO" ? <>
-                  <label className="admin-edit-grid__wide">Motivo da excecao<textarea maxLength={1000} onChange={(event) => setKycReason(event.target.value)} placeholder="Explique por que o KYC sera liberado sem documentos" rows={3} value={kycReason} /></label>
-                  <button className="button button--primary" disabled={detailLoading} onClick={approveKycWithoutDocuments} type="button"><Check size={16} /> Aprovar sem documentos e liberar Tier 2</button>
-                </> : null}
+                <div className="kyc-exception-alert">
+                  <span className="kyc-exception-alert__icon"><ShieldAlert size={21} /></span>
+                  <div><small>EXCECAO ADMINISTRATIVA</small><strong>Participante sem documentos enviados</strong><p>A liberacao manual nao possui fotos para conferencia. Use somente quando a identidade tiver sido validada por outro meio.</p></div>
+                </div>
+                <div className="kyc-exception-status">
+                  <div><small>Status da verificacao</small><strong>{selectedUser.kycStatus === "APROVADO" ? "Identidade liberada manualmente" : "Identidade ainda nao verificada"}</strong></div>
+                  <div className="kyc-exception-status__badges"><StatusBadge status={selectedUser.kycStatus} /><span>{selectedUser.kycLevel}</span></div>
+                </div>
+                {selectedUser.kycStatus !== "APROVADO" ? <div className="kyc-exception-form">
+                  <label className="kyc-reason">
+                    Justificativa obrigatoria
+                    <textarea maxLength={1000} onChange={(event) => setKycReason(event.target.value)} placeholder="Informe como a identidade foi confirmada e por que a liberacao manual foi autorizada." rows={4} value={kycReason} />
+                    <small>Minimo de 8 caracteres. A justificativa e o administrador ficam registrados na auditoria.</small>
+                  </label>
+                  <button className="button button--primary kyc-exception-submit" disabled={detailLoading} onClick={approveKycWithoutDocuments} type="button"><Check size={18} /><span><strong>{detailLoading ? "Liberando KYC..." : "Aprovar KYC e liberar Tier 2"}</strong><small>Confirmar excecao administrativa</small></span></button>
+                </div> : null}
               </>}
             </section> : null}
             {canManagePayoutAccount ? <section className="admin-edit-panel">

@@ -1,9 +1,12 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { AppButton } from "../components/AppButton";
 import { PageHeader } from "../components/PageHeader";
 import { ScreenContainer } from "../components/ScreenContainer";
+import { trackStoreConversationActivity } from "../services/store-chats.api";
+import { useAuthStore } from "../stores/useAuthStore";
+import { useCartStore } from "../stores/useCartStore";
 import {
   cartSubtotalCents,
   normalizeCart,
@@ -20,25 +23,46 @@ import {
 } from "../utils/theme";
 
 export function CartScreen({ navigation, route }) {
-  const cart = normalizeCart(route.params);
-  const [items, setItems] = useState(cart.items);
+  const { session } = useAuthStore();
+  const routeCart = normalizeCart(route.params);
+  const routeConversationId = route.params?.conversationId ?? null;
+  const {
+    conversationId,
+    items,
+    removeItem,
+    setCart,
+    store,
+    updateItemQuantity,
+  } = useCartStore();
+
+  useEffect(() => {
+    if (!items.length && routeCart.items.length) {
+      setCart({
+        conversationId: routeConversationId,
+        items: routeCart.items,
+        store: routeCart.store,
+      });
+    }
+  }, []);
+
   const subtotalCents = useMemo(() => cartSubtotalCents(items), [items]);
-  const negotiatesByChat = storeUsesChatNegotiation(cart.store);
+  const negotiatesByChat = storeUsesChatNegotiation(store);
 
   function updateQuantity(itemId, quantity) {
-    setItems((currentItems) =>
-      currentItems
-        .map((item) =>
-          item.id === itemId
-            ? { ...item, quantity: Math.max(1, Math.min(quantity, 99)) }
-            : item,
-        )
-        .filter((item) => item.quantity > 0),
-    );
+    updateItemQuantity(itemId, quantity);
   }
 
-  function removeItem(itemId) {
-    setItems((currentItems) => currentItems.filter((item) => item.id !== itemId));
+  function continuePurchase() {
+    if (conversationId && session?.accessToken) {
+      void trackStoreConversationActivity(session.accessToken, conversationId, {
+        action: "START_CHECKOUT",
+      }).catch(() => {});
+    }
+    navigation.navigate("Checkout", {
+      conversationId,
+      items,
+      store,
+    });
   }
 
   return (
@@ -46,8 +70,8 @@ export function CartScreen({ navigation, route }) {
       <PageHeader
         subtitle={
           negotiatesByChat
-            ? `${cart.store?.name ?? "Loja"} - selecao para enviar no chat`
-            : `${cart.store?.name ?? "Loja"} - revise antes de continuar`
+            ? `${store?.name ?? "Loja"} - selecao para enviar no chat`
+            : `${store?.name ?? "Loja"} - revise antes de continuar`
         }
         title="Seu pedido"
       />
@@ -83,12 +107,7 @@ export function CartScreen({ navigation, route }) {
         <AppButton
           disabled={!items.length}
           icon="arrow-forward"
-          onPress={() =>
-            navigation.navigate("Checkout", {
-              items,
-              store: cart.store,
-            })
-          }
+          onPress={continuePurchase}
           title={negotiatesByChat ? "Revisar e enviar" : "Continuar compra"}
         />
         <AppButton onPress={() => navigation.goBack()} title="Adicionar mais itens" variant="outline" />

@@ -30,7 +30,7 @@ export function submitKycDocuments(accessToken, { documentBack, documentFront, d
   return apiRequest("/api/app/kyc/submissions", {
     body,
     method: "POST",
-    timeoutMs: 90_000,
+    timeoutMs: 120_000,
     token: accessToken,
   });
 }

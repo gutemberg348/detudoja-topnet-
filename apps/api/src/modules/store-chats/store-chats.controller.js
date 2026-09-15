@@ -3,6 +3,7 @@ import {
   getStoreConversation,
   listStoreConversations,
   openStoreConversation,
+  trackStoreConversationActivity,
 } from "./store-chats.service.js";
 
 export async function openStoreConversationController(req, res, next) {
@@ -52,3 +53,14 @@ export async function createStoreConversationMessageController(req, res, next) {
   }
 }
 
+export async function trackStoreConversationActivityController(req, res, next) {
+  try {
+    res.status(201).json(await trackStoreConversationActivity(
+      req.auth.user.id,
+      req.params.conversationId,
+      req.body,
+    ));
+  } catch (error) {
+    next(error);
+  }
+}

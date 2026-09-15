@@ -1,6 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { resolveMediaUrl } from "../../utils/media";
 import { formatarDinheiro } from "../../utils/money";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../../utils/theme";
 import { countNewStoreOrders, formatStatus } from "./seller.utils";
@@ -229,6 +230,7 @@ export function SellerDashboard({
       <SectionHeading
         action="Nova loja"
         icon="storefront-outline"
+        imageUrl={stores[0]?.logoUrl}
         onPress={onCreateStore}
         subtitle="Lojas e servicos em um unico lugar"
         title="Minhas operacoes"
@@ -434,11 +436,19 @@ function CommandCard({
   );
 }
 
-function SectionHeading({ action, icon, onPress, subtitle, title }) {
+function SectionHeading({ action, icon, imageUrl, onPress, subtitle, title }) {
   return (
     <View style={styles.sectionHeading}>
       <View style={styles.sectionIcon}>
-        <Ionicons color={colors.primaryDark} name={icon} size={19} />
+        {imageUrl ? (
+          <Image
+            resizeMode="contain"
+            source={{ uri: resolveMediaUrl(imageUrl) }}
+            style={styles.operationLogo}
+          />
+        ) : (
+          <Ionicons color={colors.primaryDark} name={icon} size={19} />
+        )}
       </View>
       <View style={styles.sectionCopy}>
         <Text style={styles.sectionTitle}>{title}</Text>
@@ -498,11 +508,16 @@ function StoreRow({ chatUnreadCount, onPress, store }) {
       ]}
     >
       <View style={[styles.storeIcon, hasAttention && styles.storeIconAttention]}>
-        <Ionicons
-          color={colors.primaryDark}
-          name="storefront-outline"
-          size={21}
-        />
+        {store.logoUrl ? (
+          <Image
+            accessibilityLabel={`Logo da loja ${store.name}`}
+            resizeMode="contain"
+            source={{ uri: resolveMediaUrl(store.logoUrl) }}
+            style={styles.storeLogo}
+          />
+        ) : (
+          <Ionicons color={colors.primaryDark} name="storefront-outline" size={21} />
+        )}
       </View>
       <View style={styles.rowCopy}>
         <View style={styles.storeTitleLine}>
@@ -632,6 +647,7 @@ const styles = StyleSheet.create({
   sectionCopy: { flex: 1, gap: 2, minWidth: 0 },
   sectionHeading: { alignItems: "center", flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm },
   sectionIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 38, justifyContent: "center", width: 38 },
+  operationLogo: { borderRadius: radius.round, height: "100%", width: "100%" },
   sectionSubtitle: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption },
   sectionTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.h3, fontWeight: "800" },
   serviceOperation: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.md, minHeight: 82, padding: spacing.md, ...shadowSoft },
@@ -659,6 +675,7 @@ const styles = StyleSheet.create({
   payoutText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption },
   payoutTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small, fontWeight: "700" },
   storeIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, height: 48, justifyContent: "center", width: 48 },
+  storeLogo: { borderRadius: radius.md, height: "100%", width: "100%" },
   storeIconAttention: { borderColor: colors.primaryLight, borderWidth: 1 },
   storeChatNotification: { alignItems: "center", backgroundColor: "#FEF3C7", borderColor: "#FDE68A", borderRadius: radius.round, borderWidth: 1, flexDirection: "row", gap: 4, minHeight: 28, paddingHorizontal: spacing.sm },
   storeChatNotificationValue: { color: "#78350F", fontFamily: fonts.extraBold, fontSize: typography.caption, fontWeight: "800" },

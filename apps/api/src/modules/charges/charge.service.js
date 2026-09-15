@@ -329,10 +329,7 @@ function generatedChargeAccessWhere(userId) {
       { criador_usuario_id: userId },
       {
         loja: {
-          OR: [
-            { lojista: { usuario_id: userId } },
-            { usuarios: { some: { status: "ATIVO", usuario_id: userId } } },
-          ],
+          lojista: { usuario_id: userId },
         },
       },
     ],
@@ -370,10 +367,7 @@ async function findAccessibleStoreForCharges(userId, storeId) {
     where: {
       excluido_em: null,
       id,
-      OR: [
-        { lojista: { usuario_id: userId } },
-        { usuarios: { some: { status: "ATIVO", usuario_id: userId } } },
-      ],
+      lojista: { usuario_id: userId },
     },
   });
 
@@ -408,10 +402,7 @@ export async function createStoreQrCharge(userId, storeId, data) {
         },
       },
       status: "ATIVA",
-      OR: [
-        { lojista: { usuario_id: userId } },
-        { usuarios: { some: { status: "ATIVO", usuario_id: userId } } },
-      ],
+      lojista: { usuario_id: userId },
     },
   });
 

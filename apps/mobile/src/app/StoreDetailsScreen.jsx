@@ -7,16 +7,20 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { BackHeader } from "../components/BackHeader";
+import { CartAddButton } from "../components/CartAddButton";
 import { ScreenContainer } from "../components/ScreenContainer";
+import { SearchBar } from "../components/SearchBar";
 import { SectionHeader } from "../components/SectionHeader";
 import { getMarketplaceStore } from "../services/marketplace.api";
 import { useAuthStore } from "../stores/useAuthStore";
+import { useCartStore } from "../stores/useCartStore";
+import { buildCartItem } from "../utils/checkout";
 import { resolveMediaUrl } from "../utils/media";
 import { formatarDinheiro } from "../utils/money";
+import { matchesSearchText, normalizeSearchText } from "../utils/search";
 import {
   colors,
   fonts,
@@ -28,6 +32,7 @@ import {
 
 export function StoreDetailsScreen({ navigation, route }) {
   const { session } = useAuthStore();
+  const { addItem } = useCartStore();
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [mediaErrors, setMediaErrors] = useState({ banner: false, logo: false });
@@ -98,17 +103,34 @@ export function StoreDetailsScreen({ navigation, route }) {
   const isOpen = store.openForOrders !== false;
   const isManagedByViewer = store.isManagedByViewer === true;
   const products = store.products ?? [];
-  const filteredProducts = products.filter((product) => {
-    const search = productSearch.trim().toLowerCase();
+  const filteredProducts = products.filter((product) => (
+    !productSearch.trim()
+    || matchesSearchText(
+      `${product.name} ${product.brand ?? ""} ${product.shortDescription ?? ""} ${product.description ?? ""}`,
+      productSearch,
+    )
+  ));
+  const catalogSuggestions = (() => {
+    const normalized = normalizeSearchText(productSearch);
+    if (normalized.length === 1) return [];
 
-    if (!search) {
-      return true;
-    }
-
-    return `${product.name} ${product.description ?? ""}`
-      .toLowerCase()
-      .includes(search);
-  });
+    return products
+      .filter((product) => (
+        !normalized
+        || matchesSearchText(
+          `${product.name} ${product.brand ?? ""} ${product.shortDescription ?? ""} ${product.description ?? ""}`,
+          normalized,
+        )
+      ))
+      .slice(0, 6)
+      .map((product) => ({
+        description: product.brand || product.shortDescription || store.name,
+        iconUrl: product.imageUrl,
+        id: product.id,
+        label: product.name,
+        type: "product",
+      }));
+  })();
   const featuredProduct = products.find((product) => product.featured) ?? products[0];
   const cashbackPercent = Number(store.cashbackPercent ?? 0);
   const delivery = store.delivery ?? {};
@@ -126,7 +148,15 @@ export function StoreDetailsScreen({ navigation, route }) {
   }
 
   function openProduct(product) {
-    navigation.navigate("ProductDetails", { product, store });
+    navigation.navigate("ProductDetails", {
+      conversationId: route.params?.conversationId,
+      product,
+      store,
+    });
+  }
+
+  function addProduct(product) {
+    addItem(buildCartItem(product), store, route.params?.conversationId);
   }
 
   return (
@@ -293,7 +323,11 @@ export function StoreDetailsScreen({ navigation, route }) {
         )}
 
         {featuredProduct ? (
-          <FeaturedProductCard onPress={() => openProduct(featuredProduct)} product={featuredProduct} />
+          <FeaturedProductCard
+            onAdd={() => addProduct(featuredProduct)}
+            onPress={() => openProduct(featuredProduct)}
+            product={featuredProduct}
+          />
         ) : null}
 
         <View style={styles.section}>
@@ -301,28 +335,24 @@ export function StoreDetailsScreen({ navigation, route }) {
             subtitle="Escolha um item para ver detalhes e quantidade"
             title="Catalogo da loja"
           />
-          <View style={styles.productSearch}>
-            <View style={styles.productSearchIcon}>
-              <Ionicons color={colors.primaryDark} name="search-outline" size={20} />
-            </View>
-            <TextInput
-              onChangeText={setProductSearch}
-              placeholder="Buscar neste catalogo"
-              placeholderTextColor={colors.textMuted}
-              style={styles.productSearchInput}
-              value={productSearch}
-            />
-            {productSearch ? (
-              <Pressable hitSlop={10} onPress={() => setProductSearch("")}>
-                <Ionicons color={colors.textWeak} name="close-circle" size={20} />
-              </Pressable>
-            ) : null}
-          </View>
+          <SearchBar
+            compact
+            onChangeText={setProductSearch}
+            onSelectSuggestion={(suggestion) => {
+              const product = products.find((item) => Number(item.id) === Number(suggestion.id));
+              if (product) openProduct(product);
+              return true;
+            }}
+            placeholder="Buscar neste catalogo"
+            suggestions={catalogSuggestions}
+            value={productSearch}
+          />
           {filteredProducts.length ? (
             <View style={styles.products}>
               {filteredProducts.map((product) => (
                 <ProductCard
                   key={product.id}
+                  onAdd={() => addProduct(product)}
                   onPress={() => openProduct(product)}
                   product={product}
                 />
@@ -343,41 +373,41 @@ export function StoreDetailsScreen({ navigation, route }) {
   );
 }
 
-function FeaturedProductCard({ onPress, product }) {
+function FeaturedProductCard({ onAdd, onPress, product }) {
   const imageUrl = resolveMediaUrl(product.imageUrl);
   const price = product.promotionalPriceCents ?? product.priceCents;
 
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.featuredProduct, pressed && styles.pressed]}>
-      {imageUrl ? (
-        <Image resizeMode="cover" source={{ uri: imageUrl }} style={styles.featuredImage} />
-      ) : (
-        <LinearGradient colors={["#DDF8EA", "#E8F2FF"]} style={styles.featuredImageFallback}>
-          <Ionicons color={colors.primaryDark} name="sparkles-outline" size={31} />
-        </LinearGradient>
-      )}
-      <View style={styles.featuredCopy}>
-        <View style={styles.featuredLabelRow}>
-          <Ionicons color={colors.primaryDark} name="sparkles" size={14} />
-          <Text style={styles.featuredLabel}>Destaque da loja</Text>
-        </View>
-        <Text numberOfLines={2} style={styles.featuredName}>{product.name}</Text>
-        <Text numberOfLines={2} style={styles.featuredDescription}>
-          {product.shortDescription || product.description || "Uma escolha especial desta loja."}
-        </Text>
-        <View style={styles.featuredFooter}>
-          <View>
-            {product.promotionalPriceCents ? (
-              <Text style={styles.featuredOldPrice}>{formatarDinheiro(product.priceCents)}</Text>
-            ) : null}
-            <Text style={styles.featuredPrice}>{formatarDinheiro(price)}</Text>
+    <View style={styles.featuredProduct}>
+      <Pressable onPress={onPress} style={({ pressed }) => [styles.featuredLink, pressed && styles.pressed]}>
+        {imageUrl ? (
+          <Image resizeMode="cover" source={{ uri: imageUrl }} style={styles.featuredImage} />
+        ) : (
+          <LinearGradient colors={["#DDF8EA", "#E8F2FF"]} style={styles.featuredImageFallback}>
+            <Ionicons color={colors.primaryDark} name="sparkles-outline" size={31} />
+          </LinearGradient>
+        )}
+        <View style={styles.featuredCopy}>
+          <View style={styles.featuredLabelRow}>
+            <Ionicons color={colors.primaryDark} name="sparkles" size={14} />
+            <Text style={styles.featuredLabel}>Destaque da loja</Text>
           </View>
-          <View style={styles.featuredOpen}>
-            <Ionicons color={colors.card} name="arrow-forward" size={18} />
+          <Text numberOfLines={2} style={styles.featuredName}>{product.name}</Text>
+          <Text numberOfLines={2} style={styles.featuredDescription}>
+            {product.shortDescription || product.description || "Uma escolha especial desta loja."}
+          </Text>
+          <View style={styles.featuredFooter}>
+            <View>
+              {product.promotionalPriceCents ? (
+                <Text style={styles.featuredOldPrice}>{formatarDinheiro(product.priceCents)}</Text>
+              ) : null}
+              <Text style={styles.featuredPrice}>{formatarDinheiro(price)}</Text>
+            </View>
           </View>
         </View>
-      </View>
-    </Pressable>
+      </Pressable>
+      <CartAddButton direction="down" name={product.name} onPress={onAdd} size={32} style={styles.featuredAdd} />
+    </View>
   );
 }
 
@@ -390,57 +420,55 @@ function MetaPill({ icon, text }) {
   );
 }
 
-function ProductCard({ onPress, product }) {
+function ProductCard({ onAdd, onPress, product }) {
   const price = product.promotionalPriceCents ?? product.priceCents;
   const imageUrl = resolveMediaUrl(product.imageUrl);
   const soldOut = product.stockControlled && Number(product.stockQuantity ?? 0) <= 0;
 
   return (
-    <Pressable
-      accessibilityLabel={`Abrir ${product.name}`}
-      disabled={soldOut}
-      onPress={onPress}
-      style={({ pressed }) => [styles.productCard, soldOut && styles.productCardDisabled, pressed && styles.pressed]}
-    >
-      {imageUrl ? (
-        <Image source={{ uri: imageUrl }} style={styles.productImage} />
-      ) : (
-        <View style={styles.productImageFallback}>
-          <Ionicons color={colors.primaryDark} name="cube-outline" size={26} />
-        </View>
-      )}
-      <View style={styles.productCopy}>
-        <View style={styles.productTitleRow}>
-          <Text numberOfLines={1} style={styles.productName}>{product.name}</Text>
-          {soldOut ? <Text style={styles.soldOutBadge}>Esgotado</Text> : null}
-        </View>
-        <Text numberOfLines={2} style={styles.productDescription}>
-          {product.shortDescription || product.description || "Produto disponivel na loja."}
-        </Text>
-        <View style={styles.productMetaRow}>
-          <Ionicons color={colors.textMuted} name="time-outline" size={13} />
-          <Text numberOfLines={1} style={styles.productMetaText}>
-            {formatEstimatedTime(product.estimatedTimeMinutes)}
+    <View style={[styles.productCard, soldOut && styles.productCardDisabled]}>
+      <Pressable
+        accessibilityLabel={`Abrir ${product.name}`}
+        disabled={soldOut}
+        onPress={onPress}
+        style={({ pressed }) => [styles.productCardMain, pressed && styles.pressed]}
+      >
+        {imageUrl ? (
+          <Image source={{ uri: imageUrl }} style={styles.productImage} />
+        ) : (
+          <View style={styles.productImageFallback}>
+            <Ionicons color={colors.primaryDark} name="cube-outline" size={26} />
+          </View>
+        )}
+        <View style={styles.productCopy}>
+          <View style={styles.productTitleRow}>
+            <Text numberOfLines={1} style={styles.productName}>{product.name}</Text>
+            {soldOut ? <Text style={styles.soldOutBadge}>Esgotado</Text> : null}
+          </View>
+          <Text numberOfLines={2} style={styles.productDescription}>
+            {product.shortDescription || product.description || "Produto disponivel na loja."}
           </Text>
-          {product.unit ? (
+          <View style={styles.productMetaRow}>
+            <Ionicons color={colors.textMuted} name="time-outline" size={13} />
             <Text numberOfLines={1} style={styles.productMetaText}>
-              {product.unit}
+              {formatEstimatedTime(product.estimatedTimeMinutes)}
             </Text>
-          ) : null}
-        </View>
-        <View style={styles.productFooter}>
-          <View style={styles.productPriceBlock}>
-            {product.promotionalPriceCents ? (
-              <Text style={styles.productOldPrice}>{formatarDinheiro(product.priceCents)}</Text>
+            {product.unit ? (
+              <Text numberOfLines={1} style={styles.productMetaText}>{product.unit}</Text>
             ) : null}
-            <Text style={styles.productPrice}>{formatarDinheiro(price)}</Text>
           </View>
-          <View style={styles.productOpen}>
-            <Ionicons color={colors.card} name="add" size={20} />
+          <View style={styles.productFooter}>
+            <View style={styles.productPriceBlock}>
+              {product.promotionalPriceCents ? (
+                <Text style={styles.productOldPrice}>{formatarDinheiro(product.priceCents)}</Text>
+              ) : null}
+              <Text style={styles.productPrice}>{formatarDinheiro(price)}</Text>
+            </View>
           </View>
         </View>
-      </View>
-    </Pressable>
+      </Pressable>
+      {!soldOut ? <CartAddButton direction="down" name={product.name} onPress={onAdd} size={32} /> : null}
+    </View>
   );
 }
 
@@ -556,11 +584,14 @@ const styles = StyleSheet.create({
     gap: 5,
     minWidth: 0,
     padding: spacing.md,
+    paddingRight: 52,
   },
+  featuredAdd: { bottom: spacing.md, position: "absolute", right: spacing.md },
   featuredDescription: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption, lineHeight: 17 },
   featuredFooter: { alignItems: "flex-end", flexDirection: "row", gap: spacing.md, justifyContent: "space-between", marginTop: spacing.xs },
-  featuredImage: { alignSelf: "stretch", backgroundColor: colors.cardMuted, minHeight: 158, width: 136 },
-  featuredImageFallback: { alignItems: "center", alignSelf: "stretch", justifyContent: "center", minHeight: 158, width: 136 },
+  featuredImage: { alignSelf: "stretch", backgroundColor: colors.cardMuted, borderBottomLeftRadius: radius.lg, borderTopLeftRadius: radius.lg, minHeight: 158, width: 136 },
+  featuredImageFallback: { alignItems: "center", alignSelf: "stretch", borderBottomLeftRadius: radius.lg, borderTopLeftRadius: radius.lg, justifyContent: "center", minHeight: 158, width: 136 },
+  featuredLink: { flex: 1, flexDirection: "row", minWidth: 0 },
   featuredLabel: {
     color: colors.primaryDark,
     fontFamily: fonts.bold,
@@ -590,7 +621,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     flexDirection: "row",
     minHeight: 158,
-    overflow: "hidden",
+    overflow: "visible",
     ...shadowSoft,
   },
   hero: {
@@ -767,6 +798,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   productCard: {
+    alignItems: "center",
     backgroundColor: colors.card,
     borderColor: colors.border,
     borderRadius: radius.lg,
@@ -776,6 +808,13 @@ const styles = StyleSheet.create({
     minHeight: 128,
     padding: spacing.md,
     ...shadowSoft,
+  },
+  productCardMain: {
+    alignItems: "center",
+    flex: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    minWidth: 0,
   },
   productCardDisabled: { opacity: 0.55 },
   productCopy: {
@@ -824,14 +863,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.extraBold,
     fontSize: typography.small,
     fontWeight: "800",
-  },
-  productOpen: {
-    alignItems: "center",
-    backgroundColor: colors.primaryDark,
-    borderRadius: radius.round,
-    height: 34,
-    justifyContent: "center",
-    width: 34,
   },
   productOldPrice: { color: colors.textMuted, fontFamily: fonts.medium, fontSize: 10, textDecorationLine: "line-through" },
   productPrice: {

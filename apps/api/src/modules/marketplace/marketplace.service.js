@@ -259,6 +259,7 @@ function serializeSuggestion(suggestion) {
     iconUrl: suggestion.iconUrl ?? null,
     id: suggestion.id,
     imageUrl: suggestion.imageUrl ?? null,
+    iconName: suggestion.iconName ?? null,
     label: suggestion.label,
     storeId: suggestion.storeId ?? null,
     type: suggestion.type,
@@ -342,11 +343,11 @@ export async function listMarketplaceSuggestions(userId, query = {}) {
   const search = String(query.search ?? "").trim();
   const limit = Math.min(Number(query.limit ?? 6) || 6, 20);
 
-  if (!search) {
-    return { suggestions: [] };
-  }
-
-  const matches = await findMarketplaceSearchMatches(search);
+  const normalizedSearch = normalizeName(search);
+  if (normalizedSearch.length === 1) return { suggestions: [] };
+  const matches = normalizedSearch
+    ? await findMarketplaceSearchMatches(normalizedSearch)
+    : null;
 
   const { categories, stores, products, serviceTypes } =
     await marketplaceRepository.listSuggestions(baseAddress, matches, limit);
@@ -389,19 +390,49 @@ export async function listMarketplaceSuggestions(userId, query = {}) {
   const serviceSuggestions = serviceTypes.map((serviceType) => ({
     description: "Disponivel agora",
     id: serviceType.id,
+    iconName: serviceType.icone,
     label: serviceType.nome,
     type: "service",
   }));
-  const suggestions = [
-    ...serviceSuggestions,
-    ...categorySuggestions,
-    ...storeSuggestions,
-    ...productSuggestions,
-  ]
-    .slice(0, limit)
+  const groups = [storeSuggestions, productSuggestions, categorySuggestions, serviceSuggestions]
+    .map((group) => rankSuggestions(group, normalizedSearch));
+  const suggestions = interleaveSuggestions(groups, limit)
     .map(serializeSuggestion);
 
   return { suggestions };
+}
+
+function rankSuggestions(suggestions, search) {
+  if (!search) return suggestions;
+
+  return [...suggestions].sort((left, right) => (
+    suggestionScore(left, search) - suggestionScore(right, search)
+    || String(left.label).localeCompare(String(right.label), "pt-BR")
+  ));
+}
+
+function suggestionScore(suggestion, search) {
+  const label = normalizeName(suggestion.label);
+  const description = normalizeName(suggestion.description);
+  if (label === search) return 0;
+  if (label.startsWith(search)) return 1;
+  if (label.includes(search)) return 2;
+  if (description.startsWith(search)) return 3;
+  if (description.includes(search)) return 4;
+  return 5;
+}
+
+function interleaveSuggestions(groups, limit) {
+  const result = [];
+  const queues = groups.map((group) => [...group]);
+
+  while (result.length < limit && queues.some((queue) => queue.length)) {
+    for (const queue of queues) {
+      if (queue.length && result.length < limit) result.push(queue.shift());
+    }
+  }
+
+  return result;
 }
 
 export async function getMarketplaceStore(userId, storeId) {

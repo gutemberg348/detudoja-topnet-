@@ -25,16 +25,17 @@ docker compose config --quiet
 docker compose up -d --build
 ```
 
-Para preencher o ambiente de testes com categorias, sete lojas, 19 produtos
-e imagens de catalogo, defina `DEMO_SEED_PASSWORD` no `.env` raiz e execute uma
-vez depois que a API estiver saudavel:
+Para preencher o ambiente de testes com 10 contas verificadas, sete lojas,
+42 produtos, prestadores, servicos de frete e dois motoboys, defina
+`DEMO_SEED_PASSWORD` no `.env` raiz e execute depois que a API estiver saudavel:
 
 ```bash
 docker compose --profile seed run --rm seed-demo
 ```
 
-A seed pode ser executada novamente: ela atualiza apenas os registros de teste
-identificados pelos slugs `demo-*`.
+A seed pode ser executada novamente sem duplicar a massa. Os logins vao de
+`demo1@detudoja.local` ate `demo10@detudoja.local`, todos com a senha definida
+em `DEMO_SEED_PASSWORD`.
 
 As configuracoes privadas da API ficam separadamente em `apps/api/.env`,
 criado a partir de `apps/api/.env.example`. Nenhum arquivo `.env` real deve

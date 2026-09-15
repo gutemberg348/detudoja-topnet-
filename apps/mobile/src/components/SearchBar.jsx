@@ -1,12 +1,15 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { resolveMediaUrl } from "../utils/media";
 import { colors, fonts, radius, shadow, spacing, typography } from "../utils/theme";
 
 export function SearchBar({
   compact = false,
   containerStyle,
+  loading = false,
   onChangeText,
+  onFocusChange,
   onSelectSuggestion,
   onSubmit,
   placeholder = "Buscar produtos, serviços ou categorias",
@@ -16,7 +19,7 @@ export function SearchBar({
 }) {
   const [focused, setFocused] = useState(false);
   const blurTimeoutRef = useRef(null);
-  const visibleSuggestions = focused && value.trim() && suggestions.length > 0;
+  const visibleSuggestions = focused && (loading || suggestions.length > 0);
 
   useEffect(() => () => clearBlurTimeout(), []);
 
@@ -30,12 +33,14 @@ export function SearchBar({
   function openSuggestions() {
     clearBlurTimeout();
     setFocused(true);
+    onFocusChange?.(true);
   }
 
   function closeSuggestionsSoon() {
     clearBlurTimeout();
     blurTimeoutRef.current = setTimeout(() => {
       setFocused(false);
+      onFocusChange?.(false);
     }, 180);
   }
 
@@ -43,6 +48,7 @@ export function SearchBar({
     const nextValue = suggestion.label ?? suggestion.name ?? String(suggestion);
     clearBlurTimeout();
     setFocused(false);
+    onFocusChange?.(false);
     const handled = onSelectSuggestion?.(suggestion);
 
     if (handled === true) {
@@ -95,6 +101,12 @@ export function SearchBar({
           onStartShouldSetResponder={() => true}
           style={[styles.suggestions, compact && styles.suggestionsCompact]}
         >
+          <View style={styles.suggestionsHeader}>
+            <Text style={styles.suggestionsTitle}>
+              {value.trim() ? "Resultados rapidos" : "Sugestoes perto de voce"}
+            </Text>
+            {loading ? <ActivityIndicator color={colors.primaryDark} size="small" /> : null}
+          </View>
           <ScrollView
             contentContainerStyle={styles.suggestionsContent}
             keyboardShouldPersistTaps="always"
@@ -123,13 +135,7 @@ export function SearchBar({
                     pressed && styles.suggestionPressed,
                   ]}
                 >
-                  <View style={[styles.suggestionIcon, { backgroundColor: visual.background }]}>
-                    <Ionicons
-                      color={visual.color}
-                      name={visual.icon}
-                      size={20}
-                    />
-                  </View>
+                  <SuggestionArtwork suggestion={suggestion} visual={visual} />
                   <View style={styles.suggestionCopy}>
                     <Text numberOfLines={1} style={styles.suggestionText}>
                       {label}
@@ -154,7 +160,46 @@ export function SearchBar({
   );
 }
 
-function suggestionIcon(type) {
+function SuggestionArtwork({ suggestion, visual }) {
+  const iconUrl = resolveMediaUrl(suggestion.iconUrl ?? suggestion.imageUrl);
+  const [imageFailed, setImageFailed] = useState(false);
+
+  useEffect(() => {
+    setImageFailed(false);
+  }, [iconUrl]);
+
+  return (
+    <View style={[styles.suggestionIcon, { backgroundColor: visual.background }]}>
+      {iconUrl && !imageFailed ? (
+        <Image
+          onError={() => setImageFailed(true)}
+          resizeMode={suggestion.type === "product" ? "cover" : "contain"}
+          source={{ uri: iconUrl }}
+          style={styles.suggestionImage}
+        />
+      ) : (
+        <Ionicons
+          color={visual.color}
+          name={suggestionIcon(suggestion.type, suggestion.iconName)}
+          size={20}
+        />
+      )}
+    </View>
+  );
+}
+
+function suggestionIcon(type, iconName) {
+  const serviceIcons = {
+    bicycle: "bicycle-outline",
+    car: "car-outline",
+    construct: "construct-outline",
+    delivery: "cube-outline",
+    person: "person-outline",
+  };
+
+  if (type === "service" && serviceIcons[String(iconName ?? "").toLowerCase()]) {
+    return serviceIcons[String(iconName).toLowerCase()];
+  }
   if (type === "category") {
     return "grid-outline";
   }
@@ -241,7 +286,7 @@ function suggestionVisual(type) {
     color: colors.textSecondary,
   };
 
-  return { ...visual, icon: suggestionIcon(type) };
+  return visual;
 }
 
 const styles = StyleSheet.create({
@@ -296,6 +341,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: 40,
   },
+  suggestionImage: { height: "100%", width: "100%" },
   suggestionKind: { borderRadius: radius.round, paddingHorizontal: 7, paddingVertical: 3 },
   suggestionKindText: { fontFamily: fonts.bold, fontSize: 9, fontWeight: "700", textTransform: "uppercase" },
   suggestionMeta: {
@@ -338,6 +384,22 @@ const styles = StyleSheet.create({
   },
   suggestionsContent: {
     paddingVertical: 2,
+  },
+  suggestionsHeader: {
+    alignItems: "center",
+    backgroundColor: colors.cardMuted,
+    borderBottomColor: colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    minHeight: 36,
+    paddingHorizontal: spacing.lg,
+  },
+  suggestionsTitle: {
+    color: colors.textSecondary,
+    fontFamily: fonts.bold,
+    fontSize: 10,
+    textTransform: "uppercase",
   },
   suggestionsCompact: { top: 54 },
   suggestionsScroll: {

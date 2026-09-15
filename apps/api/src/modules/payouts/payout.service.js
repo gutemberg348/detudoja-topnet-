@@ -3,9 +3,10 @@ import { recordFinancialFailure } from "../monitoring/monitoring.service.js";
 import { emitWalletUpdated } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
 import { isValidCnpj, normalizeCnpj } from "../../utils/cnpj.js";
+import { isValidCpf } from "../../utils/cpf.js";
+import { sendExpoPushToUsers } from "../notifications/notifications.service.js";
 import {
   createAsaasPixTransfer,
-  getAsaasExternalPixKey,
   getAsaasTransfer,
   isAsaasEnabled,
   listAsaasTransfers,
@@ -29,25 +30,8 @@ const transferTypeByPixType = {
   TELEFONE: "PHONE",
 };
 
-const asaasPixKeyTypeByPixType = {
-  ALEATORIA: "EVP",
-  CNPJ: "CNPJ",
-  CPF: "CPF",
-  EMAIL: "EMAIL",
-  TELEFONE: "PHONE",
-};
-
 function onlyDigits(value) {
   return String(value ?? "").replace(/\D/g, "");
-}
-
-function normalizeDocument(value) {
-  const digits = onlyDigits(value);
-  const cnpj = normalizeCnpj(value);
-
-  if (digits.length === 11 && cnpj.length === 11) return digits;
-  if (isValidCnpj(cnpj)) return cnpj;
-  throw new AppError("Documento do titular invalido", 400);
 }
 
 function normalizePixKey(type, value) {
@@ -97,35 +81,6 @@ function maskPixKey(type, key) {
   return `${key.slice(0, 4)}...${key.slice(-4)}`;
 }
 
-function normalizeHolderName(value) {
-  return String(value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, " ")
-    .trim();
-}
-
-function getExternalHolderName(externalKey) {
-  return String(
-    externalKey?.ownerName
-      ?? externalKey?.holderName
-      ?? externalKey?.name
-      ?? externalKey?.owner?.name
-      ?? "",
-  ).trim();
-}
-
-function getExternalHolderDocument(externalKey) {
-  const value = externalKey?.cpfCnpj
-      ?? externalKey?.ownerCpfCnpj
-      ?? externalKey?.holderDocument
-      ?? externalKey?.owner?.cpfCnpj
-      ?? "";
-  const cnpj = normalizeCnpj(value);
-  return cnpj.length === 14 ? cnpj : onlyDigits(value);
-}
-
 function serializeAccount(account) {
   if (!account) return null;
   return {
@@ -153,68 +108,38 @@ function asaasDate(date) {
   }).format(date);
 }
 
-async function allowedHolderDocuments(repository, userId) {
+async function getPayoutOwner(repository, userId) {
   const user = await repository.findUser({
     include: {
-      kyc: { select: { nome_completo: true, razao_social: true } },
       lojista: { select: { cnpj: true, cpf: true, razao_social: true } },
-      vendedor: { select: { cnpj: true, cpf: true } },
+      vendedor: { select: { cnpj: true, cpf: true, nome_publico: true } },
     },
     where: { id: userId, excluido_em: null },
   });
 
   if (!user) throw new AppError("Usuario nao encontrado", 404);
+  const cpf = onlyDigits(user.cpf);
+  if (!isValidCpf(cpf)) {
+    throw new AppError("Cadastre um CPF valido na sua conta para continuar", 428);
+  }
 
   return {
-    cpfRequired: !user.cpf,
-    documents: new Set([
-      user.cpf,
-      user.lojista?.cpf,
-      user.lojista?.cnpj,
-      user.vendedor?.cpf,
-      user.vendedor?.cnpj,
-    ].map((value) => {
-      const cnpj = normalizeCnpj(value);
-      return cnpj.length === 14 ? cnpj : onlyDigits(value);
-    }).filter(Boolean)),
-    names: new Set([
-      user.nome,
-      user.kyc?.nome_completo,
-      user.kyc?.razao_social,
-      user.lojista?.razao_social,
-    ].map(normalizeHolderName).filter(Boolean)),
+    businesses: [
+      { document: normalizeCnpj(user.lojista?.cnpj), name: user.lojista?.razao_social },
+      { document: normalizeCnpj(user.vendedor?.cnpj), name: user.vendedor?.nome_publico },
+    ].filter((business) => isValidCnpj(business.document)),
+    cpf,
+    name: user.nome,
   };
 }
 
-async function validatePayoutPixKey({ document, holderName, key, keyType, owner }) {
-  if (!isAsaasEnabled()) {
-    throw new AppError("A validacao da chave Pix exige o gateway Asaas ativo", 503);
+function payoutIdentity(owner, keyType, key) {
+  if (keyType !== "CNPJ") return { document: owner.cpf, holderName: owner.name };
+  const business = owner.businesses.find((item) => item.document === key);
+  if (!business) {
+    throw new AppError("Este CNPJ precisa estar vinculado ao seu cadastro comercial", 409);
   }
-
-  const externalKey = await getAsaasExternalPixKey({
-    key,
-    type: asaasPixKeyTypeByPixType[keyType],
-  });
-  const externalDocument = getExternalHolderDocument(externalKey);
-  const normalizedKeyDocument = keyType === "CNPJ" ? normalizeCnpj(key) : onlyDigits(key);
-  const isDocumentKey = ["CPF", "CNPJ"].includes(keyType) && normalizedKeyDocument === document;
-  const documentMatches = externalDocument === document || isDocumentKey;
-  const externalHolderName = getExternalHolderName(externalKey);
-
-  if (!documentMatches) {
-    throw new AppError("A chave Pix consultada nao pertence ao CPF ou CNPJ informado", 409);
-  }
-  if (!externalHolderName) {
-    throw new AppError("O Asaas nao retornou o nome do titular para validar esta chave", 409);
-  }
-  if (normalizeHolderName(holderName) !== normalizeHolderName(externalHolderName)) {
-    throw new AppError("O nome informado nao confere com o titular da chave Pix", 409);
-  }
-  if (!owner.names.has(normalizeHolderName(externalHolderName))) {
-    throw new AppError("O titular da chave Pix nao confere com a identidade aprovada da conta", 409);
-  }
-
-  return { holderName: externalHolderName };
+  return { document: business.document, holderName: business.name || owner.name };
 }
 
 export async function getPayoutAccount(userId) {
@@ -229,41 +154,19 @@ export async function getPayoutAccount(userId) {
 }
 
 export async function savePayoutAccount(userId, data) {
-  const document = normalizeDocument(data.holderDocument);
-  const key = normalizePixKey(data.keyType, data.key);
-  const holderName = data.holderName.trim();
-  const owner = await allowedHolderDocuments(payoutRepository, userId);
-
-  if (document.length === 11 && owner.cpfRequired) {
-    throw new AppError(
-      "Cadastre seu CPF na conta antes de validar uma chave Pix de pessoa fisica",
-      428,
-    );
-  }
-
-  if (!owner.documents.has(document)) {
-    throw new AppError("O documento do titular precisa ser o CPF ou CNPJ vinculado a sua conta", 409);
-  }
-
-  const validation = await validatePayoutPixKey({
-    document,
-    holderName,
-    key,
-    keyType: data.keyType,
-    owner,
-  });
+  const owner = await getPayoutOwner(payoutRepository, userId);
+  const key = normalizePixKey(data.keyType, data.keyType === "CPF" ? owner.cpf : data.key);
+  payoutIdentity(owner, data.keyType, key);
 
   try {
     const account = await payoutRepository.transaction(async (database) => {
       const repository = createPayoutRepository(database);
-      const currentOwner = await allowedHolderDocuments(repository, userId);
-
-      if (!currentOwner.documents.has(document)) {
-        throw new AppError("O documento do titular precisa ser o CPF ou CNPJ vinculado a sua conta", 409);
-      }
+      const currentOwner = await getPayoutOwner(repository, userId);
+      const currentKey = normalizePixKey(data.keyType, data.keyType === "CPF" ? currentOwner.cpf : data.key);
+      const currentIdentity = payoutIdentity(currentOwner, data.keyType, currentKey);
 
       const accountWithKey = await repository.findBankAccountByKey({
-        where: { chave_pix: key },
+        where: { chave_pix: currentKey },
       });
 
       if (accountWithKey && accountWithKey.usuario_id !== userId) {
@@ -280,15 +183,15 @@ export async function savePayoutAccount(userId, data) {
         where: { excluido_em: null, usuario_id: userId },
       });
       const payload = {
-        chave_pix: key,
-        documento_titular: document,
+        chave_pix: currentKey,
+        documento_titular: currentIdentity.document,
         excluido_em: null,
-        nome_titular: validation.holderName,
+        nome_titular: currentIdentity.holderName,
         principal: true,
         status: "ATIVA",
         tipo_chave: data.keyType,
-        provedor_validacao: "ASAAS",
-        validado_em: new Date(),
+        provedor_validacao: "CADASTRO_DIRETO",
+        validado_em: null,
       };
 
       return current
@@ -318,7 +221,7 @@ export async function requireActivePayoutAccount(userId, database = prisma) {
   });
 
   if (!account) {
-    throw new AppError("Cadastre e valide sua chave Pix de recebimento antes de gerar uma venda presencial", 428);
+    throw new AppError("Cadastre sua chave Pix de recebimento antes de gerar uma venda presencial", 428);
   }
   return account;
 }
@@ -365,6 +268,12 @@ async function restoreFailedPayout(payoutId, reason, nextStatus = "FALHOU") {
 
   if (result) {
     emitWalletUpdated({ transactionId: result.transactionId, userIds: [result.userId] });
+    void sendExpoPushToUsers({
+      body: "O Pix nao foi concluido. O valor integral voltou para o seu saldo de vendas. Confira a chave antes de tentar novamente.",
+      data: { payoutId: String(payoutId), type: "payout_failed" },
+      title: "Valor devolvido ao saldo",
+      userIds: [result.userId],
+    });
     if (nextStatus === "FALHOU") {
       recordFinancialFailure("pix-payout", reason, {
         payoutId,

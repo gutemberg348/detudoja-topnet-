@@ -13,8 +13,9 @@
   mesmo banco e volume privado de documentos.
 - `web-admin`: compila o painel Vite e o serve por Nginx. O Nginx encaminha
   `/api`, `/socket.io` e `/uploads` para o container da API.
-- `seed-demo`: servico opcional do perfil `seed`; cria dados de vitrine e copia
-  as imagens curadas para o volume persistente de uploads.
+- `seed-demo`: servico opcional do perfil `seed`; cria 10 contas, lojas,
+  produtos, prestadores e motoboys, e copia as imagens curadas para o volume
+  persistente de uploads.
 
 O `Dockerfile` da API instala OpenSSL e certificados antes de gerar o Prisma,
 evitando deteccao incorreta da biblioteca na VPS. As dependencias e modelos do
@@ -34,15 +35,17 @@ docker compose ps
 docker compose down
 ```
 
-Para popular somente um ambiente de testes com sete lojas e 19 produtos,
+Para popular somente um ambiente de testes com 10 contas verificadas, sete
+lojas, 42 produtos, cinco prestadores, 13 ofertas de servico e dois motoboys,
 defina antes `DEMO_SEED_PASSWORD` no `.env` raiz com pelo menos 12 caracteres:
 
 ```powershell
 docker compose --profile seed run --rm seed-demo
 ```
 
-O comando e idempotente para os registros `demo-*`. Ele nao deve ser usado para
-substituir ou editar lojas reais cadastradas por comerciantes.
+O comando e idempotente para a massa de teste. Os logins sao
+`demo1@detudoja.local` a `demo10@detudoja.local`, todos com a senha escolhida.
+Ele nao substitui nem edita lojas reais cadastradas por comerciantes.
 
 `docker compose down` preserva banco, Redis e uploads. Nao use `docker compose down -v` em ambiente com dados importantes, pois esse comando apaga os volumes.
 

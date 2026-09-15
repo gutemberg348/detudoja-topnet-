@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
-import { env } from "../src/config/env.js";
 import { prisma } from "../src/config/prisma.js";
 import {
   createStoreQrCharge,
@@ -42,12 +41,16 @@ import {
   createStoreConversationMessage,
   getStoreConversation,
   openStoreConversation,
+  trackStoreConversationActivity,
 } from "../src/modules/store-chats/store-chats.service.js";
 import {
   creditUserWallet,
   ensureUserWallets,
 } from "../src/modules/wallet/wallet.service.js";
-import { listMarketplaceStores } from "../src/modules/marketplace/marketplace.service.js";
+import {
+  listMarketplaceStores,
+  listMarketplaceSuggestions,
+} from "../src/modules/marketplace/marketplace.service.js";
 import { updateCurrentUser } from "../src/modules/users/users.service.js";
 
 const marker = "audit-business-flow";
@@ -380,6 +383,31 @@ test("marketplace usa a cidade escolhida sem alterar o endereco de entrega", asy
   }
 });
 
+test("busca sugere dados cadastrados ao focar e completa a partir de duas letras", async () => {
+  const initial = await listMarketplaceSuggestions(state.buyer.id, { limit: 12 });
+  const initialTypes = new Set(initial.suggestions.map((suggestion) => suggestion.type));
+  assert.equal(initialTypes.has("store"), true);
+  assert.equal(initialTypes.has("product"), true);
+  assert.equal(initialTypes.has("category"), true);
+
+  const oneLetter = await listMarketplaceSuggestions(state.buyer.id, {
+    limit: 12,
+    search: "a",
+  });
+  assert.deepEqual(oneLetter.suggestions, []);
+
+  const autocomplete = await listMarketplaceSuggestions(state.buyer.id, {
+    limit: 12,
+    search: "au",
+  });
+  assert.ok(autocomplete.suggestions.some(
+    (suggestion) => suggestion.type === "store" && suggestion.label === "Audit Store",
+  ));
+  assert.ok(autocomplete.suggestions.some(
+    (suggestion) => suggestion.type === "product" && suggestion.label === "Audit Product",
+  ));
+});
+
 test("CPF monthly limit is shared by stores and autonomous sales and reserves pending Asaas Pix", async () => {
   const secondStore = await prisma.loja.create({
     data: {
@@ -429,7 +457,7 @@ test("CPF monthly limit is shared by stores and autonomous sales and reserves pe
   }
 });
 
-test("store chat persists both sides and blocks an unrelated user", async () => {
+test("store journey is visible and support is marked per customer message", async () => {
   await assert.rejects(
     openStoreConversation(state.seller.id, state.store.id),
     (error) => error.statusCode === 409
@@ -437,9 +465,21 @@ test("store chat persists both sides and blocks an unrelated user", async () => 
   );
 
   const opened = await openStoreConversation(state.buyer.id, state.store.id);
-  await createStoreConversationMessage(state.buyer.id, opened.conversation.id, {
-    message: "Mensagem do comprador",
+  assert.equal(opened.conversation.messages[0].text, "Cliente entrou na loja e iniciou a navegacao.");
+
+  await createStoreConversationMessage(state.seller.id, opened.conversation.id, {
+    message: "Posso ajudar com algum produto?",
   });
+  await trackStoreConversationActivity(state.buyer.id, opened.conversation.id, {
+    action: "VIEW_PRODUCT",
+    productId: state.product.id,
+  });
+
+  const support = await createStoreConversationMessage(state.buyer.id, opened.conversation.id, {
+    message: "Mensagem do comprador",
+    support: true,
+  });
+  assert.equal(support.message.content.kind, "SUPPORT");
 
   await assert.rejects(
     getStoreConversation(state.outsider.id, opened.conversation.id),
@@ -447,7 +487,11 @@ test("store chat persists both sides and blocks an unrelated user", async () => 
   );
 
   const sellerView = await getStoreConversation(state.seller.id, opened.conversation.id);
+  assert.equal(sellerView.conversation.messages.some(
+    (message) => message.text === `Cliente abriu ${state.product.nome}.`,
+  ), true);
   assert.equal(sellerView.conversation.messages.at(-1).text, "Mensagem do comprador");
+  assert.equal(sellerView.conversation.messages.at(-1).content.kind, "SUPPORT");
 
   await createStoreConversationMessage(state.seller.id, opened.conversation.id, {
     message: "Resposta da loja",
@@ -840,57 +884,43 @@ test("chat proposal never confirms Pix internally when the Asaas gateway is unav
   assert.equal(persisted.propostas[0].status, "ACEITA");
 });
 
-test("payout key is never activated without an Asaas ownership lookup", async () => {
-  const before = await prisma.contaBancaria.findFirst({
+test("CPF payout key comes from the authenticated account without duplicate fields", async () => {
+  const result = await savePayoutAccount(state.seller.id, {
+    key: "",
+    keyType: "CPF",
+  });
+  const persisted = await prisma.contaBancaria.findFirstOrThrow({
     where: { principal: true, usuario_id: state.seller.id },
   });
 
-  await assert.rejects(
-    () => savePayoutAccount(state.seller.id, {
-      holderDocument: state.seller.cpf,
-      holderName: state.seller.nome,
-      key: state.seller.cpf,
-      keyType: "CPF",
-    }),
-    (error) => error.statusCode === 503,
-  );
-
-  const after = await prisma.contaBancaria.findUnique({ where: { id: before.id } });
-  assert.equal(after.status, before.status);
-  assert.equal(after.validado_em, before.validado_em);
+  assert.equal(result.account.status, "ATIVA");
+  assert.equal(result.account.holderName, state.seller.nome);
+  assert.equal(result.account.validationProvider, "CADASTRO_DIRETO");
+  assert.equal(result.account.validatedAt, null);
+  assert.equal(persisted.chave_pix, state.seller.cpf);
+  assert.equal(persisted.documento_titular, state.seller.cpf);
 });
 
-test("payout key becomes active only after the Asaas holder data matches", async () => {
-  const previousEnabled = env.asaas.enabled;
-  const previousApiKey = env.asaas.apiKey;
+test("non-document payout key is saved without querying Asaas", async () => {
   const previousFetch = globalThis.fetch;
-
-  env.asaas.enabled = true;
-  env.asaas.apiKey = "test-asaas-key";
-  globalThis.fetch = async () => new Response(JSON.stringify({
-    cpfCnpj: state.seller.cpf,
-    ownerName: state.seller.nome,
-  }), {
-    headers: { "content-type": "application/json" },
-    status: 200,
-  });
+  globalThis.fetch = async () => {
+    throw new Error("Asaas must not be called while saving a Pix key");
+  };
 
   try {
     const result = await savePayoutAccount(state.seller.id, {
-      holderDocument: state.seller.cpf,
-      holderName: state.seller.nome,
-      key: state.seller.cpf,
-      keyType: "CPF",
+      key: "seller@pix.local",
+      keyType: "EMAIL",
     });
 
     assert.equal(result.account.status, "ATIVA");
     assert.equal(result.account.holderName, state.seller.nome);
-    assert.equal(result.account.validationProvider, "ASAAS");
-    assert.ok(result.account.validatedAt);
+    assert.equal(result.account.validationProvider, "CADASTRO_DIRETO");
+    assert.equal(result.account.validatedAt, null);
+    assert.equal(result.account.keyMasked, "se***@pix.local");
   } finally {
-    env.asaas.enabled = previousEnabled;
-    env.asaas.apiKey = previousApiKey;
     globalThis.fetch = previousFetch;
+    await savePayoutAccount(state.seller.id, { key: "", keyType: "CPF" });
   }
 });
 

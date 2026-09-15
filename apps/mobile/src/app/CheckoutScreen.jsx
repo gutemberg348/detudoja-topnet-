@@ -19,6 +19,7 @@ import {
 } from "../services/orders.api";
 import { getCurrentUserAddresses } from "../services/users.api";
 import { useAuthStore } from "../stores/useAuthStore";
+import { useCartStore } from "../stores/useCartStore";
 import {
   checkoutTotals,
   normalizeCart,
@@ -68,6 +69,7 @@ function addressFromSaved(address) {
 }
 
 export function CheckoutScreen({ navigation, route }) {
+  const { clearCart } = useCartStore();
   const { session } = useAuthStore();
   const cart = normalizeCart(route.params);
   const [deliveryMode, setDeliveryMode] = useState("delivery");
@@ -277,6 +279,7 @@ export function CheckoutScreen({ navigation, route }) {
         storeId: cart.store.id,
       }, requestIdempotencyKeyRef.current ??= createOrderIdempotencyKey("request"));
 
+      clearCart();
       navigation.replace("CustomerOrderDetails", { order: response.order });
     } catch (requestError) {
       setSubmitError(requestError.message ?? "Nao foi possivel enviar o pedido para a loja.");

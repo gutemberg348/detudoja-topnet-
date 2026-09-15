@@ -389,12 +389,31 @@ tbody tr:hover { background: #f8fcf9; }
 .drawer-actions { margin-top: 22px; padding: 15px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-soft); }
 .admin-edit-panel { display: grid; gap: 13px; margin-top: 18px; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow-sm); }
 .admin-edit-panel--credit { border-color: var(--primary-border); background: #f3fbf6; }
+.admin-edit-panel--kyc { gap: 15px; overflow: hidden; }
 .admin-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--primary-dark); }
 .admin-panel-heading h3 { margin: 0; color: var(--ink); font-size: 14px; }
 .admin-panel-heading .eyebrow { margin-bottom: 3px; }
 .admin-edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
 .admin-edit-grid label { display: grid; gap: 6px; color: var(--ink-soft); font-size: 10px; font-weight: 700; }
 .admin-edit-grid__wide { grid-column: 1 / -1; }
+.kyc-exception-alert { display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: start; gap: 12px; border: 1px solid #efd7a0; border-radius: 8px; padding: 14px; color: #865600; background: #fff9eb; }
+.kyc-exception-alert__icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 8px; color: #9a6700; background: #ffedbd; }
+.kyc-exception-alert small, .kyc-exception-alert strong, .kyc-exception-alert p { display: block; }
+.kyc-exception-alert small { margin-bottom: 4px; font-size: 8px; font-weight: 800; letter-spacing: .08em; }
+.kyc-exception-alert strong { color: var(--ink); font-size: 12px; line-height: 1.35; }
+.kyc-exception-alert p { margin: 5px 0 0; color: var(--ink-soft); font-size: 10px; line-height: 1.55; }
+.kyc-exception-status { display: flex; align-items: center; justify-content: space-between; gap: 14px; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; background: var(--surface-soft); }
+.kyc-exception-status small, .kyc-exception-status strong { display: block; }
+.kyc-exception-status small { margin-bottom: 3px; color: var(--muted); font-size: 9px; font-weight: 700; text-transform: uppercase; }
+.kyc-exception-status strong { color: var(--ink); font-size: 11px; }
+.kyc-exception-status__badges { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; }
+.kyc-exception-status__badges > span:last-child { color: var(--ink-soft); font-size: 11px; font-weight: 800; }
+.kyc-exception-form { display: grid; gap: 12px; border-top: 1px solid var(--border); padding-top: 15px; }
+.kyc-exception-form .kyc-reason small { color: var(--muted); font-size: 9px; font-weight: 400; line-height: 1.5; }
+.kyc-exception-submit { width: 100%; min-height: 54px; padding: 9px 15px; }
+.kyc-exception-submit > span { display: grid; gap: 2px; text-align: left; }
+.kyc-exception-submit strong { font-size: 11px; }
+.kyc-exception-submit small { color: inherit; font-size: 8px; font-weight: 500; opacity: .78; }
 .admin-wallet-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
 .admin-wallet-list span { display: flex; flex-direction: column; gap: 2px; padding: 9px; border: 1px solid var(--border); border-radius: 6px; color: var(--primary-dark); background: var(--surface); font-size: 11px; }
 .admin-wallet-list strong { color: var(--muted); font-size: 9px; }

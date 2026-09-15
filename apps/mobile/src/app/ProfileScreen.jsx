@@ -3,6 +3,8 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
+  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -22,6 +24,11 @@ import {
 import { getCurrentUser, updateCurrentUser } from "../services/users.api";
 import { fetchCepAddress } from "../services/cep.api";
 import { ApiError } from "../services/api";
+import {
+  acceptStoreStaffInvitation,
+  declineStoreStaffInvitation,
+  getMyStoreWorkplaces,
+} from "../services/seller.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { useWalletStore } from "../stores/useWalletStore";
 import {
@@ -32,6 +39,7 @@ import {
   onlyDigits,
 } from "../utils/authValidation";
 import { formatarDinheiro } from "../utils/money";
+import { resolveMediaUrl } from "../utils/media";
 import { colors, fonts, radius, spacing, typography } from "../utils/theme";
 
 const accountTypeLabels = {
@@ -107,6 +115,7 @@ export function ProfileScreen({ navigation }) {
   const [unreadStoreChatCount, setUnreadStoreChatCount] = useState(0);
   const [phone, setPhone] = useState("");
   const [profile, setProfile] = useState(null);
+  const [workProfile, setWorkProfile] = useState({ invitations: [], workplaces: [] });
 
   const loadProfile = useCallback(async () => {
     if (!session?.accessToken) {
@@ -190,13 +199,23 @@ export function ProfileScreen({ navigation }) {
     }
   }, [session?.accessToken]);
 
+  const loadWorkProfile = useCallback(async () => {
+    if (!session?.accessToken) return;
+    try {
+      setWorkProfile(await getMyStoreWorkplaces(session.accessToken));
+    } catch {
+      setWorkProfile({ invitations: [], workplaces: [] });
+    }
+  }, [session?.accessToken]);
+
   useFocusEffect(
     useCallback(() => {
       loadProfile();
       loadOrders();
       loadServices();
       loadStoreChats();
-    }, [loadOrders, loadProfile, loadServices, loadStoreChats]),
+      loadWorkProfile();
+    }, [loadOrders, loadProfile, loadServices, loadStoreChats, loadWorkProfile]),
   );
 
   const handleRealtimeOrder = useCallback(() => {
@@ -387,6 +406,21 @@ export function ProfileScreen({ navigation }) {
     navigation.navigate("StoreChatsInbox");
   }
 
+  async function decideWorkInvitation(invitation, accept) {
+    try {
+      if (accept) {
+        const response = await acceptStoreStaffInvitation(session.accessToken, { invitationId: invitation.id });
+        await loadWorkProfile();
+        Alert.alert("Convite aceito", `Voce agora pode atender os clientes da ${response.store.name}.`);
+      } else {
+        await declineStoreStaffInvitation(session.accessToken, invitation.id);
+        await loadWorkProfile();
+      }
+    } catch (requestError) {
+      Alert.alert("Nao foi possivel concluir", requestError.message ?? "Tente novamente.");
+    }
+  }
+
   const quickActions = [
     {
       badgeText: hasUnreadOrderMessages
@@ -471,6 +505,13 @@ export function ProfileScreen({ navigation }) {
           setEditing((current) => !current);
         }}
         profile={profile}
+      />
+
+      <WorkProfilePanel
+        invitations={workProfile.invitations ?? []}
+        navigation={navigation}
+        onDecision={decideWorkInvitation}
+        workplaces={(workProfile.workplaces ?? []).filter((item) => item.role !== "DONO")}
       />
 
       <WalletPreview
@@ -566,6 +607,11 @@ export function ProfileScreen({ navigation }) {
 
       <View style={styles.detailsCard}>
         <DetailRow
+          icon="at-outline"
+          label="Seu ID para convites"
+          value={profile.publicId ? `@${profile.publicId}` : String(profile.id)}
+        />
+        <DetailRow
           icon="call-outline"
           label="Telefone"
           value={formatPhone(profile.phone) || "Nao informado"}
@@ -659,6 +705,64 @@ function ProfileHero({ onEdit, profile }) {
           />
         </Pressable>
       </View>
+    </View>
+  );
+}
+
+function WorkProfilePanel({ invitations, navigation, onDecision, workplaces }) {
+  if (!invitations.length && !workplaces.length) {
+    return (
+      <Pressable onPress={() => navigation.navigate("StoreStaffQrScan")} style={({ pressed }) => [styles.workQrEmpty, pressed && styles.pressed]}>
+        <View style={styles.workIcon}><Ionicons color={colors.primaryDark} name="qr-code-outline" size={21} /></View>
+        <View style={styles.workCopy}>
+          <Text style={styles.workTitle}>Convite para trabalhar em uma loja?</Text>
+          <Text style={styles.workText}>Leia o QR do dono para entrar como atendente.</Text>
+        </View>
+        <Ionicons color={colors.primaryDark} name="chevron-forward" size={18} />
+      </Pressable>
+    );
+  }
+
+  return (
+    <View style={styles.workPanel}>
+      <View style={styles.workHeading}>
+        <View style={styles.workIcon}><Ionicons color={colors.primaryDark} name="briefcase-outline" size={21} /></View>
+        <View style={styles.workCopy}>
+          <Text style={styles.workTitle}>Perfil profissional</Text>
+          <Text style={styles.workText}>Sua conta pessoal continua ativa.</Text>
+        </View>
+        <Pressable accessibilityLabel="Ler convite por QR" onPress={() => navigation.navigate("StoreStaffQrScan")} style={styles.workScan}>
+          <Ionicons color={colors.primaryDark} name="scan-outline" size={20} />
+        </Pressable>
+      </View>
+      {invitations.map((invitation) => (
+        <View key={invitation.id} style={styles.workInvite}>
+          <Text style={styles.workInviteEyebrow}>CONVITE DE TRABALHO</Text>
+          <Text style={styles.workStoreName}>{invitation.store?.name}</Text>
+          <Text style={styles.workText}>Entrar como atendente e responder os chats desta loja?</Text>
+          <View style={styles.workActions}>
+            <AppButton onPress={() => onDecision(invitation, false)} title="Recusar" variant="outline" />
+            <AppButton onPress={() => onDecision(invitation, true)} title="Aceitar" />
+          </View>
+        </View>
+      ))}
+      {workplaces.map((membership) => {
+        const logoUrl = resolveMediaUrl(membership.store?.logoUrl);
+        return (
+          <Pressable
+            key={membership.id}
+            onPress={() => navigation.navigate("StoreChatsInbox", { scope: "seller", store: membership.store, storeId: membership.store?.id })}
+            style={({ pressed }) => [styles.workStore, pressed && styles.pressed]}
+          >
+            <View style={styles.workLogo}>{logoUrl ? <Image source={{ uri: logoUrl }} style={styles.workLogoImage} /> : <Ionicons color={colors.primaryDark} name="storefront-outline" size={22} />}</View>
+            <View style={styles.workCopy}>
+              <Text numberOfLines={1} style={styles.workStoreName}>{membership.store?.name}</Text>
+              <Text style={styles.workText}>Atendente · tocar para entrar na loja</Text>
+            </View>
+            <View style={styles.workEnter}><Ionicons color={colors.card} name="arrow-forward" size={18} /></View>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
@@ -1282,6 +1386,22 @@ const styles = StyleSheet.create({
     fontSize: typography.label,
     fontWeight: "700",
   },
+  workActions: { flexDirection: "row", gap: spacing.sm },
+  workCopy: { flex: 1, gap: 3, minWidth: 0 },
+  workEnter: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.round, height: 38, justifyContent: "center", width: 38 },
+  workHeading: { alignItems: "center", flexDirection: "row", gap: spacing.md },
+  workIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 42, justifyContent: "center", width: 42 },
+  workInvite: { backgroundColor: colors.primarySoft, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, gap: spacing.sm, padding: spacing.md },
+  workInviteEyebrow: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: 9 },
+  workLogo: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, height: 48, justifyContent: "center", overflow: "hidden", width: 48 },
+  workLogoImage: { height: "100%", width: "100%" },
+  workPanel: { backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.xl, borderWidth: 1, gap: spacing.md, padding: spacing.lg },
+  workQrEmpty: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.md, padding: spacing.md },
+  workScan: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 38, justifyContent: "center", width: 38 },
+  workStore: { alignItems: "center", borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.md, padding: spacing.md },
+  workStoreName: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.small },
+  workText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption, lineHeight: 17 },
+  workTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.small },
   walletPreview: {
     gap: spacing.md,
   },

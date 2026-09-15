@@ -46,8 +46,6 @@ const statusLabels = {
 };
 
 const initialAccountForm = {
-  holderDocument: "",
-  holderName: "",
   key: "",
   keyType: "CPF",
 };
@@ -165,15 +163,9 @@ export function WithdrawalScreen() {
       const response = await getWithdrawalPixAccount(session.accessToken);
       setAccountForm((current) => ({
         ...current,
-        holderName: response.account?.holderName ?? session.user?.name ?? "",
         keyType: response.account?.keyType ?? current.keyType,
       }));
-    } catch {
-      setAccountForm((current) => ({
-        ...current,
-        holderName: session.user?.name ?? "",
-      }));
-    }
+    } catch {}
     setAccountModalOpen(true);
   }
 
@@ -204,7 +196,7 @@ export function WithdrawalScreen() {
     setIsSubmitting(true);
     setError("");
     try {
-      await createWithdrawal(session.accessToken, {
+      const response = await createWithdrawal(session.accessToken, {
         amountCents,
         idempotencyKey: idempotencyKeyRef.current,
         walletSources,
@@ -212,6 +204,9 @@ export function WithdrawalScreen() {
       idempotencyKeyRef.current = requestKey();
       setSourceAmounts({});
       await load();
+      if (["FALHOU", "CANCELADO"].includes(response.withdrawal?.status)) {
+        setError("O Pix nao foi enviado. Todo o valor voltou para o seu saldo; confira a chave antes de tentar novamente.");
+      }
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel solicitar o saque.");
     } finally {
@@ -262,8 +257,8 @@ export function WithdrawalScreen() {
             {data?.account
               ? data.account.status === "ATIVA"
                 ? `${data.account.keyType} - ${data.account.holderName}`
-                : "Chave aguardando validacao bancaria. Edite para validar."
-              : "Cadastre uma chave do mesmo titular da conta."}
+                : "Edite a chave para deixa-la pronta para uso."
+              : "Cadastre a chave que deseja usar nos saques."}
           </Text>
         </View>
         <Pressable onPress={openAccount} style={styles.editAccount}>
@@ -463,6 +458,7 @@ export function WithdrawalScreen() {
         onSubmit={saveAccount}
         open={accountModalOpen}
         purpose="withdrawal"
+        userNeedsCpf={Boolean(session?.user?.cpfRequired)}
       />
       <CpfRequirementModal
         onClose={() => setCpfModalOpen(false)}

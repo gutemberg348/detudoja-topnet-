@@ -52,19 +52,39 @@ import {
 } from "../modules/payouts/payout.controller.js";
 import { payoutAccountSchema } from "../modules/payouts/payout.validator.js";
 import {
-  payoutPixKeyValidationGatewayRateLimit,
   payoutPixKeyValidationRateLimit,
 } from "../middlewares/rate-limit.middleware.js";
+import {
+  acceptStoreStaffInviteController,
+  createStoreStaffInviteController,
+  declineStoreStaffInviteController,
+  getMyStoreWorkplacesController,
+  getStoreTeamController,
+  revokeStoreMemberController,
+} from "../modules/store-staff/store-staff.controller.js";
+import {
+  createStoreStaffInviteSchema,
+  decideStoreStaffInviteSchema,
+} from "../modules/store-staff/store-staff.validator.js";
 
 export const sellerRoutes = Router();
 
 sellerRoutes.get("/segments", listSellerSegmentsController);
 sellerRoutes.get("/store-categories", listSellerStoreCategoriesController);
 sellerRoutes.get("/profile", getSellerProfileController);
+sellerRoutes.get("/workplaces", getMyStoreWorkplacesController);
+sellerRoutes.post(
+  "/workplaces/invitations/accept",
+  validate(decideStoreStaffInviteSchema),
+  acceptStoreStaffInviteController,
+);
+sellerRoutes.post(
+  "/workplaces/invitations/:invitationId/decline",
+  declineStoreStaffInviteController,
+);
 sellerRoutes.get("/payout-account", getPayoutAccountController);
 sellerRoutes.put(
   "/payout-account",
-  payoutPixKeyValidationGatewayRateLimit,
   payoutPixKeyValidationRateLimit,
   validate(payoutAccountSchema),
   savePayoutAccountController,
@@ -88,6 +108,16 @@ sellerRoutes.patch(
   updateSellerStoreController,
 );
 sellerRoutes.delete("/stores/:storeId", deleteSellerStoreController);
+sellerRoutes.get("/stores/:storeId/team", getStoreTeamController);
+sellerRoutes.post(
+  "/stores/:storeId/team/invitations",
+  validate(createStoreStaffInviteSchema),
+  createStoreStaffInviteController,
+);
+sellerRoutes.delete(
+  "/stores/:storeId/team/members/:memberId",
+  revokeStoreMemberController,
+);
 sellerRoutes.post(
   "/stores/:storeId/charges",
   validate(createStoreChargeSchema),

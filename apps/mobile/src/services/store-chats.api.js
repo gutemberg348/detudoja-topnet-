@@ -65,3 +65,11 @@ export function sendStoreConversationMessage(token, conversationId, payload) {
     token,
   });
 }
+
+export function trackStoreConversationActivity(token, conversationId, data) {
+  return apiRequest(`/api/app/store-chats/${conversationId}/activity`, {
+    body: data,
+    method: "POST",
+    token,
+  });
+}

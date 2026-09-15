@@ -2,7 +2,17 @@ import { useEffect, useState } from "react";
 import { getMarketplaceSuggestions } from "../services/marketplace.api";
 import { normalizeSearchText } from "../utils/search";
 
-export function useMarketplaceSuggestions(accessToken, query, { enabled = true, limit = 8, scope = "" } = {}) {
+export function useMarketplaceSuggestions(
+  accessToken,
+  query,
+  {
+    enabled = true,
+    limit = 8,
+    minimumCharacters = 2,
+    scope = "",
+    showInitial = false,
+  } = {},
+) {
   const [isLoading, setIsLoading] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const search = normalizeSearchText(query);
@@ -10,7 +20,10 @@ export function useMarketplaceSuggestions(accessToken, query, { enabled = true, 
   useEffect(() => {
     let active = true;
 
-    if (!enabled || !accessToken || search.length < 1) {
+    const canLoadInitial = showInitial && search.length === 0;
+    const canAutocomplete = search.length >= minimumCharacters;
+
+    if (!enabled || !accessToken || (!canLoadInitial && !canAutocomplete)) {
       setSuggestions([]);
       setIsLoading(false);
       return () => {
@@ -24,7 +37,7 @@ export function useMarketplaceSuggestions(accessToken, query, { enabled = true, 
       try {
         const response = await getMarketplaceSuggestions(accessToken, {
           limit,
-          search,
+          search: search || undefined,
         });
 
         if (active) {
@@ -45,7 +58,7 @@ export function useMarketplaceSuggestions(accessToken, query, { enabled = true, 
       active = false;
       clearTimeout(timeout);
     };
-  }, [accessToken, enabled, limit, scope, search]);
+  }, [accessToken, enabled, limit, minimumCharacters, scope, search, showInitial]);
 
   return { isLoading, suggestions };
 }

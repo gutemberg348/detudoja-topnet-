@@ -138,20 +138,80 @@ export async function updateAdminUserStatus(adminId, userId, status) {
   return getAdminUser(parsedUserId);
 }
 
-export async function updateAdminUser(userId, data) {
+export async function updateAdminUser(adminId, userId, data) {
   const parsedUserId = parsePositiveId(userId, "Participante invalido");
-  const exists = await adminUsersRepository.findParticipantId(parsedUserId);
+  const cpf = data.cpf === undefined ? undefined : data.cpf.replace(/\D/g, "") || null;
+  if (cpf && !isValidCpf(cpf)) throw new AppError("CPF invalido", 400);
 
-  if (!exists) {
-    throw new AppError("Participante nao encontrado", 404);
+  try {
+    await adminUsersRepository.transaction(async (database) => {
+      const user = await database.usuario.findFirst({ where: { ...participantWhere, id: parsedUserId } });
+      if (!user) throw new AppError("Participante nao encontrado", 404);
+      if (data.cpf !== undefined && !cpf && user.cpf) {
+        throw new AppError("O CPF cadastrado nao pode ser removido; informe o CPF correto", 409);
+      }
+
+      await database.usuario.update({
+        data: {
+          ...(cpf !== undefined ? { cpf } : {}),
+          ...(data.email !== undefined ? { email: data.email.trim().toLowerCase() } : {}),
+          ...(data.name !== undefined ? { nome: data.name.trim() } : {}),
+          ...(data.phone !== undefined ? { telefone: data.phone.replace(/\D/g, "") || null } : {}),
+        },
+        where: { id: user.id },
+      });
+
+      if (cpf && cpf !== user.cpf) {
+        const syncOperations = [
+          database.kycUsuario.updateMany({ data: { cpf }, where: { usuario_id: user.id } }),
+          database.lojista.updateMany({ data: { cpf }, where: { tipo_pessoa: "FISICA", usuario_id: user.id } }),
+          database.vendedor.updateMany({ data: { cpf }, where: { tipo_pessoa: "FISICA", usuario_id: user.id } }),
+          database.contaBancaria.updateMany({
+            data: {
+              chave_pix: cpf,
+              documento_titular: cpf,
+              provedor_validacao: "CADASTRO_DIRETO",
+              status: "ATIVA",
+              validado_em: null,
+            },
+            where: { excluido_em: null, tipo_chave: "CPF", usuario_id: user.id },
+          }),
+        ];
+        if (user.cpf) {
+          syncOperations.push(database.contaBancaria.updateMany({
+            data: { documento_titular: cpf },
+            where: {
+              documento_titular: user.cpf,
+              excluido_em: null,
+              tipo_chave: { not: "CPF" },
+              usuario_id: user.id,
+            },
+          }));
+        }
+        await Promise.all(syncOperations);
+      }
+
+      await adminUsersRepository.createAudit(database, {
+        acao: "DADOS_PARTICIPANTE_ATUALIZADOS",
+        administrador_id: adminId,
+        dados_json: {
+          campos: Object.keys(data),
+          cpfAlterado: Boolean(cpf && cpf !== user.cpf),
+        },
+        usuario_alvo_id: user.id,
+      });
+    });
+  } catch (error) {
+    if (error?.code === "P2002") {
+      const target = Array.isArray(error.meta?.target) ? error.meta.target.join(",") : String(error.meta?.target ?? "");
+      if (target.includes("cpf") || target.includes("chave_pix")) {
+        throw new AppError("Este CPF ou chave Pix ja esta vinculado a outra conta", 409);
+      }
+      if (target.includes("telefone")) throw new AppError("Este telefone ja esta cadastrado", 409);
+      if (target.includes("email")) throw new AppError("Este e-mail ja esta cadastrado", 409);
+    }
+    throw error;
   }
-
-  await adminUsersRepository.update(parsedUserId, {
-    ...(data.cpf !== undefined ? { cpf: data.cpf.replace(/\D/g, "") || null } : {}),
-    ...(data.email !== undefined ? { email: data.email.trim().toLowerCase() } : {}),
-    ...(data.name !== undefined ? { nome: data.name.trim() } : {}),
-    ...(data.phone !== undefined ? { telefone: data.phone.replace(/\D/g, "") || null } : {}),
-  });
 
   return getAdminUser(parsedUserId);
 }

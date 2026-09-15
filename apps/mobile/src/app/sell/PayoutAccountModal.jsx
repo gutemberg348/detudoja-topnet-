@@ -93,13 +93,6 @@ function formatPixKey(type, value) {
   return String(value ?? "").replace(/\s/g, "").toLowerCase();
 }
 
-function formatHolderDocument(value) {
-  const characters = String(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
-  return /[A-Z]/.test(characters) || characters.length > 11
-    ? formatCnpj(characters)
-    : formatCpf(characters);
-}
-
 function isValidPixKey(type, value) {
   const raw = String(value ?? "").trim();
   if (type === "CPF") return isValidCpf(raw);
@@ -107,11 +100,6 @@ function isValidPixKey(type, value) {
   if (type === "TELEFONE") return /^[1-9]{2}9\d{8}$/.test(onlyDigits(raw));
   if (type === "EMAIL") return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(raw);
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(raw);
-}
-
-function isValidHolderDocument(value) {
-  const characters = String(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
-  return characters.length === 11 ? isValidCpf(characters) : isValidCnpj(characters);
 }
 
 function maskedPreview(type, value) {
@@ -146,19 +134,19 @@ export function PayoutAccountModal({
   onSubmit,
   open,
   purpose = "sale",
+  userNeedsCpf = false,
 }) {
   const isWithdrawal = purpose === "withdrawal";
   const selectedType = keyTypes.find((item) => item.value === form.keyType) ?? keyTypes[0];
   const selectedCopy = keyCopy[selectedType.value];
-  const keyValid = isValidPixKey(selectedType.value, form.key);
-  const holderNameValid = form.holderName.trim().length >= 2;
-  const holderDocumentValid = isValidHolderDocument(form.holderDocument);
-  const formValid = keyValid && holderNameValid && holderDocumentValid;
+  const usesAccountCpf = selectedType.value === "CPF";
+  const keyValid = usesAccountCpf ? !userNeedsCpf : isValidPixKey(selectedType.value, form.key);
+  const formValid = keyValid;
 
   return (
     <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={styles.backdrop}
       >
         <View style={styles.modal}>
@@ -214,7 +202,7 @@ export function PayoutAccountModal({
                 <View style={styles.currentAccountStatus}>
                   <View style={styles.statusDot} />
                   <Text style={styles.currentAccountStatusText}>
-                    {existingAccount.status === "ATIVA" ? "Verificada" : "Pendente"}
+                    {existingAccount.status === "ATIVA" ? "Pronta" : "Pendente"}
                   </Text>
                 </View>
               </View>
@@ -228,8 +216,8 @@ export function PayoutAccountModal({
               />
               <Text style={styles.contextText}>
                 {isWithdrawal
-                  ? "Consultamos o Asaas e liberamos o saque somente depois de confirmar o titular da chave."
-                  : "Consultamos o Asaas antes de liberar esta chave para receber QR presencial."}
+                  ? "Cadastre somente a chave. O destino e confirmado no envio do saque e, se o Pix falhar, o valor volta ao saldo."
+                  : "Cadastre somente a chave. O repasse e enviado pelo Asaas depois da venda e, se falhar, o valor volta a carteira."}
               </Text>
             </View>
 
@@ -276,68 +264,33 @@ export function PayoutAccountModal({
             <View style={styles.divider} />
 
             <View style={styles.section}>
-              <StepTitle number="2" text="Confirme os dados bancarios" />
-              <AppInput
-                autoCapitalize="none"
-                autoComplete={selectedType.value === "EMAIL" ? "email" : "off"}
-                error={form.key && !keyValid ? selectedCopy.error : undefined}
-                icon={selectedType.icon}
-                keyboardType={keyKeyboard(selectedType.value)}
-                label={`${existingAccount ? "Nova chave" : "Chave Pix"} - ${selectedType.label}`}
-                maxLength={
-                  selectedType.value === "CNPJ"
-                    ? 18
-                    : selectedType.value === "CPF"
-                      ? 14
-                      : selectedType.value === "TELEFONE"
-                        ? 15
-                        : selectedType.value === "ALEATORIA"
-                          ? 36
-                          : 255
-                }
-                onChangeText={(key) =>
-                  onChange((current) => ({
-                    ...current,
-                    key: formatPixKey(current.keyType, key),
-                  }))
-                }
-                placeholder={selectedCopy.placeholder}
-                returnKeyType="next"
-                value={form.key}
-              />
-              {!form.key ? <Text style={styles.fieldHint}>{selectedCopy.hint}</Text> : null}
-
-              <AppInput
-                autoCapitalize="words"
-                autoComplete="name"
-                error={form.holderName && !holderNameValid ? "Informe o nome do titular." : undefined}
-                icon="person-circle-outline"
-                label="Nome do titular"
-                maxLength={180}
-                onChangeText={(holderName) =>
-                  onChange((current) => ({ ...current, holderName }))
-                }
-                placeholder="Nome como aparece na conta bancaria"
-                returnKeyType="next"
-                value={form.holderName}
-              />
-              <AppInput
-                error={form.holderDocument && !holderDocumentValid
-                  ? "Digite um CPF ou CNPJ valido."
-                  : undefined}
-                icon="document-text-outline"
-                keyboardType="default"
-                label="CPF ou CNPJ do titular"
-                maxLength={18}
-                onChangeText={(holderDocument) =>
-                  onChange((current) => ({
-                    ...current,
-                    holderDocument: formatHolderDocument(holderDocument),
-                  }))
-                }
-                placeholder="Documento vinculado a sua conta"
-                value={form.holderDocument}
-              />
+              <StepTitle number="2" text={usesAccountCpf ? "Use o CPF da sua conta" : "Informe a chave Pix"} />
+              {usesAccountCpf ? (
+                <View style={styles.accountCpf}>
+                  <View style={styles.accountCpfIcon}>
+                    <Ionicons color={colors.primaryDark} name="person-outline" size={21} />
+                  </View>
+                  <View style={styles.accountCpfCopy}>
+                    <Text style={styles.accountCpfTitle}>CPF cadastrado na conta</Text>
+                    <Text style={styles.accountCpfText}>O app usa automaticamente seu CPF. Voce nao precisa digitar nome nem documento novamente.</Text>
+                  </View>
+                  <Ionicons color={colors.success} name="checkmark-circle" size={22} />
+                </View>
+              ) : <>
+                <AppInput
+                  autoCapitalize="none"
+                  autoComplete={selectedType.value === "EMAIL" ? "email" : "off"}
+                  error={form.key && !keyValid ? selectedCopy.error : undefined}
+                  icon={selectedType.icon}
+                  keyboardType={keyKeyboard(selectedType.value)}
+                  label={`${existingAccount ? "Nova chave" : "Chave Pix"} - ${selectedType.label}`}
+                  maxLength={selectedType.value === "CNPJ" ? 18 : selectedType.value === "TELEFONE" ? 15 : selectedType.value === "ALEATORIA" ? 36 : 255}
+                  onChangeText={(key) => onChange((current) => ({ ...current, key: formatPixKey(current.keyType, key) }))}
+                  placeholder={selectedCopy.placeholder}
+                  value={form.key}
+                />
+                {!form.key ? <Text style={styles.fieldHint}>{selectedCopy.hint}</Text> : null}
+              </>}
             </View>
 
             {formValid ? (
@@ -346,9 +299,9 @@ export function PayoutAccountModal({
                   <Ionicons color={colors.card} name="checkmark" size={18} />
                 </View>
                 <View style={styles.readyCopy}>
-                  <Text style={styles.readyTitle}>Pronto para consultar a titularidade</Text>
+                  <Text style={styles.readyTitle}>Chave pronta para salvar</Text>
                   <Text numberOfLines={1} style={styles.readyText}>
-                    {selectedType.label} {maskedPreview(selectedType.value, form.key)}
+                    {usesAccountCpf ? "CPF cadastrado na sua conta" : `${selectedType.label} ${maskedPreview(selectedType.value, form.key)}`}
                   </Text>
                 </View>
               </View>
@@ -365,7 +318,7 @@ export function PayoutAccountModal({
             <View style={styles.securityNote}>
               <Ionicons color={colors.primaryDark} name="lock-closed-outline" size={16} />
               <Text style={styles.securityText}>
-                A chave so fica ativa quando o Asaas confirma CPF/CNPJ e nome do titular.
+                Se o banco recusar o Pix, o valor retorna automaticamente ao saldo e voce recebe um aviso.
               </Text>
             </View>
             <AppButton
@@ -390,6 +343,27 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: spacing.md,
   },
+  accountCpf: {
+    alignItems: "center",
+    backgroundColor: colors.cardMuted,
+    borderColor: colors.primaryLight,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    padding: spacing.md,
+  },
+  accountCpfCopy: { flex: 1, gap: 3 },
+  accountCpfIcon: {
+    alignItems: "center",
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.round,
+    height: 42,
+    justifyContent: "center",
+    width: 42,
+  },
+  accountCpfText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption, lineHeight: 17 },
+  accountCpfTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small, fontWeight: "700" },
   body: {
     gap: spacing.lg,
     paddingHorizontal: spacing.xl,

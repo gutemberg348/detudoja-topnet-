@@ -5,8 +5,9 @@ import { Inter_700Bold } from "@expo-google-fonts/inter/700Bold";
 import { Inter_800ExtraBold } from "@expo-google-fonts/inter/800ExtraBold";
 import { useFonts } from "expo-font";
 import { StatusBar } from "expo-status-bar";
-import { useEffect } from "react";
-import { AppState, StyleSheet, View } from "react-native";
+import { useEffect, useState } from "react";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { AppState, Keyboard, Pressable, StyleSheet, Text, View } from "react-native";
 import { AppNavigator, navigationRef } from "./src/navigation/AppNavigator";
 import { heartbeatSellerServices } from "./src/services/service-chats.api";
 import {
@@ -18,18 +19,22 @@ import {
   AuthStoreProvider,
   useAuthStore,
 } from "./src/stores/useAuthStore";
-import { colors } from "./src/utils/theme";
+import { CartStoreProvider, useCartStore } from "./src/stores/useCartStore";
+import { colors, fonts, radius, shadow, spacing } from "./src/utils/theme";
 
 export function App() {
   return (
     <AuthStoreProvider>
-      <AppContent />
+      <CartStoreProvider>
+        <AppContent />
+      </CartStoreProvider>
     </AuthStoreProvider>
   );
 }
 
 function AppContent() {
   const { session } = useAuthStore();
+  const [activeRouteName, setActiveRouteName] = useState("");
   const [fontsLoaded] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -92,8 +97,57 @@ function AppContent() {
   return (
     <View style={styles.app}>
       <StatusBar style="dark" />
-      <AppNavigator />
+      <AppNavigator onRouteChange={setActiveRouteName} />
+      <GlobalCartButton activeRouteName={activeRouteName} />
     </View>
+  );
+}
+
+const routesWithoutFloatingCart = new Set([
+  "Cart",
+  "Checkout",
+  "CheckoutPayment",
+  "GatewayPixPayment",
+  "PersonalConversation",
+  "ProductDetails",
+  "ServiceConversation",
+  "StoreConversation",
+]);
+
+function GlobalCartButton({ activeRouteName }) {
+  const { itemCount } = useCartStore();
+  const { session } = useAuthStore();
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    const showSubscription = Keyboard.addListener("keyboardDidShow", () => setKeyboardVisible(true));
+    const hideSubscription = Keyboard.addListener("keyboardDidHide", () => setKeyboardVisible(false));
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
+  if (
+    !session
+    || itemCount <= 0
+    || keyboardVisible
+    || routesWithoutFloatingCart.has(activeRouteName)
+  ) return null;
+
+  return (
+    <Pressable
+      accessibilityLabel={`Abrir carrinho com ${itemCount} itens`}
+      onPress={() => navigationRef.isReady() && navigationRef.navigate("Cart")}
+      style={({ pressed }) => [styles.globalCart, pressed && styles.globalCartPressed]}
+    >
+      <View style={styles.globalCartIcon}>
+        <Ionicons color={colors.card} name="bag-handle" size={22} />
+        <View style={styles.globalCartBadge}>
+          <Text style={styles.globalCartBadgeText}>{itemCount > 99 ? "99+" : itemCount}</Text>
+        </View>
+      </View>
+    </Pressable>
   );
 }
 
@@ -102,4 +156,37 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     flex: 1,
   },
+  globalCart: {
+    alignItems: "center",
+    backgroundColor: colors.primaryDark,
+    borderRadius: radius.round,
+    bottom: 84,
+    height: 52,
+    justifyContent: "center",
+    minHeight: 52,
+    position: "absolute",
+    right: spacing.md,
+    width: 52,
+    ...shadow,
+    elevation: 8,
+    zIndex: 100,
+  },
+  globalCartBadge: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderRadius: radius.round,
+    minHeight: 18,
+    minWidth: 18,
+    paddingHorizontal: 4,
+    position: "absolute",
+    right: -9,
+    top: -8,
+  },
+  globalCartBadgeText: {
+    color: colors.primaryDark,
+    fontFamily: fonts.extraBold,
+    fontSize: 10,
+  },
+  globalCartIcon: { position: "relative" },
+  globalCartPressed: { opacity: 0.82 },
 });

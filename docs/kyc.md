@@ -120,6 +120,12 @@ para facilitar um teste.
 - O Docker usa o volume persistente `kyc_private_data`.
 - O container `kyc-worker` processa OCR/biometria separado do processo HTTP da
   API. Em execucao local, o worker pode rodar dentro da API.
+- O proxy Nginx da API precisa aceitar o conjunto das tres fotos. Inclua
+  `docker/nginx/kyc-upload.conf` dentro do bloco `server` de
+  `api-brasil.testes-techcode.shop`; o limite padrao de 1 MB do Nginx rejeita
+  fotos de celulares antes que a requisicao chegue ao Express.
+- O app reduz o maior lado de cada captura para 1800 px e envia JPEG comprimido.
+  A API ainda normaliza novamente a imagem e limita cada arquivo a 8 MB.
 - Imagens so podem ser lidas por rota administrativa autenticada e usam
   `Cache-Control: private, no-store`.
 - Cada imagem aceita no maximo 8 MB. O rate limit usa Redis quando conectado.

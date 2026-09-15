@@ -5,8 +5,12 @@ import {
   getStoreConversationController,
   listStoreConversationsController,
   openStoreConversationController,
+  trackStoreConversationActivityController,
 } from "../modules/store-chats/store-chats.controller.js";
-import { createStoreChatMessageSchema } from "../modules/store-chats/store-chats.validator.js";
+import {
+  createStoreChatMessageSchema,
+  storeChatActivitySchema,
+} from "../modules/store-chats/store-chats.validator.js";
 
 export const storeChatsRoutes = Router();
 
@@ -14,8 +18,12 @@ storeChatsRoutes.get("/", listStoreConversationsController);
 storeChatsRoutes.post("/stores/:storeId/open", openStoreConversationController);
 storeChatsRoutes.get("/:conversationId", getStoreConversationController);
 storeChatsRoutes.post(
+  "/:conversationId/activity",
+  validate(storeChatActivitySchema),
+  trackStoreConversationActivityController,
+);
+storeChatsRoutes.post(
   "/:conversationId/messages",
   validate(createStoreChatMessageSchema),
   createStoreConversationMessageController,
 );
-

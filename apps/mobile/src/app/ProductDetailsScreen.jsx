@@ -12,6 +12,9 @@ import {
 import { AppButton } from "../components/AppButton";
 import { BackHeader } from "../components/BackHeader";
 import { ScreenContainer } from "../components/ScreenContainer";
+import { trackStoreConversationActivity } from "../services/store-chats.api";
+import { useAuthStore } from "../stores/useAuthStore";
+import { useCartStore } from "../stores/useCartStore";
 import { buildCartItem, productPriceCents } from "../utils/checkout";
 import { resolveMediaUrl } from "../utils/media";
 import { formatarDinheiro } from "../utils/money";
@@ -25,8 +28,11 @@ import {
 } from "../utils/theme";
 
 export function ProductDetailsScreen({ navigation, route }) {
+  const { session } = useAuthStore();
+  const { addItem, itemCount, setCart } = useCartStore();
   const product = route.params?.product;
   const store = route.params?.store;
+  const conversationId = route.params?.conversationId;
   const [notes, setNotes] = useState("");
   const [quantity, setQuantity] = useState(1);
   const [storeLogoFailed, setStoreLogoFailed] = useState(false);
@@ -47,10 +53,30 @@ export function ProductDetailsScreen({ navigation, route }) {
   const totalCents = priceCents * quantity;
   const negotiatesByChat = storeUsesChatNegotiation(store);
   const item = buildCartItem(product, { notes, quantity });
-  const cartParams = { items: [item], store };
+  const cartParams = { conversationId, items: [item], store };
 
   function changeQuantity(nextQuantity) {
     setQuantity(Math.max(1, Math.min(nextQuantity, 99)));
+  }
+
+  function track(action) {
+    if (!conversationId || !session?.accessToken) return;
+    void trackStoreConversationActivity(session.accessToken, conversationId, {
+      action,
+      productId: product.id,
+    }).catch(() => {});
+  }
+
+  function addToCart() {
+    track("ADD_TO_CART");
+    addItem(item, store, conversationId);
+    navigation.navigate("Cart");
+  }
+
+  function buyNow() {
+    track("START_CHECKOUT");
+    setCart(cartParams);
+    navigation.navigate("Checkout", cartParams);
   }
 
   return (
@@ -71,19 +97,26 @@ export function ProductDetailsScreen({ navigation, route }) {
           style={styles.heroOverlay}
         />
         <View style={styles.topBar}>
-          <Pressable
-            onPress={() => navigation.navigate("Cart", cartParams)}
-            style={styles.roundButton}
-          >
-            <Ionicons color={colors.textPrimary} name="bag-handle-outline" size={22} />
-          </Pressable>
+          {itemCount > 0 ? (
+            <Pressable
+              accessibilityLabel={`Abrir carrinho com ${itemCount} itens`}
+              onPress={() => navigation.navigate("Cart")}
+              style={styles.roundButton}
+            >
+              <Ionicons color={colors.textPrimary} name="bag-handle-outline" size={22} />
+            </Pressable>
+          ) : null}
         </View>
       </View>
 
       <View style={styles.body}>
         <Pressable
           accessibilityLabel={`Abrir loja ${store.name}`}
-          onPress={() => navigation.navigate("StoreDetails", { lojaId: store.id, store })}
+          onPress={() => navigation.navigate("StoreConversation", {
+            conversationId,
+            store,
+            storeId: store.id,
+          })}
           style={styles.storeBrand}
         >
           <View style={styles.storeBrandLogo}>
@@ -186,13 +219,13 @@ export function ProductDetailsScreen({ navigation, route }) {
         <View style={styles.bottomActions}>
           <AppButton
             icon="bag-add-outline"
-            onPress={() => navigation.navigate("Cart", cartParams)}
+            onPress={addToCart}
             title="Adicionar ao carrinho"
             variant="outline"
           />
           <AppButton
             icon={negotiatesByChat ? "chatbubble-ellipses-outline" : "card-outline"}
-            onPress={() => navigation.navigate("Checkout", cartParams)}
+            onPress={buyNow}
             title={
               negotiatesByChat
                 ? `Pedir pelo chat - ${formatarDinheiro(totalCents)}`

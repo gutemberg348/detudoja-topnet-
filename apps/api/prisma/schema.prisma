@@ -216,6 +216,14 @@ enum StatusUsuarioLoja {
   BLOQUEADO
 }
 
+enum StatusConviteFuncionarioLoja {
+  PENDENTE
+  ACEITO
+  RECUSADO
+  REVOGADO
+  EXPIRADO
+}
+
 enum StatusVendedor {
   PENDENTE
   ATIVO
@@ -664,6 +672,8 @@ model Usuario {
   vendedor                   Vendedor?
   lojista                    Lojista?
   lojas_vinculadas           UsuarioLoja[]
+  convites_loja_recebidos    ConviteFuncionarioLoja[]  @relation("ConviteFuncionarioConvidado")
+  convites_loja_criados      ConviteFuncionarioLoja[]  @relation("ConviteFuncionarioCriador")
   transacoes_compradas       TransacaoComercial[]      @relation("UsuarioComprador")
   recebiveis                 Recebivel[]               @relation("UsuarioRecebedor")
   repasses_pix               RepassePix[]
@@ -1066,25 +1076,26 @@ model Loja {
   atualizado_em                            DateTime   @updatedAt @db.Timestamptz(3)
   excluido_em                              DateTime?  @db.Timestamptz(3)
 
-  lojista              Lojista              @relation(fields: [lojista_id], references: [id], onDelete: Restrict)
-  categoria            CategoriaLoja        @relation(fields: [categoria_id], references: [id], onDelete: Restrict)
-  segmento_venda       SegmentoVenda?       @relation(fields: [segmento_venda_id], references: [id], onDelete: Restrict)
-  endereco             EnderecoLoja?
-  usuarios             UsuarioLoja[]
-  produtos             ProdutoLoja[]
-  pagamentos           Pagamento[]
-  pedidos              PedidoLoja[]
-  transacoes           TransacaoComercial[]
-  recebiveis           Recebivel[]
-  campanhas_cashback   CampanhaCashback[]
-  documentos_fiscais   DocumentoFiscal[]
-  taxas_plataforma     TaxaPlataforma[]
-  cobrancas            Cobranca[]
-  cadastros_origem     Usuario[]            @relation("UsuariosCadastroOrigemLoja")
-  conversas_gerais     ConversaLoja[]
-  conversas_motoboy    ConversaServico[]    @relation("LojaSolicitacoesMotoboy")
-  solicitacoes_motoboy SolicitacaoMotoboy[] @relation("LojaChamadasMotoboy")
-  motoboys_equipe      MotoboyLoja[]
+  lojista               Lojista                  @relation(fields: [lojista_id], references: [id], onDelete: Restrict)
+  categoria             CategoriaLoja            @relation(fields: [categoria_id], references: [id], onDelete: Restrict)
+  segmento_venda        SegmentoVenda?           @relation(fields: [segmento_venda_id], references: [id], onDelete: Restrict)
+  endereco              EnderecoLoja?
+  usuarios              UsuarioLoja[]
+  produtos              ProdutoLoja[]
+  pagamentos            Pagamento[]
+  pedidos               PedidoLoja[]
+  transacoes            TransacaoComercial[]
+  recebiveis            Recebivel[]
+  campanhas_cashback    CampanhaCashback[]
+  documentos_fiscais    DocumentoFiscal[]
+  taxas_plataforma      TaxaPlataforma[]
+  cobrancas             Cobranca[]
+  cadastros_origem      Usuario[]                @relation("UsuariosCadastroOrigemLoja")
+  conversas_gerais      ConversaLoja[]
+  conversas_motoboy     ConversaServico[]        @relation("LojaSolicitacoesMotoboy")
+  solicitacoes_motoboy  SolicitacaoMotoboy[]     @relation("LojaChamadasMotoboy")
+  motoboys_equipe       MotoboyLoja[]
+  convites_funcionarios ConviteFuncionarioLoja[]
 
   @@index([lojista_id])
   @@index([categoria_id])
@@ -1096,16 +1107,17 @@ model Loja {
 }
 
 model ConversaLoja {
-  id                 Int                @id @default(autoincrement())
-  loja_id            Int
-  cliente_usuario_id Int
-  status             StatusConversaLoja @default(ABERTA)
-  nao_lidas_cliente  Int                @default(0)
-  nao_lidas_loja     Int                @default(0)
-  ultima_mensagem_em DateTime?          @db.Timestamptz(3)
-  arquivado_em       DateTime?          @db.Timestamptz(3)
-  criado_em          DateTime           @default(now()) @db.Timestamptz(3)
-  atualizado_em      DateTime           @updatedAt @db.Timestamptz(3)
+  id                        Int                @id @default(autoincrement())
+  loja_id                   Int
+  cliente_usuario_id        Int
+  status                    StatusConversaLoja @default(ABERTA)
+  atendimento_solicitado_em DateTime?          @db.Timestamptz(3)
+  nao_lidas_cliente         Int                @default(0)
+  nao_lidas_loja            Int                @default(0)
+  ultima_mensagem_em        DateTime?          @db.Timestamptz(3)
+  arquivado_em              DateTime?          @db.Timestamptz(3)
+  criado_em                 DateTime           @default(now()) @db.Timestamptz(3)
+  atualizado_em             DateTime           @updatedAt @db.Timestamptz(3)
 
   loja      Loja                   @relation(fields: [loja_id], references: [id], onDelete: Cascade)
   cliente   Usuario                @relation("ConversaLojaCliente", fields: [cliente_usuario_id], references: [id], onDelete: Cascade)
@@ -1221,6 +1233,29 @@ model UsuarioLoja {
   @@index([cargo])
   @@index([status])
   @@map("usuarios_loja")
+}
+
+model ConviteFuncionarioLoja {
+  id                    Int                          @id @default(autoincrement())
+  loja_id               Int
+  convidado_usuario_id  Int?
+  criado_por_usuario_id Int
+  cargo                 CargoUsuarioLoja             @default(ATENDENTE)
+  token_hash            String                       @unique @db.VarChar(128)
+  status                StatusConviteFuncionarioLoja @default(PENDENTE)
+  expira_em             DateTime                     @db.Timestamptz(3)
+  aceito_em             DateTime?                    @db.Timestamptz(3)
+  criado_em             DateTime                     @default(now()) @db.Timestamptz(3)
+  atualizado_em         DateTime                     @updatedAt @db.Timestamptz(3)
+
+  loja       Loja     @relation(fields: [loja_id], references: [id], onDelete: Cascade)
+  convidado  Usuario? @relation("ConviteFuncionarioConvidado", fields: [convidado_usuario_id], references: [id], onDelete: Cascade)
+  criado_por Usuario  @relation("ConviteFuncionarioCriador", fields: [criado_por_usuario_id], references: [id], onDelete: Cascade)
+
+  @@index([loja_id, status])
+  @@index([convidado_usuario_id, status])
+  @@index([expira_em, status])
+  @@map("convites_funcionarios_loja")
 }
 
 model Vendedor {

@@ -1,11 +1,15 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useState } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { CartAddButton } from "./CartAddButton";
+import { useCartStore } from "../stores/useCartStore";
+import { buildCartItem } from "../utils/checkout";
 import { resolveMediaUrl } from "../utils/media";
 import { formatarDinheiro } from "../utils/money";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
 
 export function MarketplaceProductCard({ item, onPress, style, variant = "list" }) {
+  const { addItem } = useCartStore();
   const [imageFailed, setImageFailed] = useState(false);
   const product = item?.product ?? {};
   const store = item?.store ?? {};
@@ -16,66 +20,79 @@ export function MarketplaceProductCard({ item, onPress, style, variant = "list" 
   const isGrid = variant === "grid";
 
   return (
-    <Pressable
-      accessibilityLabel={`Abrir produto ${product.name ?? ""}`}
-      accessibilityRole="button"
-      disabled={soldOut}
-      onPress={() => onPress?.(item)}
-      style={({ pressed }) => [
+    <View
+      style={[
         styles.card,
         isGrid && styles.cardGrid,
         style,
         soldOut && styles.cardDisabled,
-        pressed && styles.pressed,
       ]}
     >
-      <View style={[styles.media, isGrid && styles.mediaGrid]}>
-        {imageUrl && !imageFailed ? (
-          <Image
-            onError={() => setImageFailed(true)}
-            resizeMode="cover"
-            source={{ uri: imageUrl }}
-            style={styles.image}
-          />
-        ) : (
-          <View style={styles.imageFallback}>
-            <Ionicons color={colors.primaryDark} name="cube-outline" size={27} />
-          </View>
-        )}
-        {product.featured ? (
-          <View style={styles.featuredBadge}>
-            <Ionicons color={colors.warning} name="star" size={11} />
-          </View>
-        ) : null}
-      </View>
-
-      <View style={[styles.copy, isGrid && styles.copyGrid]}>
-        <Text numberOfLines={1} style={styles.storeName}>{store.name ?? "Loja"}</Text>
-        <Text numberOfLines={isGrid ? 2 : 1} style={styles.productName}>{product.name ?? "Produto"}</Text>
-        <Text numberOfLines={2} style={styles.description}>
-          {product.shortDescription || product.description || "Disponivel para comprar pelo app."}
-        </Text>
-
-        <View style={[styles.footer, isGrid && styles.footerGrid]}>
-          <View style={styles.priceBlock}>
-            {product.promotionalPriceCents ? (
-              <Text style={styles.oldPrice}>{formatarDinheiro(product.priceCents)}</Text>
-            ) : null}
-            <Text style={styles.price}>{formatarDinheiro(currentPrice)}</Text>
-          </View>
-          {cashbackPercent > 0 ? (
-            <View style={styles.cashback}>
-              <Ionicons color={colors.primaryDark} name="cash-outline" size={13} />
-              <Text style={styles.cashbackText}>{formatPercent(cashbackPercent)} de volta</Text>
+      <Pressable
+        accessibilityLabel={`Abrir produto ${product.name ?? ""}`}
+        accessibilityRole="button"
+        disabled={soldOut}
+        onPress={() => onPress?.(item)}
+        style={({ pressed }) => [
+          styles.productLink,
+          isGrid && styles.productLinkGrid,
+          pressed && styles.pressed,
+        ]}
+      >
+        <View style={[styles.media, isGrid && styles.mediaGrid]}>
+          {imageUrl && !imageFailed ? (
+            <Image
+              onError={() => setImageFailed(true)}
+              resizeMode="cover"
+              source={{ uri: imageUrl }}
+              style={styles.image}
+            />
+          ) : (
+            <View style={styles.imageFallback}>
+              <Ionicons color={colors.primaryDark} name="cube-outline" size={27} />
+            </View>
+          )}
+          {product.featured ? (
+            <View style={styles.featuredBadge}>
+              <Ionicons color={colors.warning} name="star" size={11} />
             </View>
           ) : null}
         </View>
-      </View>
 
-      <View style={[styles.arrow, isGrid && styles.arrowGrid]}>
-        <Ionicons color={colors.primaryDark} name="chevron-forward" size={18} />
-      </View>
-    </Pressable>
+        <View style={[styles.copy, isGrid && styles.copyGrid]}>
+          <Text numberOfLines={1} style={styles.storeName}>{store.name ?? "Loja"}</Text>
+          <Text numberOfLines={isGrid ? 2 : 1} style={styles.productName}>{product.name ?? "Produto"}</Text>
+          <Text numberOfLines={2} style={styles.description}>
+            {product.shortDescription || product.description || "Disponivel para comprar pelo app."}
+          </Text>
+
+          <View style={[styles.footer, isGrid && styles.footerGrid]}>
+            <View style={styles.priceBlock}>
+              {product.promotionalPriceCents ? (
+                <Text style={styles.oldPrice}>{formatarDinheiro(product.priceCents)}</Text>
+              ) : null}
+              <Text style={styles.price}>{formatarDinheiro(currentPrice)}</Text>
+            </View>
+            {cashbackPercent > 0 ? (
+              <View style={styles.cashback}>
+                <Ionicons color={colors.primaryDark} name="cash-outline" size={13} />
+                <Text style={styles.cashbackText}>{formatPercent(cashbackPercent)} de volta</Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+      </Pressable>
+
+      {!soldOut ? (
+        <CartAddButton
+          direction="down"
+          name={product.name}
+          onPress={() => addItem(buildCartItem(product), store)}
+          size={32}
+          style={isGrid ? styles.addButtonGrid : null}
+        />
+      ) : null}
+    </View>
   );
 }
 
@@ -84,14 +101,7 @@ function formatPercent(value) {
 }
 
 const styles = StyleSheet.create({
-  arrow: {
-    alignItems: "center",
-    backgroundColor: colors.primarySoft,
-    borderRadius: radius.round,
-    height: 32,
-    justifyContent: "center",
-    width: 32,
-  },
+  addButtonGrid: { bottom: spacing.md, position: "absolute", right: spacing.md },
   cashback: {
     alignItems: "center",
     flexDirection: "row",
@@ -122,7 +132,7 @@ const styles = StyleSheet.create({
     gap: 0,
     minHeight: 270,
     minWidth: 0,
-    overflow: "hidden",
+    overflow: "visible",
     padding: 0,
     position: "relative",
   },
@@ -189,6 +199,18 @@ const styles = StyleSheet.create({
     textDecorationLine: "line-through",
   },
   pressed: { opacity: 0.86, transform: [{ scale: 0.99 }] },
+  productLink: {
+    alignItems: "center",
+    flex: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    minWidth: 0,
+  },
+  productLinkGrid: {
+    alignItems: "stretch",
+    flexDirection: "column",
+    gap: 0,
+  },
   price: {
     color: colors.primaryDark,
     fontFamily: fonts.extraBold,
@@ -209,12 +231,5 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "600",
     textTransform: "uppercase",
-  },
-  arrowGrid: {
-    bottom: spacing.md,
-    height: 28,
-    position: "absolute",
-    right: spacing.md,
-    width: 28,
   },
 });

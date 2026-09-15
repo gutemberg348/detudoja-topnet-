@@ -3,35 +3,36 @@ import { Pressable, StyleSheet, Text } from "react-native";
 import { colors, fonts, radius, spacing, typography } from "../utils/theme";
 
 export function BackHeader({
+  compact = false,
   color = colors.primaryDark,
   onPress,
+  showTitle = true,
   style,
   title = "Voltar",
   titleStyle,
 }) {
   return (
     <Pressable
-      accessibilityLabel={title}
+      accessibilityLabel={title || "Voltar"}
       accessibilityRole="button"
       hitSlop={12}
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
+        compact && styles.buttonCompact,
         style,
         pressed && styles.pressed,
       ]}
     >
       <Ionicons color={color} name="chevron-back" size={20} style={styles.icon} />
-      <Text
-        numberOfLines={1}
-        style={[
-          styles.title,
-          { color },
-          titleStyle,
-        ]}
-      >
-        {title}
-      </Text>
+      {showTitle ? (
+        <Text
+          numberOfLines={1}
+          style={[styles.title, { color }, titleStyle]}
+        >
+          {title}
+        </Text>
+      ) : null}
     </Pressable>
   );
 }
@@ -49,6 +50,15 @@ const styles = StyleSheet.create({
     minHeight: 36,
     paddingLeft: spacing.sm,
     paddingRight: spacing.md,
+  },
+  buttonCompact: {
+    alignSelf: "center",
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    height: 38,
+    minHeight: 38,
+    paddingHorizontal: 0,
+    width: 38,
   },
   icon: {
     marginLeft: -2,

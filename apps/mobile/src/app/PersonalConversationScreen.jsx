@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppButton } from "../components/AppButton";
+import { BackHeader } from "../components/BackHeader";
 import { ChatComposer } from "../components/ChatComposer";
 import { ContactAvatar } from "../components/ContactAvatar";
 import {
@@ -153,13 +154,14 @@ export function PersonalConversationScreen({ navigation, route }) {
   }
 
   return (
-    <SafeAreaView edges={["left", "right"]} style={styles.safeArea}>
+    <SafeAreaView edges={["top", "left", "right"]} style={styles.safeArea}>
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={0}
         style={styles.keyboard}
       >
         <View style={styles.header}>
+          <BackHeader compact onPress={navigation.goBack} showTitle={false} />
           <ContactAvatar
             name={conversation?.displayName}
             photoUrl={conversation?.person?.photoUrl}
@@ -196,6 +198,7 @@ export function PersonalConversationScreen({ navigation, route }) {
           </View>
         ) : (
           <FlatList
+            automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
             contentContainerStyle={styles.messages}
             data={conversation?.messages ?? []}
             keyExtractor={(item) => String(item.id)}

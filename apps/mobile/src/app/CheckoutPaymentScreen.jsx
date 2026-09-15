@@ -12,6 +12,7 @@ import {
   payCustomerOrderProposal,
 } from "../services/orders.api";
 import { useAuthStore } from "../stores/useAuthStore";
+import { useCartStore } from "../stores/useCartStore";
 import { useWalletStore } from "../stores/useWalletStore";
 import { formatarDinheiro } from "../utils/money";
 import {
@@ -25,6 +26,7 @@ import {
 
 export function CheckoutPaymentScreen({ navigation, route }) {
   const { session } = useAuthStore();
+  const { clearCart } = useCartStore();
   const { wallets } = useWalletStore();
   const [useBalance, setUseBalance] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -94,6 +96,8 @@ export function CheckoutPaymentScreen({ navigation, route }) {
             payment: paymentData,
           storeId: store.id,
           }, checkoutIdempotencyKeyRef.current ??= createOrderIdempotencyKey("checkout"));
+
+      if (!isProposalPayment) clearCart();
 
       if (response.gatewayPayment) {
         navigation.replace("GatewayPixPayment", {

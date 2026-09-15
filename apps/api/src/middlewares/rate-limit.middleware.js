@@ -128,25 +128,14 @@ export const withdrawalRequestRateLimit = createRateLimiter({
 });
 
 export const payoutPixKeyValidationRateLimit = createRateLimiter({
-  keyPrefix: "payout-pix-key-validation-user-v2",
+  keyPrefix: "payout-pix-key-update-user-v3",
   keyGenerator: (req) => `payout-pix-key:${req.auth.user.id}`,
   legacyHeaders: false,
-  limit: 5,
-  message: { message: "Limite de validacoes atingido. Aguarde 5 minutos e confira os dados antes de tentar novamente." },
+  limit: 10,
+  message: { message: "Muitas alteracoes de chave Pix. Aguarde alguns minutos antes de tentar novamente." },
   skip: skipInTests,
   standardHeaders: "draft-7",
   windowMs: 5 * 60 * 1000,
-});
-
-export const payoutPixKeyValidationGatewayRateLimit = createRateLimiter({
-  keyPrefix: "payout-pix-key-validation-gateway",
-  keyGenerator: () => "asaas-external-pix-key",
-  legacyHeaders: false,
-  limit: 4,
-  message: { message: "A validacao Pix esta temporariamente ocupada. Aguarde um minuto." },
-  skip: skipInTests,
-  standardHeaders: "draft-7",
-  windowMs: 60 * 1000,
 });
 
 export const courierRequestCreateRateLimit = createRateLimiter({

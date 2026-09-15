@@ -121,8 +121,6 @@ export function SellScreen() {
   const [pendingPayoutAction, setPendingPayoutAction] = useState(null);
   const [payoutAccount, setPayoutAccount] = useState(null);
   const [payoutForm, setPayoutForm] = useState({
-    holderDocument: "",
-    holderName: "",
     key: "",
     keyType: "CPF",
   });
@@ -360,10 +358,8 @@ export function SellScreen() {
     runSellerAction(action);
   }
 
-  function openPayoutForm(action = null, sellerProfile = profile) {
+  function openPayoutForm(action = null) {
     setPayoutForm({
-      holderDocument: sellerProfile?.document ?? "",
-      holderName: sellerProfile?.publicName ?? session?.user?.name ?? "",
       key: "",
       keyType: payoutAccount?.keyType ?? "CPF",
     });
@@ -399,7 +395,7 @@ export function SellScreen() {
       if (response.account?.status === "ATIVA") {
         continuePayoutAction(nextAction);
       } else {
-        setError("A chave foi salva, mas ainda precisa ser validada antes de receber ou sacar.");
+        setError("A chave foi salva, mas ainda nao esta disponivel. Edite-a e tente novamente.");
       }
     } catch (requestError) {
       if (requestError instanceof ApiError && requestError.status === 428) {
@@ -521,7 +517,7 @@ export function SellScreen() {
         if (hasActivePayoutAccount) {
           showAutonomousSale();
         } else {
-          openPayoutForm({ type: "sale" }, response.profile);
+          openPayoutForm({ type: "sale" });
         }
       }
       if (onboardingFlow === "service") {
@@ -1102,6 +1098,7 @@ export function SellScreen() {
         }}
         onSubmit={submitPayoutAccount}
         open={payoutOpen}
+        userNeedsCpf={Boolean(session?.user?.cpfRequired)}
       />
     </>
   );
@@ -1126,6 +1123,7 @@ export function SellScreen() {
           onBack={() => setStoreDetailsOpen(false)}
           onCallCourier={() => navigation.navigate("StoreCourierRequest", { store: activeStore })}
           onManageCouriers={() => navigation.navigate("StoreCourierTeam", { store: activeStore })}
+          onManageTeam={() => navigation.navigate("StoreTeam", { store: activeStore })}
           onDeleteProduct={confirmDeleteProduct}
           onDeleteStore={confirmDeleteStore}
           onEditMedia={openMediaForm}
@@ -1201,6 +1199,7 @@ export function SellScreen() {
         }}
         onSubmit={submitPayoutAccount}
         open={payoutOpen}
+        userNeedsCpf={Boolean(session?.user?.cpfRequired)}
       />
 
       <CpfRequirementModal

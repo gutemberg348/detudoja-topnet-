@@ -81,7 +81,7 @@ export async function updateAdminUserStatusController(req, res, next) {
 
 export async function updateAdminUserController(req, res, next) {
   try {
-    res.json(await updateAdminUser(req.params.userId, req.body));
+    res.json(await updateAdminUser(req.auth.user.id, req.params.userId, req.body));
   } catch (error) {
     next(error);
   }

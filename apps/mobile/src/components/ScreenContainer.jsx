@@ -23,6 +23,7 @@ export function ScreenContainer({
   const contentStyle = [styles.contentWidth, padded && styles.padded, contentContainerStyle];
   const content = scroll ? (
     <ScrollView
+      automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
       contentContainerStyle={styles.scrollContent}
       keyboardShouldPersistTaps="handled"
       onContentSizeChange={onContentSizeChange}
@@ -38,20 +39,22 @@ export function ScreenContainer({
     </View>
   );
 
-  return (
+  const safeContent = (
     <SafeAreaView edges={edges} style={[styles.safeArea, style]}>
-      {keyboardAvoiding ? (
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          keyboardVerticalOffset={keyboardVerticalOffset}
-          style={styles.keyboard}
-        >
-          {content}
-        </KeyboardAvoidingView>
-      ) : (
-        <View style={styles.keyboard}>{content}</View>
-      )}
+      {content}
     </SafeAreaView>
+  );
+
+  return keyboardAvoiding ? (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={keyboardVerticalOffset}
+      style={styles.keyboard}
+    >
+      {safeContent}
+    </KeyboardAvoidingView>
+  ) : (
+    <View style={styles.keyboard}>{safeContent}</View>
   );
 }
 

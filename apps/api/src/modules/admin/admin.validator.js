@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isValidCpf } from "../../utils/cpf.js";
 
 export const createAdministratorSchema = z.object({
   email: z.string().trim().email("Informe um e-mail valido").max(255),
@@ -128,7 +129,7 @@ export const updateAdminPayoutAccountSchema = z.object({
 
 export const updateAdminUserSchema = z
   .object({
-    cpf: z.string().trim().max(14).optional().or(z.literal("")),
+    cpf: z.string().trim().max(14).refine((value) => !value || isValidCpf(value), "CPF invalido").optional().or(z.literal("")),
     email: z.string().trim().email("E-mail invalido").max(255).optional(),
     name: z.string().trim().min(2, "Informe o nome").max(160).optional(),
     phone: z.string().trim().max(30).optional().or(z.literal("")),

@@ -57,15 +57,18 @@ export function StoresScreen({ navigation, route }) {
   const [marketplaceLocation, setMarketplaceLocation] = useState(null);
   const [products, setProducts] = useState([]);
   const [resultMode, setResultMode] = useState(() => initialResultMode(route));
+  const [searchFocused, setSearchFocused] = useState(false);
   const [serviceTypes, setServiceTypes] = useState([]);
   const [search, setSearch] = useState(route.params?.query ?? "");
   const [stores, setStores] = useState([]);
-  const { suggestions } = useMarketplaceSuggestions(session?.accessToken, search, {
-    enabled: Boolean(marketplaceLocation),
-    limit: 8,
+  const { isLoading: suggestionsLoading, suggestions } = useMarketplaceSuggestions(session?.accessToken, search, {
+    enabled: Boolean(marketplaceLocation) && searchFocused,
+    limit: 12,
+    minimumCharacters: 2,
     scope: marketplaceLocation
       ? `${marketplaceLocation.city}|${marketplaceLocation.state}`
       : "",
+    showInitial: true,
   });
   const hasSearch = Boolean(search.trim());
   const hasMarketplaceSearch = Boolean(marketplaceSearch.trim());
@@ -77,6 +80,13 @@ export function StoresScreen({ navigation, route }) {
     () => regularCategories.find((item) => item.id === category) ?? null,
     [regularCategories, category],
   );
+  const matchingCategories = useMemo(() => {
+    if (!hasSearch) return [];
+    return regularCategories.filter((item) => (
+      matchesSearchText(item.name, search)
+      || matchesSearchText(item.description, search)
+    ));
+  }, [hasSearch, regularCategories, search]);
   const visibleStores = useMemo(
     () => stores.filter((store) => !isServiceStoreCategory(store.category)),
     [stores],
@@ -97,11 +107,11 @@ export function StoresScreen({ navigation, route }) {
       || matchesSearchText(serviceType.description, term)
     ));
   }, [resultMode, search, serviceTypes]);
-  const showServiceResults = resultMode === "services";
-  const showStoreResults = resultMode === "stores";
-  const showProductResults = resultMode === "products";
+  const showServiceResults = hasSearch || resultMode === "services";
+  const showStoreResults = hasSearch || resultMode === "stores";
+  const showProductResults = hasSearch || resultMode === "products";
   const hasAnySearchResult = Boolean(
-    matchingServiceTypes.length || visibleStores.length || products.length,
+    matchingCategories.length || matchingServiceTypes.length || visibleStores.length || products.length,
   );
   const showGlobalEmptySearch = hasSearch
     && !isLoading
@@ -262,7 +272,7 @@ export function StoresScreen({ navigation, route }) {
   }, [refreshServiceTypes, session?.accessToken]);
 
   function openStore(store) {
-    navigation.navigate("StoreDetails", { lojaId: store.id, store });
+    navigation.navigate("StoreConversation", { store, storeId: store.id });
   }
 
   function openProduct(item) {
@@ -273,8 +283,8 @@ export function StoresScreen({ navigation, route }) {
   }
 
   function openStoreSuggestion(suggestion) {
-    navigation.navigate("StoreDetails", {
-      lojaId: suggestion.storeId ?? suggestion.id,
+    navigation.navigate("StoreConversation", {
+      storeId: suggestion.storeId ?? suggestion.id,
     });
   }
 
@@ -360,6 +370,7 @@ export function StoresScreen({ navigation, route }) {
 
   function selectCategory(categoryId) {
     setCategory(categoryId);
+    setResultMode("stores");
     setSearch("");
   }
 
@@ -406,7 +417,9 @@ export function StoresScreen({ navigation, route }) {
         <View style={styles.searchArea}>
           <SearchBar
             containerStyle={styles.searchBarFlex}
+            loading={suggestionsLoading}
             onChangeText={changeSearch}
+            onFocusChange={setSearchFocused}
             onSelectSuggestion={selectSuggestion}
             onSubmit={submitSearch}
             placeholder="Buscar lojas, produtos ou servicos"
@@ -418,15 +431,43 @@ export function StoresScreen({ navigation, route }) {
       </View>
 
       <View style={styles.body}>
-        <ResultModeSelector mode={resultMode} onChange={(mode) => {
+        {!hasSearch ? <ResultModeSelector mode={resultMode} onChange={(mode) => {
           setResultMode(mode);
           setCategory("todas");
-        }} />
+        }} /> : null}
 
         {hasSearch ? (
           <View style={styles.globalSearchHint}>
             <Ionicons color={colors.primaryDark} name="search-outline" size={16} />
             <Text style={styles.globalSearchHintText}>Buscando em lojas, produtos e servicos</Text>
+          </View>
+        ) : null}
+
+        {hasSearch && matchingCategories.length ? (
+          <View style={styles.section}>
+            <View style={styles.resultsHeader}>
+              <View style={styles.resultsCopy}>
+                <Text style={styles.sectionTitle}>Categorias</Text>
+                <Text style={styles.sectionSubtitle}>Atalhos relacionados a sua busca</Text>
+              </View>
+              <View style={styles.resultCount}>
+                <Text style={styles.resultCountText}>{matchingCategories.length}</Text>
+              </View>
+            </View>
+            <ScrollView
+              contentContainerStyle={styles.categoryList}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+            >
+              {matchingCategories.map((item) => (
+                <CategoryCard
+                  category={item}
+                  key={item.id}
+                  label={item.name}
+                  onPress={() => selectCategory(item.id)}
+                />
+              ))}
+            </ScrollView>
           </View>
         ) : null}
 

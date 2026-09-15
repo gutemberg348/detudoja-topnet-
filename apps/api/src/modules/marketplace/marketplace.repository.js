@@ -155,7 +155,13 @@ export const marketplaceRepository = {
         take: limit,
         where: {
           excluido_em: null,
-          id: { in: matches.categoryIds },
+          ...(matches ? { id: { in: matches.categoryIds } } : {}),
+          lojas: {
+            some: {
+              ...publicStoreWhere,
+              endereco: { is: cityAddressWhere(baseAddress) },
+            },
+          },
           status: "ATIVA",
         },
       }),
@@ -166,7 +172,7 @@ export const marketplaceRepository = {
         where: {
           ...publicStoreWhere,
           endereco: { is: cityAddressWhere(baseAddress) },
-          id: { in: matches.storeIds },
+          ...(matches ? { id: { in: matches.storeIds } } : {}),
         },
       }),
       prisma.produtoLoja.findMany({
@@ -175,7 +181,7 @@ export const marketplaceRepository = {
         take: limit,
         where: {
           excluido_em: null,
-          id: { in: matches.productIds },
+          ...(matches ? { id: { in: matches.productIds } } : {}),
           loja: {
             ...publicStoreWhere,
             endereco: { is: cityAddressWhere(baseAddress) },
@@ -188,7 +194,7 @@ export const marketplaceRepository = {
         take: limit,
         where: {
           excluido_em: null,
-          id: { in: matches.serviceTypeIds },
+          ...(matches ? { id: { in: matches.serviceTypeIds } } : {}),
           modo_atendimento: "NEGOCIACAO_CHAT",
           slug: { not: "entregador" },
           status: "ATIVO",

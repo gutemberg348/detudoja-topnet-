@@ -53,6 +53,7 @@ function serializeUser(user, accountLevel) {
     name: user.nome,
     phone: user.telefone,
     phoneVerified: user.telefone_verificado,
+    publicId: user.identificador_publico,
     profiles: deriveProfiles(user),
     status: user.status,
   };

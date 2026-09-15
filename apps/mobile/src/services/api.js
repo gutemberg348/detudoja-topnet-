@@ -137,7 +137,10 @@ export async function apiRequest(
     return null;
   }
 
-  const data = await response.json().catch(() => null);
+  const contentType = response.headers.get("content-type") ?? "";
+  const data = contentType.includes("application/json")
+    ? await response.json().catch(() => null)
+    : null;
 
   if (
     response.status === 401
@@ -160,8 +163,13 @@ export async function apiRequest(
   }
 
   if (!response.ok) {
+    const fallbackMessage = response.status === 413
+      ? "As fotos ficaram grandes demais para o servidor. Tire novas fotos e tente novamente."
+      : response.status === 408 || response.status === 504
+        ? "O servidor demorou para receber as fotos. Confira sua conexao e tente novamente."
+        : "A solicitacao nao pode ser concluida.";
     throw new ApiError(
-      data?.message ?? "A solicitação não pôde ser concluída.",
+      data?.message ?? fallbackMessage,
       response.status,
       data,
     );

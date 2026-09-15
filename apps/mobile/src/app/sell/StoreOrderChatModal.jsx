@@ -296,6 +296,7 @@ export function StoreOrderChatModal({
           ) : null}
 
           <ScrollView
+            automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
             contentContainerStyle={styles.orderChatBody}
             keyboardShouldPersistTaps="handled"
             onContentSizeChange={scrollToLatest}

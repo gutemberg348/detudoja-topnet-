@@ -740,17 +740,7 @@ async function findStoreForUser(userId, storeId) {
     where: {
       excluido_em: null,
       id: parsedStoreId,
-      OR: [
-        { lojista: { usuario_id: userId } },
-        {
-          usuarios: {
-            some: {
-              status: "ATIVO",
-              usuario_id: userId,
-            },
-          },
-        },
-      ],
+      lojista: { usuario_id: userId },
     },
   });
 

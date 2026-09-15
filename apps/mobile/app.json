@@ -7,12 +7,6 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
-    "splash": {
-      "backgroundColor": "#F5FFF8",
-      "image": "./assets/brasil-cashback-logo.png",
-      "resizeMode": "contain"
-    },
     "android": {
       "package": "com.detudoja.mobile",
       "versionCode": 9,
@@ -59,7 +53,17 @@
       "expo-font",
       "expo-web-browser",
       "expo-notifications",
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      "expo-status-bar",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#F5FFF8",
+          "image": "./assets/brasil-cashback-logo.png",
+          "imageWidth": 260,
+          "resizeMode": "contain"
+        }
+      ]
     ],
     "extra": {
       "eas": {

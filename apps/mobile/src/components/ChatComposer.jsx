@@ -8,6 +8,7 @@ export function ChatComposer({
   draft,
   leadingAction = null,
   maxLength = 2000,
+  onBlur,
   onChangeDraft,
   onFocus,
   onSend,
@@ -29,6 +30,7 @@ export function ChatComposer({
           editable={!disabled}
           maxLength={maxLength}
           multiline
+          onBlur={onBlur}
           onChangeText={onChangeDraft}
           onFocus={onFocus}
           onSubmitEditing={submitOnEnter ? onSend : undefined}

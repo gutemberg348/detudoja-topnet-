@@ -54,6 +54,45 @@ export function getSellerProfile(accessToken) {
   return apiRequest("/api/app/seller/profile", { token: accessToken });
 }
 
+export function getMyStoreWorkplaces(accessToken) {
+  return apiRequest("/api/app/seller/workplaces", { token: accessToken });
+}
+
+export function acceptStoreStaffInvitation(accessToken, data) {
+  return apiRequest("/api/app/seller/workplaces/invitations/accept", {
+    body: data,
+    method: "POST",
+    token: accessToken,
+  });
+}
+
+export function declineStoreStaffInvitation(accessToken, invitationId) {
+  return apiRequest(`/api/app/seller/workplaces/invitations/${invitationId}/decline`, {
+    body: {},
+    method: "POST",
+    token: accessToken,
+  });
+}
+
+export function getStoreTeam(accessToken, storeId) {
+  return apiRequest(`/api/app/seller/stores/${storeId}/team`, { token: accessToken });
+}
+
+export function createStoreStaffInvitation(accessToken, storeId, publicId = "") {
+  return apiRequest(`/api/app/seller/stores/${storeId}/team/invitations`, {
+    body: { publicId },
+    method: "POST",
+    token: accessToken,
+  });
+}
+
+export function removeStoreStaffMember(accessToken, storeId, memberId) {
+  return apiRequest(`/api/app/seller/stores/${storeId}/team/members/${memberId}`, {
+    method: "DELETE",
+    token: accessToken,
+  });
+}
+
 export function getPayoutAccount(accessToken) {
   return apiRequest("/api/app/seller/payout-account", { token: accessToken });
 }

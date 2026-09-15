@@ -32,10 +32,7 @@ export function createStoreSignupRepository(database = prisma) {
           excluido_em: null,
           id: storeId,
           status: "ATIVA",
-          OR: [
-            { lojista: { usuario_id: userId } },
-            { usuarios: { some: { status: "ATIVO", usuario_id: userId } } },
-          ],
+          lojista: { usuario_id: userId },
         },
       });
     },

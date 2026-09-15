@@ -24,6 +24,8 @@ import { StoreConversationScreen } from "../app/StoreConversationScreen";
 import { StoreCourierRequestScreen } from "../app/StoreCourierRequestScreen";
 import { StoreCourierTeamScreen } from "../app/StoreCourierTeamScreen";
 import { StoreChatsInboxScreen } from "../app/StoreChatsInboxScreen";
+import { StoreStaffQrScanScreen } from "../app/StoreStaffQrScanScreen";
+import { StoreTeamScreen } from "../app/StoreTeamScreen";
 import { ServiceProvidersScreen } from "../app/ServiceProvidersScreen";
 import { ServiceConversationScreen } from "../app/ServiceConversationScreen";
 import { ServiceDeskScreen } from "../app/ServiceDeskScreen";
@@ -41,16 +43,19 @@ import { MainTabs } from "./MainTabs";
 const Stack = createNativeStackNavigator();
 export const navigationRef = createNavigationContainerRef();
 
-function backHeaderOptions() {
+function backHeaderOptions(title) {
   return ({ navigation }) => ({
     headerBackVisible: false,
     headerLeft: () => (
       <BackHeader
+        compact
         onPress={navigation.goBack}
+        showTitle={false}
         title="Voltar"
       />
     ),
-    headerTitle: "",
+    headerTitle: title,
+    headerTitleAlign: "center",
   });
 }
 
@@ -79,6 +84,7 @@ const linking = {
       InviteRegister: "cadastro/convite/:registrationCode",
       ResetPassword: "redefinir-senha",
       PersonalChatsInbox: "amigos",
+      StoreStaffQrScan: "funcionario/aceitar",
     },
   },
   prefixes: ["detudoja://"],
@@ -100,7 +106,7 @@ function Routes() {
       screenOptions={{
         contentStyle: { backgroundColor: colors.background },
         headerBackButtonDisplayMode: "minimal",
-        headerStyle: { backgroundColor: colors.card },
+        headerStyle: { backgroundColor: colors.background },
         headerShadowVisible: false,
         headerTintColor: colors.textPrimary,
         headerTitleStyle: { fontWeight: "700" },
@@ -119,87 +125,97 @@ function Routes() {
       <Stack.Screen
         component={ServiceConversationScreen}
         name="ServiceConversation"
-        options={backHeaderOptions()}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         component={PersonalChatsInboxScreen}
         name="PersonalChatsInbox"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Conversas")}
       />
       <Stack.Screen
         component={PersonalConversationScreen}
         name="PersonalConversation"
-        options={backHeaderOptions()}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         component={FriendQrScanScreen}
         name="FriendQrScan"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Adicionar contato")}
       />
       <Stack.Screen
         component={ServiceProvidersScreen}
         name="ServiceProviders"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Prestadores")}
       />
       <Stack.Screen
         component={ServiceDeskScreen}
         name="ServiceDesk"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Servicos")}
       />
       <Stack.Screen
         component={ServiceInboxScreen}
         name="ServiceInbox"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Atendimentos")}
       />
       <Stack.Screen
         component={StoreDetailsScreen}
         name="StoreDetails"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Loja")}
       />
       <Stack.Screen
         component={StoreConversationScreen}
         name="StoreConversation"
-        options={backHeaderOptions()}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         component={StoreCourierRequestScreen}
         name="StoreCourierRequest"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Solicitar entrega")}
       />
       <Stack.Screen
         component={StoreCourierTeamScreen}
         name="StoreCourierTeam"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Entregadores")}
       />
       <Stack.Screen
         component={StoreChatsInboxScreen}
         name="StoreChatsInbox"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Conversas")}
+      />
+      <Stack.Screen
+        component={StoreTeamScreen}
+        name="StoreTeam"
+        options={backHeaderOptions("Equipe da loja")}
+      />
+      <Stack.Screen
+        component={StoreStaffQrScanScreen}
+        name="StoreStaffQrScan"
+        options={backHeaderOptions("Convite de trabalho")}
       />
       <Stack.Screen
         component={ProductDetailsScreen}
         name="ProductDetails"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Produto")}
       />
       <Stack.Screen
         component={CartScreen}
         name="Cart"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Carrinho")}
       />
       <Stack.Screen
         component={CheckoutScreen}
         name="Checkout"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Finalizar pedido")}
       />
       <Stack.Screen
         component={CheckoutPaymentScreen}
         name="CheckoutPayment"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Pagamento")}
       />
       <Stack.Screen
         component={GatewayPixPaymentScreen}
         name="GatewayPixPayment"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Pagamento Pix")}
       />
       <Stack.Screen
         component={OnlineOrderSuccessScreen}
@@ -209,66 +225,76 @@ function Routes() {
       <Stack.Screen
         component={CustomerOrdersScreen}
         name="CustomerOrders"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Meus pedidos")}
       />
       <Stack.Screen
         component={CustomerOrderDetailsScreen}
         name="CustomerOrderDetails"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Pedido")}
       />
       <Stack.Screen
         component={WalletScreen}
         name="Carteira"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Carteira")}
       />
       <Stack.Screen
         component={WalletDepositScreen}
         name="WalletDeposit"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Adicionar saldo")}
       />
       <Stack.Screen
         component={WithdrawalScreen}
         name="Withdrawal"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Sacar")}
       />
       <Stack.Screen
         component={SupportScreen}
         name="Suporte"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Suporte")}
       />
       <Stack.Screen
         component={KycVerificationScreen}
         name="KycVerification"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Verificar identidade")}
       />
       <Stack.Screen
         component={ChargeScanScreen}
         name="ChargeScan"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Ler cobranca")}
       />
       <Stack.Screen
         component={ChargePaymentScreen}
         name="ChargePayment"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Pagar")}
       />
       <Stack.Screen
         component={ChargeQrScreen}
         name="ChargeQr"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Receber")}
       />
       <Stack.Screen
         component={GeneratedChargesHistoryScreen}
         name="GeneratedChargesHistory"
-        options={backHeaderOptions()}
+        options={backHeaderOptions("Cobrancas")}
       />
     </Stack.Navigator>
   );
 }
 
-export function AppNavigator() {
+export function AppNavigator({ onRouteChange }) {
+  const syncCurrentRoute = () => {
+    onRouteChange?.(navigationRef.getCurrentRoute()?.name ?? "");
+  };
+
   return (
     <SafeAreaProvider>
-      <NavigationContainer linking={linking} ref={navigationRef} theme={navigationTheme}>
+      <NavigationContainer
+        linking={linking}
+        onReady={syncCurrentRoute}
+        onStateChange={syncCurrentRoute}
+        ref={navigationRef}
+        theme={navigationTheme}
+      >
         <Routes />
       </NavigationContainer>
     </SafeAreaProvider>

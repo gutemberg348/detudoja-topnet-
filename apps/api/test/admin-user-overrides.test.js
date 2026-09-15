@@ -5,6 +5,7 @@ import { prisma } from "../src/config/prisma.js";
 import {
   activateAllAdminUserServices,
   approveAdminUserKycWithoutSubmission,
+  updateAdminUser,
   updateAdminUserPassword,
 } from "../src/modules/admin/admin-users.service.js";
 
@@ -19,6 +20,7 @@ async function cleanup() {
     if (user) {
       await database.auditoriaAdministrativa.deleteMany({ where: { usuario_alvo_id: user.id } });
       await database.servicoVendedor.deleteMany({ where: { vendedor: { usuario_id: user.id } } });
+      await database.contaBancaria.deleteMany({ where: { usuario_id: user.id } });
       await database.vendedor.deleteMany({ where: { usuario_id: user.id } });
       await database.kycUsuario.deleteMany({ where: { usuario_id: user.id } });
       await database.sessaoAutenticacao.deleteMany({ where: { usuario_id: user.id } });
@@ -102,4 +104,40 @@ test("admin approves KYC without files, resets password and activates eligible s
     "SENHA_PARTICIPANTE_REDEFINIDA",
     "TODOS_SERVICOS_PRESTADOR_LIBERADOS",
   ]));
+});
+
+test("admin CPF update synchronizes the account identity and CPF Pix key", async () => {
+  const before = await prisma.usuario.findUniqueOrThrow({ where: { id: state.user.id } });
+  await prisma.contaBancaria.create({
+    data: {
+      chave_pix: before.cpf,
+      documento_titular: before.cpf,
+      nome_titular: before.nome,
+      principal: true,
+      status: "ATIVA",
+      tipo_chave: "CPF",
+      usuario_id: before.id,
+    },
+  });
+
+  const updated = await updateAdminUser(state.admin.id, state.user.id, {
+    cpf: "111.444.777-35",
+  });
+  const [kyc, seller, account, audit] = await Promise.all([
+    prisma.kycUsuario.findUniqueOrThrow({ where: { usuario_id: state.user.id } }),
+    prisma.vendedor.findUniqueOrThrow({ where: { usuario_id: state.user.id } }),
+    prisma.contaBancaria.findFirstOrThrow({ where: { usuario_id: state.user.id } }),
+    prisma.auditoriaAdministrativa.findFirstOrThrow({
+      orderBy: { id: "desc" },
+      where: { acao: "DADOS_PARTICIPANTE_ATUALIZADOS", usuario_alvo_id: state.user.id },
+    }),
+  ]);
+
+  assert.equal(updated.user.cpf, "***.***.***-35");
+  assert.equal(kyc.cpf, "11144477735");
+  assert.equal(seller.cpf, "11144477735");
+  assert.equal(account.chave_pix, "11144477735");
+  assert.equal(account.documento_titular, "11144477735");
+  assert.equal(account.provedor_validacao, "CADASTRO_DIRETO");
+  assert.equal(audit.administrador_id, state.admin.id);
 });

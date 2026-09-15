@@ -98,10 +98,7 @@ async function accessibleStore(userId, storeId) {
     where: {
       excluido_em: null,
       id: parseId(storeId, "Loja invalida"),
-      OR: [
-        { lojista: { excluido_em: null, usuario_id: userId } },
-        { usuarios: { some: { status: "ATIVO", usuario_id: userId } } },
-      ],
+      lojista: { excluido_em: null, usuario_id: userId },
     },
   });
   if (!store) throw new AppError("Voce nao possui acesso a esta loja", 403);

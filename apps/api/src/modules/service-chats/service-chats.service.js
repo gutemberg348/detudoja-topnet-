@@ -134,10 +134,7 @@ async function findStoreForCourierRequest(userId, storeId) {
     where: {
       excluido_em: null,
       id: parsePositiveId(storeId, "Loja solicitante invalida"),
-      OR: [
-        { lojista: { excluido_em: null, usuario_id: userId } },
-        { usuarios: { some: { status: "ATIVO", usuario_id: userId } } },
-      ],
+      lojista: { excluido_em: null, usuario_id: userId },
     },
   });
 

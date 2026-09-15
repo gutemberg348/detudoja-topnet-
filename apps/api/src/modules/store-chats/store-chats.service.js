@@ -30,6 +30,13 @@ function serializeMessage(message, viewerId) {
     createdAt: message.criado_em.toISOString(),
     id: message.id,
     isMine: message.autor_usuario_id === viewerId,
+    sentBy: message.origem === "LOJA" && message.autor
+      ? {
+          id: message.autor.id,
+          name: message.autor.nome,
+          photoUrl: message.autor.foto_url,
+        }
+      : null,
     text: message.mensagem,
     type: message.tipo ?? "TEXTO",
   };
@@ -160,8 +167,10 @@ async function buildCommercialMessage(access, data, scope) {
   }
 
   if (type === "TEXTO") {
+    const isSupport = scope === "customer" && data.support === true;
     return {
-      content: null,
+      content: isSupport ? { kind: "SUPPORT" } : null,
+      isSupport,
       message: data.message,
       type,
     };
@@ -377,4 +386,45 @@ export async function createStoreConversationMessage(
     }),
     message: serializedMessage,
   };
+}
+
+export async function trackStoreConversationActivity(userId, conversationId, data) {
+  ensureStoreChatPrismaClient();
+  const access = await getConversationAccess(userId, conversationId);
+  if (!access.isCustomer) throw new AppError("Somente o cliente registra a jornada de compra", 403);
+  if (access.conversation.status !== "ABERTA") return { tracked: false };
+
+  const store = await storeChatsRepository.findCatalogStore(access.conversation.loja_id);
+  if (!store) throw new AppError("Loja nao encontrada", 404);
+  const product = data.productId
+    ? store.produtos.find((item) => item.id === Number(data.productId))
+    : null;
+  if (data.productId && !product) throw new AppError("Produto indisponivel nesta loja", 404);
+
+  const labels = {
+    ADD_TO_CART: product ? `Cliente adicionou ${product.nome} ao carrinho.` : "Cliente adicionou um produto ao carrinho.",
+    START_CHECKOUT: "Cliente avancou para revisar e pagar o pedido.",
+    VIEW_PRODUCT: product ? `Cliente abriu ${product.nome}.` : "Cliente abriu um produto.",
+  };
+  const content = product
+    ? {
+        action: data.action,
+        kind: "PRODUCT",
+        product: serializeChatProduct(product),
+        store: serializeChatStore(store),
+      }
+    : { action: data.action, kind: "CHECKOUT", store: serializeChatStore(store) };
+
+  await storeChatsRepository.createSystemActivity(access.conversation.id, {
+    content,
+    message: labels[data.action],
+  });
+  const conversation = await loadConversation(access.conversation.id);
+  emitStoreChatUpdated({
+    conversationId: conversation.id,
+    customerUserId: conversation.cliente_usuario_id,
+    reason: "customer-journey",
+    storeId: conversation.loja_id,
+  });
+  return { tracked: true };
 }

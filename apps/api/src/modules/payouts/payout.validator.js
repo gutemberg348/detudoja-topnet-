@@ -1,8 +1,18 @@
 import { z } from "zod";
 
 export const payoutAccountSchema = z.object({
-  holderDocument: z.string().trim().min(11).max(18),
-  holderName: z.string().trim().min(2).max(180),
-  key: z.string().trim().min(3).max(255),
+  // Campos antigos continuam aceitos durante a atualizacao dos APKs, mas o
+  // titular sempre e obtido da conta autenticada no servidor.
+  holderDocument: z.string().trim().max(18).optional(),
+  holderName: z.string().trim().max(180).optional(),
+  key: z.string().trim().max(255).optional().default(""),
   keyType: z.enum(["CPF", "CNPJ", "EMAIL", "TELEFONE", "ALEATORIA"]),
-}).strict();
+}).strict().superRefine((data, context) => {
+  if (data.keyType !== "CPF" && data.key.length < 3) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Informe a chave Pix",
+      path: ["key"],
+    });
+  }
+});

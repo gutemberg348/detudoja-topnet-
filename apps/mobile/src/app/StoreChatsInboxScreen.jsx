@@ -5,7 +5,7 @@ import { PageHeader } from "../components/PageHeader";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { StatePanel } from "../components/StatePanel";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
-import { getSellerProfile } from "../services/seller.api";
+import { getMyStoreWorkplaces, getSellerProfile } from "../services/seller.api";
 import {
   getStoreConversations,
   subscribeStoreConversationRead,
@@ -36,17 +36,24 @@ export function StoreChatsInboxScreen({ navigation, route }) {
     }
 
     try {
-      const [conversationsResponse, sellerResponse] = await Promise.all([
+      const [conversationsResponse, sellerResponse, workplacesResponse] = await Promise.all([
         getStoreConversations(session.accessToken, { scope }),
         scope === "seller"
           ? getSellerProfile(session.accessToken)
+          : Promise.resolve(null),
+        scope === "seller"
+          ? getMyStoreWorkplaces(session.accessToken)
           : Promise.resolve(null),
       ]);
 
       setConversations(conversationsResponse.conversations ?? []);
 
       if (sellerResponse) {
-        setStores(sellerResponse.stores ?? []);
+        const availableStores = [
+          ...(sellerResponse.stores ?? []),
+          ...(workplacesResponse?.workplaces ?? []).map((item) => item.store),
+        ].filter((item, index, all) => item?.id && all.findIndex((candidate) => candidate?.id === item.id) === index);
+        setStores(availableStores);
       }
     } catch (requestError) {
       if (!silent) {
@@ -375,7 +382,7 @@ function ConversationRow({ conversation, onPress, showStoreName }) {
           <Text style={styles.date}>{formatDate(conversation.updatedAt)}</Text>
         </View>
         <Text numberOfLines={1} style={styles.message}>
-          {conversation.lastMessage?.text ?? "Conversa iniciada"}
+          {conversation.lastMessage?.text ?? "Conversa da loja"}
         </Text>
         {conversation.unreadCount > 0 ? (
           <Text style={styles.unreadLabel}>Nova mensagem</Text>

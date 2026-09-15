@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppButton } from "../components/AppButton";
+import { BackHeader } from "../components/BackHeader";
 import { ChatComposer } from "../components/ChatComposer";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { StatePanel } from "../components/StatePanel";
@@ -387,7 +388,7 @@ export function ServiceConversationScreen({ navigation, route }) {
 
   if (!conversation) {
     return (
-      <ScreenContainer edges={["left", "right"]}>
+      <ScreenContainer edges={["top", "left", "right"]}>
         <StatePanel icon="chatbubbles-outline" loading text="Abrindo conversa..." />
       </ScreenContainer>
     );
@@ -396,11 +397,12 @@ export function ServiceConversationScreen({ navigation, route }) {
   return (
     <ScreenContainer
       contentContainerStyle={styles.content}
-      edges={["left", "right"]}
+      edges={["top", "left", "right"]}
       padded={false}
       scroll={false}
     >
       <View style={styles.header}>
+        <BackHeader compact onPress={navigation.goBack} showTitle={false} />
         <View style={styles.avatar}>
           {conversation.otherPerson?.photoUrl ? (
             <Image
@@ -578,6 +580,7 @@ export function ServiceConversationScreen({ navigation, route }) {
       ) : null}
 
       <ScrollView
+        automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
         contentContainerStyle={styles.messages}
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         keyboardShouldPersistTaps="handled"

@@ -137,6 +137,9 @@ const demoStores = [
       ["Combo Cafe Central", "Cafe, pao de queijo e suco natural.", 2490],
       ["Marmita Executiva", "Arroz, feijao, salada e proteina do dia.", 2990],
       ["Burger Artesanal", "Hamburguer artesanal com batata rustica.", 3490],
+      ["Tapioca Recheada", "Tapioca com queijo, frango ou carne de sol.", 1890],
+      ["Cuscuz Completo", "Cuscuz com ovos, queijo e carne de sol.", 2190],
+      ["Suco Natural 500ml", "Suco preparado na hora com fruta da estacao.", 990],
     ],
     slug: "demo-cafe-central",
   },
@@ -148,6 +151,9 @@ const demoStores = [
       ["Cesta Basica Compacta", "Itens essenciais para a semana.", 8990],
       ["Kit Hortifruti", "Frutas, legumes e verduras selecionados.", 4590],
       ["Combo Limpeza", "Sabao, detergente e desinfetante.", 3990],
+      ["Arroz Tipo 1 5kg", "Arroz branco selecionado em pacote de 5 kg.", 2790],
+      ["Feijao Carioca 1kg", "Feijao carioca tipo 1.", 899],
+      ["Leite Integral 1L", "Leite integral longa vida.", 579],
     ],
     slug: "demo-mercado-bom-preco",
   },
@@ -159,6 +165,9 @@ const demoStores = [
       ["Kit Higiene", "Itens de cuidado pessoal para o dia a dia.", 2990],
       ["Vitamina C", "Suplemento de vitamina C com 60 capsulas.", 4990],
       ["Protetor Solar", "Protecao facial FPS 50.", 5990],
+      ["Sabonete Liquido", "Sabonete liquido suave para uso diario.", 1690],
+      ["Termometro Digital", "Termometro digital de leitura rapida.", 2490],
+      ["Kit Primeiros Socorros", "Itens basicos para pequenos cuidados.", 4590],
     ],
     slug: "demo-farma-mais",
   },
@@ -170,6 +179,9 @@ const demoStores = [
       ["Camiseta Premium", "Camiseta basica em algodao.", 6990],
       ["Bolsa Casual", "Bolsa compacta para uso diario.", 11990],
       ["Kit Acessorios", "Pulseira, colar e brinco combinados.", 7990],
+      ["Calca Jeans", "Calca jeans de modelagem confortavel.", 13990],
+      ["Tenis Casual", "Tenis leve para o dia a dia.", 16990],
+      ["Vestido Midi", "Vestido midi em tecido leve.", 14990],
     ],
     slug: "demo-loja-melo",
   },
@@ -181,6 +193,9 @@ const demoStores = [
       ["Escova Modelada", "Servico de escova com finalizacao.", 5990],
       ["Kit Skincare", "Rotina basica de cuidado facial.", 12990],
       ["Design de Sobrancelha", "Design personalizado com acabamento.", 3990],
+      ["Manicure Completa", "Cuidado e esmaltacao das unhas das maos.", 4500],
+      ["Corte Feminino", "Corte com lavagem e finalizacao.", 7990],
+      ["Hidratacao Capilar", "Tratamento profundo com finalizacao.", 8990],
     ],
     slug: "demo-studio-bella",
   },
@@ -190,6 +205,11 @@ const demoStores = [
     name: "Loja de Informatica",
     products: [
       ["Carregador Turbo USB-C", "Carregador rapido com cabo USB-C incluso.", 8990],
+      ["Fone Bluetooth", "Fone sem fio com estojo de recarga.", 12990],
+      ["Mouse Sem Fio", "Mouse optico compacto com receptor USB.", 6990],
+      ["Teclado Compacto", "Teclado USB compacto para escritorio.", 9990],
+      ["Cabo USB-C 2m", "Cabo reforcado para carga e dados.", 3990],
+      ["Suporte para Notebook", "Suporte ajustavel e ventilado.", 10990],
     ],
     slug: "demo-loja-informatica",
   },
@@ -201,9 +221,34 @@ const demoStores = [
       ["Telha Ceramica", "Telha ceramica resistente para cobertura residencial.", 249],
       ["Piso Ceramico", "Piso ceramico para ambientes internos, vendido por metro quadrado.", 3490],
       ["Porcelanato Acetinado", "Porcelanato acetinado de acabamento moderno.", 6990],
+      ["Cimento 50kg", "Cimento para obras e reformas em geral.", 3890],
+      ["Tinta Acrilica 18L", "Tinta acrilica branca para areas internas.", 21990],
+      ["Kit Ferramentas", "Kit com martelo, alicate, chaves e trena.", 14990],
     ],
     slug: "demo-casa-forte",
   },
+];
+
+const demoServiceTypes = [
+  ["Frete", "Transporte de cargas entre bairros e cidades.", "car", "GERAL"],
+  ["Carreto", "Transporte rapido de pequenos volumes.", "cube", "GERAL"],
+  ["Mudanca", "Apoio completo para mudancas residenciais e comerciais.", "home", "GERAL"],
+  ["Motoboy", "Corridas e entregas locais para clientes e lojas.", "bicycle", "ENTREGA_LOCAL"],
+  ["Entrega expressa", "Entrega urbana de pequenos pacotes no mesmo dia.", "flash", "ENTREGA_LOCAL"],
+  ["Eletricista", "Instalacoes e reparos eletricos residenciais.", "flashlight", "GERAL"],
+  ["Instalacao de equipamentos", "Instalacao de aparelhos e acessorios.", "construct", "GERAL"],
+  ["Suporte de informatica", "Configuracao e manutencao de computadores e redes.", "desktop", "GERAL"],
+  ["Encanador", "Reparos hidraulicos e instalacao de torneiras.", "water", "GERAL"],
+  ["Montador de moveis", "Montagem e desmontagem de moveis.", "hammer", "GERAL"],
+  ["Pequenos reparos", "Manutencoes e consertos residenciais diversos.", "build", "GERAL"],
+];
+
+const demoProviders = [
+  { serviceNames: ["Eletricista", "Instalacao de equipamentos", "Suporte de informatica"], userIndex: 5 },
+  { serviceNames: ["Encanador", "Montador de moveis", "Pequenos reparos"], userIndex: 6 },
+  { courier: { cnh: "DEMO-CNH-0001", color: "Vermelha", model: "Honda CG 160", plate: "DEM0A01" }, serviceNames: ["Motoboy", "Entrega expressa"], userIndex: 7 },
+  { courier: { cnh: "DEMO-CNH-0002", color: "Preta", model: "Yamaha Factor 150", plate: "DEM0A02" }, serviceNames: ["Motoboy", "Entrega expressa"], userIndex: 8 },
+  { serviceNames: ["Frete", "Carreto", "Mudanca"], userIndex: 9 },
 ];
 
 const imageColors = [
@@ -449,16 +494,150 @@ async function seedServiceTypes(database) {
     where: { excluido_em: null, slug: "entregador" },
   });
 
-  for (const [index, service] of [
-    ["Frete", "Transporte de cargas e mudancas negociado pelo chat.", "car", "GERAL"],
-    ["Motoboy", "Corridas e entregas locais solicitadas por clientes ou lojas.", "bicycle", "ENTREGA_LOCAL"],
-  ].entries()) {
+  for (const [index, service] of demoServiceTypes.entries()) {
     await database.tipoServico.upsert({
       create: { descricao: service[1], icone: service[2], modo_atendimento: "NEGOCIACAO_CHAT", nome: service[0], ordem: index + 1, segmento_venda_id: servicesSegment?.id ?? null, slug: slugify(service[0]), status: "ATIVO", tipo_operacao: service[3] },
       update: { descricao: service[1], icone: service[2], modo_atendimento: "NEGOCIACAO_CHAT", ordem: index + 1, segmento_venda_id: servicesSegment?.id ?? null, status: "ATIVO", tipo_operacao: service[3] },
       where: { slug: slugify(service[0]) },
     });
   }
+}
+
+async function seedProviders(database, users, stores) {
+  const serviceTypes = await database.tipoServico.findMany({
+    include: { segmento_venda: { select: { id: true } } },
+    where: {
+      excluido_em: null,
+      slug: { in: demoServiceTypes.map(([name]) => slugify(name)) },
+      status: "ATIVO",
+    },
+  });
+  const serviceTypesByName = new Map(serviceTypes.map((service) => [service.nome, service]));
+  let couriers = 0;
+  let providerServices = 0;
+
+  for (const providerSeed of demoProviders) {
+    const user = users[providerSeed.userIndex];
+    const primaryService = serviceTypesByName.get(providerSeed.serviceNames[0]);
+
+    if (!user || !primaryService) {
+      throw new Error(`Prestador demo sem usuario ou tipo de servico: ${providerSeed.serviceNames[0]}`);
+    }
+
+    const seller = await database.vendedor.upsert({
+      create: {
+        aceita_servicos: true,
+        atende_agora: true,
+        categoria: primaryService.nome,
+        cpf: user.cpf,
+        descricao: `Profissional de teste disponivel em ${demoCityAddress.cidade}.`,
+        disponibilidade_atualizada_em: new Date(),
+        nome_publico: user.nome,
+        segmento_venda_id: primaryService.segmento_venda_id,
+        status: "ATIVO",
+        status_kyc: "APROVADO",
+        tipo_pessoa: "FISICA",
+        usuario_id: user.id,
+      },
+      update: {
+        aceita_servicos: true,
+        atende_agora: true,
+        categoria: primaryService.nome,
+        cpf: user.cpf,
+        descricao: `Profissional de teste disponivel em ${demoCityAddress.cidade}.`,
+        disponibilidade_atualizada_em: new Date(),
+        excluido_em: null,
+        nome_publico: user.nome,
+        segmento_venda_id: primaryService.segmento_venda_id,
+        status: "ATIVO",
+        status_kyc: "APROVADO",
+        tipo_pessoa: "FISICA",
+      },
+      where: { usuario_id: user.id },
+    });
+
+    for (const [serviceIndex, serviceName] of providerSeed.serviceNames.entries()) {
+      const serviceType = serviceTypesByName.get(serviceName);
+      if (!serviceType) {
+        throw new Error(`Tipo de servico demo nao encontrado: ${serviceName}`);
+      }
+
+      await database.servicoVendedor.upsert({
+        create: {
+          categoria: serviceType.nome,
+          descricao: `${serviceType.descricao} Atendimento de teste em ${demoCityAddress.cidade}.`,
+          disponibilidade_atualizada_em: new Date(),
+          disponivel_agora: true,
+          nome: serviceType.nome,
+          preco_centavos: BigInt(3500 + providerSeed.userIndex * 500 + serviceIndex * 1500),
+          status: "ATIVO",
+          tipo_servico_id: serviceType.id,
+          vendedor_id: seller.id,
+        },
+        update: {
+          categoria: serviceType.nome,
+          descricao: `${serviceType.descricao} Atendimento de teste em ${demoCityAddress.cidade}.`,
+          disponibilidade_atualizada_em: new Date(),
+          disponivel_agora: true,
+          excluido_em: null,
+          nome: serviceType.nome,
+          preco_centavos: BigInt(3500 + providerSeed.userIndex * 500 + serviceIndex * 1500),
+          status: "ATIVO",
+        },
+        where: {
+          vendedor_id_tipo_servico_id: {
+            tipo_servico_id: serviceType.id,
+            vendedor_id: seller.id,
+          },
+        },
+      });
+      providerServices += 1;
+    }
+
+    if (providerSeed.courier) {
+      const courier = await database.motoboy.upsert({
+        create: {
+          aceita_chamadas_plataforma: true,
+          cidade_base: demoCityAddress.cidade,
+          cnh: providerSeed.courier.cnh,
+          cor_moto: providerSeed.courier.color,
+          estado_base: demoCityAddress.estado,
+          modelo_moto: providerSeed.courier.model,
+          nome_exibicao: user.nome,
+          placa: providerSeed.courier.plate,
+          raio_atendimento_km: 25,
+          status: "ATIVO",
+          telefone_contato: user.telefone,
+          vendedor_id: seller.id,
+        },
+        update: {
+          aceita_chamadas_plataforma: true,
+          cidade_base: demoCityAddress.cidade,
+          cnh: providerSeed.courier.cnh,
+          cor_moto: providerSeed.courier.color,
+          estado_base: demoCityAddress.estado,
+          modelo_moto: providerSeed.courier.model,
+          nome_exibicao: user.nome,
+          placa: providerSeed.courier.plate,
+          raio_atendimento_km: 25,
+          status: "ATIVO",
+          telefone_contato: user.telefone,
+        },
+        where: { vendedor_id: seller.id },
+      });
+
+      for (const store of stores) {
+        await database.motoboyLoja.upsert({
+          create: { ativo: true, loja_id: store.id, motoboy_id: courier.id },
+          update: { ativo: true },
+          where: { loja_id_motoboy_id: { loja_id: store.id, motoboy_id: courier.id } },
+        });
+      }
+      couriers += 1;
+    }
+  }
+
+  return { couriers, providerServices, providers: demoProviders.length };
 }
 
 async function seedCategories(database) {
@@ -527,6 +706,7 @@ async function seedUsers(database, passwordHash) {
   for (const item of demoUsers) {
     const user = await database.usuario.upsert({
       create: {
+        cidade_busca: demoCityAddress.cidade,
         cpf: item.cpf,
         email: item.email,
         email_verificado: true,
@@ -534,11 +714,13 @@ async function seedUsers(database, passwordHash) {
         nome: item.name,
         senha_hash: passwordHash,
         status: "ATIVO",
+        estado_busca: demoCityAddress.estado,
         telefone: item.phone,
         telefone_verificado: true,
         tipo_conta: "CONSUMIDOR",
       },
       update: {
+        cidade_busca: demoCityAddress.cidade,
         cpf: item.cpf,
         email_verificado: true,
         excluido_em: null,
@@ -546,6 +728,7 @@ async function seedUsers(database, passwordHash) {
         nome: item.name,
         senha_hash: passwordHash,
         status: "ATIVO",
+        estado_busca: demoCityAddress.estado,
         telefone: item.phone,
         telefone_verificado: true,
         tipo_conta: "CONSUMIDOR",
@@ -747,6 +930,8 @@ async function seedNetwork(database, companyRoot, users) {
 }
 
 async function seedStores(database, categoriesByName, users) {
+  const stores = [];
+
   for (const [index, storeSeed] of demoStores.entries()) {
     const owner = users[index];
     const category = categoriesByName.get(storeSeed.categoryName);
@@ -798,6 +983,7 @@ async function seedStores(database, categoriesByName, users) {
       create: {
         aceita_pagamento_online: true,
         aceita_qrcode: true,
+        aberta_para_pedidos: true,
         banner_url: bannerUrl,
         categoria_id: category.id,
         descricao: storeSeed.description,
@@ -808,6 +994,7 @@ async function seedStores(database, categoriesByName, users) {
         segmento_venda_id: category.segmento_venda_id,
         slug: storeSeed.slug,
         status: "ATIVA",
+        taxa_entrega_centavos: BigInt(790),
         telefone: owner.telefone,
         visivel_no_app: true,
         whatsapp: owner.telefone,
@@ -815,6 +1002,7 @@ async function seedStores(database, categoriesByName, users) {
       update: {
         aceita_pagamento_online: true,
         aceita_qrcode: true,
+        aberta_para_pedidos: true,
         banner_url: bannerUrl,
         categoria_id: category.id,
         descricao: storeSeed.description,
@@ -825,12 +1013,14 @@ async function seedStores(database, categoriesByName, users) {
         nome: storeSeed.name,
         segmento_venda_id: category.segmento_venda_id,
         status: "ATIVA",
+        taxa_entrega_centavos: BigInt(790),
         telefone: owner.telefone,
         visivel_no_app: true,
         whatsapp: owner.telefone,
       },
       where: { slug: storeSeed.slug },
     });
+    stores.push(store);
 
     await database.enderecoLoja.upsert({
       create: { ...demoCityAddress, loja_id: store.id },
@@ -857,10 +1047,6 @@ async function seedStores(database, categoriesByName, users) {
           usuario_id: owner.id,
         },
       },
-    });
-
-    await database.produtoLoja.deleteMany({
-      where: { loja_id: store.id },
     });
 
     const productData = [];
@@ -907,10 +1093,33 @@ async function seedStores(database, categoriesByName, users) {
       });
     }
 
-    await database.produtoLoja.createMany({
-      data: productData,
+    const desiredSkus = productData.map((product) => product.sku);
+    await database.produtoLoja.updateMany({
+      data: { status: "INATIVO" },
+      where: {
+        loja_id: store.id,
+        sku: { notIn: desiredSkus, startsWith: `DEMO-${storeSeed.slug}-` },
+      },
     });
+
+    for (const product of productData) {
+      const existingProduct = await database.produtoLoja.findFirst({
+        select: { id: true },
+        where: { loja_id: store.id, sku: product.sku },
+      });
+
+      if (existingProduct) {
+        await database.produtoLoja.update({
+          data: { ...product, excluido_em: null },
+          where: { id: existingProduct.id },
+        });
+      } else {
+        await database.produtoLoja.create({ data: product });
+      }
+    }
   }
+
+  return stores;
 }
 
 async function main() {
@@ -932,23 +1141,30 @@ async function main() {
       const categoriesByName = await seedCategories(database);
       const users = await seedUsers(database, passwordHash);
       await seedNetwork(database, companyRoot, users);
-      await seedStores(database, categoriesByName, users);
+      const stores = await seedStores(database, categoriesByName, users);
+      const providers = await seedProviders(database, users, stores);
 
       return {
         categories: categoriesByName.size,
         firstUserEmail: users[0].email,
         stores: demoStores.length,
+        totalProducts: demoStores.reduce((total, store) => total + store.products.length, 0),
         users: users.length,
+        ...providers,
       };
     },
-    { maxWait: 10000, timeout: 60000 },
+    { maxWait: 10000, timeout: 120000 },
   );
 
   console.log("Seed demo finalizada.");
   console.log(`Usuarios demo verificados: ${result.users}`);
   console.log(`Categorias: ${result.categories}`);
-  console.log(`Lojas visiveis com produtos: ${result.stores}`);
+  console.log(`Lojas visiveis: ${result.stores}`);
+  console.log(`Produtos ativos: ${result.totalProducts}`);
+  console.log(`Prestadores ativos: ${result.providers} (${result.providerServices} servicos)`);
+  console.log(`Motoboys ativos e vinculados as lojas: ${result.couriers}`);
   console.log(`Login exemplo: ${result.firstUserEmail} (senha definida em DEMO_SEED_PASSWORD)`);
+  console.log("Logins: demo1@detudoja.local ate demo10@detudoja.local");
 }
 
 main()

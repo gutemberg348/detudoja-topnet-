@@ -58,6 +58,7 @@ export function StoreManagerPanel({
   onEditProduct,
   onEditStore,
   onManageCouriers,
+  onManageTeam,
   onNewProduct,
   onOpenCharge,
   onOpenStoreChats,
@@ -295,6 +296,11 @@ export function StoreManagerPanel({
           icon="share-social-outline"
           label="Indicar loja"
           onPress={() => setReferralOpen(true)}
+        />
+        <ManagerAction
+          icon="people-circle-outline"
+          label="Funcionarios"
+          onPress={onManageTeam}
         />
       </View>
 

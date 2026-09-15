@@ -1,6 +1,7 @@
 import { emitWalletUpdated } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
 import { recordFinancialFailure } from "../monitoring/monitoring.service.js";
+import { sendExpoPushToUsers } from "../notifications/notifications.service.js";
 import {
   createAsaasPixTransfer,
   getAsaasTransfer,
@@ -185,7 +186,12 @@ function asaasDate(date) {
   }).format(date);
 }
 
-async function releaseReservedWithdrawal(withdrawalId, { reason, status, updateData = {} }) {
+async function releaseReservedWithdrawal(withdrawalId, {
+  notifyUser = false,
+  reason,
+  status,
+  updateData = {},
+}) {
   const released = await withdrawalRepository.transaction(async (database) => {
     const repository = createWithdrawalRepository(database);
     const withdrawal = await repository.findWithdrawalUnique({
@@ -249,6 +255,14 @@ async function releaseReservedWithdrawal(withdrawalId, { reason, status, updateD
 
   if (released) {
     emitWalletUpdated({ userIds: [released.userId] });
+    if (notifyUser) {
+      void sendExpoPushToUsers({
+        body: "O Pix nao foi concluido. Todo o valor reservado voltou para as carteiras usadas no saque.",
+        data: { type: "withdrawal_failed", withdrawalId: String(withdrawalId) },
+        title: "Saque devolvido ao saldo",
+        userIds: [released.userId],
+      });
+    }
     if (status === "FALHOU") {
       recordFinancialFailure("withdrawals", reason, {
         withdrawalId,
@@ -656,7 +670,11 @@ export async function submitApprovedWithdrawal(withdrawalId) {
       });
       return null;
     }
-    await releaseReservedWithdrawal(withdrawal.id, { reason: error.message, status: "FALHOU" });
+    await releaseReservedWithdrawal(withdrawal.id, {
+      notifyUser: true,
+      reason: error.message,
+      status: "FALHOU",
+    });
     return null;
   }
 }
@@ -704,6 +722,7 @@ export async function reconcileWithdrawal(withdrawalId) {
     if (status === "DONE") return confirmWithdrawal(withdrawal.id, transfer);
     if (["FAILED", "CANCELLED"].includes(status)) {
       return releaseReservedWithdrawal(withdrawal.id, {
+        notifyUser: true,
         reason: transfer.failReason ?? "Transferencia nao concluida",
         status: status === "CANCELLED" ? "CANCELADO" : "FALHOU",
       });
@@ -755,6 +774,7 @@ export async function processAsaasWithdrawalWebhook(payload) {
     if (event === "TRANSFER_DONE") await confirmWithdrawal(withdrawal.id, payload.transfer);
     if (["TRANSFER_FAILED", "TRANSFER_CANCELLED"].includes(event)) {
       await releaseReservedWithdrawal(withdrawal.id, {
+        notifyUser: true,
         reason: payload.transfer?.failReason ?? "Transferencia nao concluida",
         status: event === "TRANSFER_CANCELLED" ? "CANCELADO" : "FALHOU",
       });

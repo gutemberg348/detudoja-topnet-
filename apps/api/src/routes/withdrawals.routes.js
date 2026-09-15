@@ -9,7 +9,6 @@ import {
 import { requestWithdrawalSchema } from "../modules/withdrawals/withdrawal.validator.js";
 import { payoutAccountSchema } from "../modules/payouts/payout.validator.js";
 import {
-  payoutPixKeyValidationGatewayRateLimit,
   payoutPixKeyValidationRateLimit,
   withdrawalRequestRateLimit,
 } from "../middlewares/rate-limit.middleware.js";
@@ -21,7 +20,6 @@ withdrawalsRoutes.get("/", getWithdrawalOverviewController);
 withdrawalsRoutes.get("/pix-account", getWithdrawalPixAccountController);
 withdrawalsRoutes.put(
   "/pix-account",
-  payoutPixKeyValidationGatewayRateLimit,
   payoutPixKeyValidationRateLimit,
   validate(payoutAccountSchema),
   saveWithdrawalPixAccountController,

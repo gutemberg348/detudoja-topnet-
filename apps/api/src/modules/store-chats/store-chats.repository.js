@@ -31,7 +31,11 @@ const customerSelect = { foto_url: true, id: true, nome: true };
 const conversationListInclude = {
   cliente: { select: customerSelect },
   loja: { select: storeSelect },
-  mensagens: { orderBy: { criado_em: "desc" }, take: 1 },
+  mensagens: {
+    include: { autor: { select: customerSelect } },
+    orderBy: { criado_em: "desc" },
+    take: 1,
+  },
 };
 const catalogStoreSelect = {
   ...storeSelect,
@@ -53,7 +57,10 @@ const catalogStoreSelect = {
 const conversationDetailInclude = {
   cliente: { select: customerSelect },
   loja: { select: catalogStoreSelect },
-  mensagens: { orderBy: { criado_em: "asc" } },
+  mensagens: {
+    include: { autor: { select: customerSelect } },
+    orderBy: { criado_em: "asc" },
+  },
 };
 
 function storeAccessWhere(userId) {
@@ -67,8 +74,51 @@ function storeAccessWhere(userId) {
 
 export const storeChatsRepository = {
   createConversation(userId, storeId) {
-    return prisma.conversaLoja.create({
-      data: { cliente_usuario_id: userId, loja_id: storeId },
+    return prisma.$transaction(async (transaction) => {
+      const now = new Date();
+      const conversation = await transaction.conversaLoja.create({
+        data: {
+          cliente_usuario_id: userId,
+          loja_id: storeId,
+          ultima_mensagem_em: now,
+        },
+      });
+      await transaction.conversaLojaMensagem.create({
+        data: {
+          conversa_loja_id: conversation.id,
+          lido_cliente_em: now,
+          lido_loja_em: now,
+          mensagem: "Cliente entrou na loja e iniciou a navegacao.",
+          origem: "SISTEMA",
+          tipo: "TEXTO",
+        },
+      });
+      return conversation;
+    });
+  },
+
+  async createSystemActivity(conversationId, { content = null, message, notifyStore = false }) {
+    const now = new Date();
+    return prisma.$transaction(async (transaction) => {
+      const created = await transaction.conversaLojaMensagem.create({
+        data: {
+          conversa_loja_id: conversationId,
+          conteudo_json: content,
+          lido_cliente_em: now,
+          lido_loja_em: notifyStore ? null : now,
+          mensagem: message,
+          origem: "SISTEMA",
+          tipo: content?.kind === "PRODUCT" ? "PRODUTO" : "TEXTO",
+        },
+      });
+      await transaction.conversaLoja.update({
+        data: {
+          ...(notifyStore ? { nao_lidas_loja: { increment: 1 } } : {}),
+          ultima_mensagem_em: now,
+        },
+        where: { id: conversationId },
+      });
+      return created;
     });
   },
 
@@ -92,6 +142,9 @@ export const storeChatsRepository = {
           ...(scope === "customer"
             ? { nao_lidas_loja: { increment: 1 } }
             : { nao_lidas_cliente: { increment: 1 } }),
+          ...(commercialMessage.isSupport
+            ? { atendimento_solicitado_em: now }
+            : {}),
           ultima_mensagem_em: now,
         },
         where: { id: access.conversation.id },

@@ -1,6 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import { useEffect, useMemo, useState } from "react";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { AppButton } from "../components/AppButton";
 import { CpfRequirementModal } from "../components/CpfRequirementModal";
 import { KycSubmissionProgress } from "../components/KycSubmissionProgress";
@@ -25,6 +26,30 @@ const statusContent = {
 };
 
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+async function prepareImageForUpload(asset) {
+  if (!asset?.uri || Platform.OS === "web") return asset;
+
+  const longestSide = Math.max(asset.width ?? 0, asset.height ?? 0);
+  const resize = longestSide > 1800
+    ? asset.width >= asset.height
+      ? { width: 1800 }
+      : { height: 1800 }
+    : null;
+  const normalized = await manipulateAsync(
+    asset.uri,
+    resize ? [{ resize }] : [],
+    { compress: 0.72, format: SaveFormat.JPEG },
+  );
+
+  return {
+    ...asset,
+    ...normalized,
+    file: undefined,
+    fileName: `kyc-${Date.now()}.jpg`,
+    mimeType: "image/jpeg",
+  };
+}
 
 function underReviewContent(processingStatus) {
   if (["PENDENTE", "PROCESSANDO"].includes(processingStatus)) {
@@ -140,12 +165,17 @@ export function KycVerificationScreen() {
       allowsEditing: false,
       cameraType: field === "selfie" ? "front" : "back",
       mediaTypes: Picker.MediaTypeOptions?.Images ?? ["images"],
-      quality: 0.9,
+      quality: 0.72,
     };
     const result = await Picker.launchCameraAsync(options);
     if (!result.canceled && result.assets?.[0]) {
-      setImages((current) => ({ ...current, [field]: result.assets[0] }));
-      setError("");
+      try {
+        const preparedImage = await prepareImageForUpload(result.assets[0]);
+        setImages((current) => ({ ...current, [field]: preparedImage }));
+        setError("");
+      } catch {
+        setError("Nao foi possivel preparar esta foto. Tire a foto novamente.");
+      }
     }
   }
 

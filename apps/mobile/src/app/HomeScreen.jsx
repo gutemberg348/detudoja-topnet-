@@ -13,8 +13,12 @@ import { useHomeConversations } from "./home/useHomeConversations";
 export function HomeScreen({ navigation }) {
   const { session } = useAuthStore();
   const [query, setQuery] = useState("");
-  const { suggestions } = useMarketplaceSuggestions(session?.accessToken, query, {
-    limit: 8,
+  const [searchFocused, setSearchFocused] = useState(false);
+  const { isLoading: suggestionsLoading, suggestions } = useMarketplaceSuggestions(session?.accessToken, query, {
+    enabled: searchFocused,
+    limit: 12,
+    minimumCharacters: 2,
+    showInitial: true,
   });
   const recent = useHomeConversations(session?.accessToken);
 
@@ -36,8 +40,24 @@ export function HomeScreen({ navigation }) {
       return true;
     }
 
-    if (isStoreSuggestion(suggestion)) {
+    if (suggestion.type === "store") {
       openStoreSuggestion(suggestion);
+      return true;
+    }
+
+    if (suggestion.type === "product") {
+      navigation.navigate("Buscar", {
+        query: suggestion.label ?? "",
+        resultMode: "products",
+      });
+      return true;
+    }
+
+    if (suggestion.type === "service") {
+      navigation.navigate("Buscar", {
+        query: suggestion.label ?? "",
+        resultMode: "services",
+      });
       return true;
     }
 
@@ -46,8 +66,8 @@ export function HomeScreen({ navigation }) {
   }
 
   function openStoreSuggestion(suggestion) {
-    navigation.navigate("StoreDetails", {
-      lojaId: suggestion.storeId ?? suggestion.id,
+    navigation.navigate("StoreConversation", {
+      storeId: suggestion.storeId ?? suggestion.id,
     });
   }
 
@@ -86,7 +106,9 @@ export function HomeScreen({ navigation }) {
       >
         <View style={styles.content}>
           <SearchBar
+            loading={suggestionsLoading}
             onChangeText={setQuery}
+            onFocusChange={setSearchFocused}
             onSelectSuggestion={selectSuggestion}
             onSubmit={openSearch}
             placeholder="O que voce quer hoje?"
@@ -179,7 +201,7 @@ function findDirectStoreSuggestion(value, suggestions = []) {
 }
 
 function isStoreSuggestion(suggestion) {
-  return ["store", "product"].includes(String(suggestion?.type ?? "").toLowerCase());
+  return String(suggestion?.type ?? "").toLowerCase() === "store";
 }
 
 function normalizeSearch(value = "") {
