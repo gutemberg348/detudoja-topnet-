@@ -87,6 +87,7 @@ services:
       - chat_media_data:/chat
 
   api-migrate:
+    image: brasil-cashback-api:${API_IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: apps/api/Dockerfile
@@ -103,6 +104,7 @@ services:
         condition: service_healthy
 
   api:
+    image: brasil-cashback-api:${API_IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: apps/api/Dockerfile
@@ -135,6 +137,7 @@ services:
       retries: 3
 
   kyc-worker:
+    image: brasil-cashback-api:${API_IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: apps/api/Dockerfile
@@ -155,6 +158,7 @@ services:
         condition: service_completed_successfully
 
   seed-demo:
+    image: brasil-cashback-api:${API_IMAGE_TAG:-local}
     profiles: ["seed"]
     build:
       context: .

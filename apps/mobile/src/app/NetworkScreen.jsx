@@ -225,7 +225,7 @@ export function NetworkScreen() {
 
       <View style={styles.section}>
         <SectionHeader
-          subtitle="Toque em uma pessoa para coloca-la no topo e abrir mais dois niveis."
+          subtitle="Toque em uma pessoa para coloca-la no inicio e abrir os tres niveis seguintes."
           title="Sua estrutura"
         />
         <NetworkMatrix

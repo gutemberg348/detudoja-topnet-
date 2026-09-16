@@ -650,10 +650,11 @@ Ativo significa `Usuario.status = ATIVO`; verificado significa
 `KycUsuario.status = APROVADO`. A qualificacao exige conta ativa, KYC aprovado
 e dois indicados diretos ativos e verificados.
 
-O mapa de `NetworkScreen.jsx` usa navegacao lateral progressiva. A pessoa em
-foco aparece no topo e somente as duas geracoes seguintes ficam abertas em
-colunas laterais. Tocar em qualquer participante, inclusive no ultimo nivel,
-move essa pessoa para o topo e carrega mais duas geracoes a partir dela. Ha
+O mapa de `NetworkScreen.jsx` usa navegacao lateral progressiva com participantes
+representados por bolinhas. A pessoa em foco aparece como inicio a esquerda e
+as tres geracoes seguintes ficam abertas em colunas para o lado. Tocar em
+qualquer participante, inclusive no ultimo nivel, transforma essa pessoa no
+novo inicio e carrega mais tres geracoes a partir dela. Ha
 atalhos para voltar ao pai e retornar a raiz, sem alterar a posicao real de
 ninguem. Verde continua identificando indicacao direta, azul ligacao de rede e
 o cadeado indica ganho bloqueado. A lista pesquisavel permanece separada;

@@ -73,7 +73,7 @@ const networkGuideSections = [
       { icon: "add-circle-outline", text: "Use os controles de mais e menos para aproximar ou afastar a visualizacao.", title: "Ajuste o zoom" },
       { icon: "locate-outline", text: "O botao de centralizar recupera a escala e a posicao inicial da arvore.", title: "Volte ao centro" },
       { icon: "search-outline", text: "A busca e os filtros alteram apenas a lista de participantes; nunca mudam a matriz real.", title: "Pesquise participantes" },
-      { icon: "person-circle-outline", text: "Toque em uma pessoa para coloca-la no topo e carregar mais dois niveis a partir dela.", title: "Avance pela rede" },
+      { icon: "person-circle-outline", text: "Toque em qualquer bolinha para coloca-la no inicio e carregar os tres niveis seguintes.", title: "Avance pela rede" },
     ],
     tip: "Comece com poucos niveis para leitura rapida e aumente a profundidade quando precisar investigar um ramo.",
   },
