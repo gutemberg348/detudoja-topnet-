@@ -31,7 +31,7 @@ import {
   registerSellerServiceSchema,
   updateSellerServiceSchema,
 } from "../modules/service-chats/service-chats.validator.js";
-import { handleUpload, uploadServiceChatImage } from "../modules/uploads/upload.middleware.js";
+import { handleUpload, uploadChatAttachment } from "../modules/uploads/upload.middleware.js";
 import { validate } from "../middlewares/validate.middleware.js";
 import {
   serviceAvailabilityHeartbeatRateLimit,
@@ -50,7 +50,7 @@ serviceChatsRoutes.post("/seller-services/heartbeat", serviceAvailabilityHeartbe
 serviceChatsRoutes.post("/", validate(createServiceConversationSchema), createServiceConversationController);
 serviceChatsRoutes.get("/:conversationId", getServiceConversationController);
 serviceChatsRoutes.post("/:conversationId/accept", acceptServiceConversationController);
-serviceChatsRoutes.post("/:conversationId/messages", serviceMessageRateLimit, handleUpload(uploadServiceChatImage), validate(createServiceConversationMessageSchema), createServiceConversationMessageController);
+serviceChatsRoutes.post("/:conversationId/messages", serviceMessageRateLimit, handleUpload(uploadChatAttachment), validate(createServiceConversationMessageSchema), createServiceConversationMessageController);
 serviceChatsRoutes.post("/:conversationId/locations", serviceMessageRateLimit, validate(createServiceConversationLocationSchema), createServiceConversationLocationController);
 serviceChatsRoutes.post("/:conversationId/proposals", validate(createServiceProposalSchema), createServiceProposalController);
 serviceChatsRoutes.post("/:conversationId/proposals/:proposalId/accept", validate(acceptServiceProposalSchema), acceptServiceProposalController);

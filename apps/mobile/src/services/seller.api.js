@@ -1,4 +1,5 @@
 import { apiRequest } from "./api";
+import { buildChatMessageFormData } from "./chat-attachments.api";
 
 function appendText(formData, key, value) {
   if (value === undefined || value === null) {
@@ -274,9 +275,9 @@ export function getStoreOrderMessages(accessToken, storeId, orderId) {
   });
 }
 
-export function sendStoreOrderMessage(accessToken, storeId, orderId, message) {
+export function sendStoreOrderMessage(accessToken, storeId, orderId, payload) {
   return apiRequest(`/api/app/seller/stores/${storeId}/orders/${orderId}/messages`, {
-    body: { message },
+    body: buildChatMessageFormData(payload),
     method: "POST",
     token: accessToken,
   });

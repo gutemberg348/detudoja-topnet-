@@ -4,6 +4,7 @@ import {
   emitPersonalChatUpdated,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
+import { deletePrivateChatAttachment, savePrivateChatAttachment, serializeChatAttachment } from "../chat-media/chat-media.service.js";
 import { parsePositiveId } from "../../utils/ids.js";
 import { personalChatsRepository } from "./personal-chats.repository.js";
 
@@ -68,6 +69,7 @@ function getParticipantIds(conversation) {
 
 function serializeMessage(message, viewerId) {
   return {
+    attachment: serializeChatAttachment(message, "personal", message.anexo_json),
     createdAt: message.criado_em.toISOString(),
     id: message.id,
     isMine: message.autor_usuario_id === viewerId,
@@ -368,19 +370,25 @@ export async function getPersonalChat(userId, conversationId) {
   return { conversation: serializeConversation(conversation, userId, true) };
 }
 
-export async function createPersonalMessage(userId, conversationId, data) {
+export async function createPersonalMessage(userId, conversationId, data, attachmentFile = null) {
   ensurePrismaClient();
   const access = await getConversationAccess(userId, conversationId, { active: true });
   const recipientSide = access.viewerSide === "a" ? "b" : "a";
+  const attachment = await savePrivateChatAttachment(attachmentFile, data, {
+    conversationId: access.conversation.id,
+    scope: "personal",
+  });
   let message;
   try {
     message = await personalChatsRepository.createMessage({
+      attachment,
       conversationId: access.conversation.id,
       recipientSide,
-      text: data.message,
+      text: data.message || null,
       userId,
     });
   } catch (error) {
+    await deletePrivateChatAttachment(attachment);
     if (error?.code === "PERSONAL_CHAT_INACTIVE") {
       throw new AppError("Esta conversa foi encerrada ou bloqueada", 409);
     }

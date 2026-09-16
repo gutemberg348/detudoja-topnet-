@@ -1,10 +1,5 @@
 import { apiRequest } from "./api";
-
-function appendImage(body, image) {
-  if (!image?.uri) return;
-  const extension = image.fileName?.split(".").pop() || "jpg";
-  body.append("image", { name: `conversa.${extension}`, type: image.mimeType || "image/jpeg", uri: image.uri });
-}
+import { buildChatMessageFormData } from "./chat-attachments.api";
 
 export function getServiceTypes(token, { operationalType } = {}) {
   const query = operationalType
@@ -61,10 +56,8 @@ export function acceptServiceConversation(token, conversationId) {
   });
 }
 
-export function sendServiceConversationMessage(token, conversationId, { image, message }) {
-  const body = new FormData();
-  body.append("message", message ?? "");
-  appendImage(body, image);
+export function sendServiceConversationMessage(token, conversationId, payload) {
+  const body = buildChatMessageFormData(payload);
   return apiRequest(`/api/app/service-chats/${conversationId}/messages`, { body, method: "POST", token });
 }
 

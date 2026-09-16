@@ -207,6 +207,12 @@ export function serializeAdminServiceType(type) {
     mode: type.modo_atendimento,
     name: type.nome,
     operationalType: type.tipo_operacao,
+    registrationRequirements: type.requisitos_cadastro ?? {
+      requiresDriverLicense: false,
+      requiresPlate: false,
+      requiresVehicle: false,
+      vehicleKinds: [],
+    },
     providersCount: type._count?.servicos_vendedor ?? 0,
     segment: type.segmento_venda
       ? { id: type.segmento_venda.id, name: type.segmento_venda.nome }

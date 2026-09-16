@@ -337,15 +337,15 @@ export function SellScreen() {
     setOnboardingOpen(true);
   }
 
-  function runSellerAction(action) {
+  function runSellerAction(action, { cpfConfirmed = false } = {}) {
     if (action === "sale") {
-      openSale();
+      openSale({ cpfConfirmed });
     } else if (action === "store") {
       openStoreForm();
     } else if (action === "service") {
       openSellerServices();
     } else if (action === "payout") {
-      openPayoutForm();
+      openPayoutForm(null, { cpfConfirmed });
     }
   }
 
@@ -358,7 +358,13 @@ export function SellScreen() {
     runSellerAction(action);
   }
 
-  function openPayoutForm(action = null) {
+  function openPayoutForm(action = null, { cpfConfirmed = false } = {}) {
+    if (!cpfConfirmed && session?.user?.cpfRequired) {
+      setPendingPayoutAction(action);
+      setPendingCpfAction("payout");
+      setPayoutOpen(false);
+      return;
+    }
     setPayoutForm({
       key: "",
       keyType: payoutAccount?.keyType ?? "CPF",
@@ -410,19 +416,19 @@ export function SellScreen() {
     }
   }
 
-  function openSale() {
+  function openSale({ cpfConfirmed = false } = {}) {
     if (!profile) {
       openOnboarding("sale");
       return;
     }
 
     if (!hasActivePayoutAccount) {
-      openPayoutForm({ type: "sale" });
+      openPayoutForm({ type: "sale" }, { cpfConfirmed });
       return;
     }
 
     if (stores.length === 1) {
-      openStoreCharge(stores[0]);
+      openStoreCharge(stores[0], { cpfConfirmed });
       return;
     }
 
@@ -432,12 +438,12 @@ export function SellScreen() {
       return;
     }
 
-    openAutonomousSale();
+    openAutonomousSale({ cpfConfirmed });
   }
 
-  function openAutonomousSale() {
+  function openAutonomousSale({ cpfConfirmed = false } = {}) {
     if (!hasActivePayoutAccount) {
-      openPayoutForm({ type: "sale" });
+      openPayoutForm({ type: "sale" }, { cpfConfirmed });
       return;
     }
     showAutonomousSale();
@@ -569,9 +575,9 @@ export function SellScreen() {
     }
   }
 
-  function openStoreCharge(store) {
+  function openStoreCharge(store, { cpfConfirmed = false } = {}) {
     if (!hasActivePayoutAccount) {
-      openPayoutForm({ store, type: "store-charge" });
+      openPayoutForm({ store, type: "store-charge" }, { cpfConfirmed });
       return;
     }
     showStoreCharge(store);
@@ -1207,8 +1213,10 @@ export function SellScreen() {
         onCompleted={() => {
           const action = pendingCpfAction;
           setPendingCpfAction(null);
-          if (action) {
-            runSellerAction(action);
+          if (action === "payout") {
+            openPayoutForm(pendingPayoutAction, { cpfConfirmed: true });
+          } else if (action) {
+            runSellerAction(action, { cpfConfirmed: true });
           }
         }}
         open={Boolean(pendingCpfAction)}

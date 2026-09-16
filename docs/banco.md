@@ -103,7 +103,11 @@ TransacaoComercial
 - Unicos: `email`, `telefone`, `cpf`, `asaas_cliente_id` e
   `identificador_publico`.
 - Indices: `status`, `tipo_conta`, `nivel_kyc`, `loja_origem_cadastro_id` e
-  `identificador_publico`.
+  `identificador_publico`; `ganhos_rede_bloqueados` tambem possui indice para
+  consulta operacional.
+- `ganhos_rede_bloqueados`, `ganhos_rede_bloqueados_em` e
+  `motivo_bloqueio_ganhos_rede` controlam a suspensao administrativa de novas
+  comissoes diretas e da matriz. O controle nao altera lancamentos historicos.
 - Relacoes 1:1: `kyc_usuarios`, `lojistas`, `vendedores`.
 - Relacoes 1:N: enderecos, contas bancarias, carteiras, codigos de convite,
   pagamentos, pedidos, saques, lancamentos, recompensas e sessoes.
@@ -324,6 +328,17 @@ ainda e uma evolucao recomendada antes de producao regulada.
 - E usado por vendedores, lojas, vendas autonomas, tipos de servico e chats de
   servico. Taxa de uma loja pode sobrescrever o segmento com
   `lojas.taxa_plataforma_personalizada_percentual`.
+
+### `tipos_servico` e `servicos_vendedor`
+
+- `tipos_servico.requisitos_cadastro` guarda em JSON os campos exigidos antes
+  de o prestador ativar a atividade: veiculo, CNH, placa e tipos de veiculo
+  aceitos.
+- `servicos_vendedor.dados_cadastro` guarda a resposta especifica daquele
+  prestador para o tipo. O cadastro geral de motoboy continua na entidade
+  propria porque tambem controla cidade, raio, equipe e corridas.
+- A migration `20260916150000_service_registration_requirements` cria os dois
+  campos e inicializa Motoboy e Frete com regras seguras.
 
 ### `lojas`
 

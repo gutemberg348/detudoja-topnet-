@@ -14,10 +14,7 @@ import {
   createServiceConversationCharge,
   serializeChargeWithQr,
 } from "../charges/charge.service.js";
-import {
-  deleteUploadedImage,
-  saveUploadedImage,
-} from "../uploads/image.service.js";
+import { deletePrivateChatAttachment, savePrivateChatAttachment, serializeChatAttachment } from "../chat-media/chat-media.service.js";
 import {
   getBusyCourierSellerIds,
   isCourierSellerBusy,
@@ -227,6 +224,8 @@ function serializeMessage(message, viewerId) {
   const kind = message.origem === "CLIENTE" ? "customer" : message.origem === "VENDEDOR" ? "seller" : "system";
   const location = parseSharedLocation(message.mensagem);
   return {
+    attachment: serializeChatAttachment(message, "service", message.anexo_json)
+      ?? (message.imagem_url ? { type: "IMAGE", url: message.imagem_url } : null),
     author: kind,
     createdAt: message.criado_em.toISOString(),
     id: message.id,
@@ -422,9 +421,48 @@ function serializeServiceType(type) {
     name: type.nome,
     availableNow: hasAvailableProvider,
     operationalType: type.tipo_operacao,
+    registrationRequirements: type.requisitos_cadastro ?? {
+      requiresDriverLicense: false,
+      requiresPlate: false,
+      requiresVehicle: false,
+      vehicleKinds: [],
+    },
     requiresCourierProfile: type.tipo_operacao === "ENTREGA_LOCAL",
     slug: type.slug,
   };
+}
+
+function validateServiceRegistration(type, registration, courierProfile) {
+  const requirements = type.requisitos_cadastro ?? {};
+  if (!requirements.requiresVehicle && !requirements.requiresDriverLicense && !requirements.requiresPlate) {
+    return;
+  }
+
+  const fallback = type.tipo_operacao === "ENTREGA_LOCAL" && courierProfile
+    ? {
+        driverLicense: courierProfile.cnh,
+        plate: courierProfile.placa,
+        vehicleKind: "MOTO",
+        vehicleModel: courierProfile.modelo_moto,
+      }
+    : {};
+  const values = { ...fallback, ...(registration ?? {}) };
+  const allowedKinds = Array.isArray(requirements.vehicleKinds) ? requirements.vehicleKinds : [];
+
+  if (requirements.requiresVehicle) {
+    if (!values.vehicleKind || !String(values.vehicleModel ?? "").trim()) {
+      throw new AppError("Cadastre o veiculo exigido para realizar este servico", 428);
+    }
+    if (allowedKinds.length && !allowedKinds.includes(values.vehicleKind)) {
+      throw new AppError("O tipo de veiculo informado nao atende este servico", 409);
+    }
+  }
+  if (requirements.requiresDriverLicense && String(values.driverLicense ?? "").replace(/\D/g, "").length !== 11) {
+    throw new AppError("Cadastre uma CNH valida para realizar este servico", 428);
+  }
+  if (requirements.requiresPlate && !/^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$/.test(String(values.plate ?? "").toUpperCase().replace(/[^A-Z0-9]/g, ""))) {
+    throw new AppError("Cadastre uma placa valida para realizar este servico", 428);
+  }
 }
 
 export async function listServiceTypes(userId, query = {}) {
@@ -518,6 +556,7 @@ export async function listSellerServices(userId) {
       ...serializeServiceType(type),
       available: isServiceAvailable(byType.get(type.id)),
       enabled: Boolean(byType.get(type.id)),
+      registrationData: byType.get(type.id)?.dados_cadastro ?? null,
       sellerServiceId: byType.get(type.id)?.id ?? null,
     })),
   };
@@ -602,7 +641,7 @@ export async function listOnlineServiceProviders(userId, serviceTypeId, { storeI
 
 export async function updateSellerService(userId, data) {
   await serviceChatsRepository.requireCommercialTier2(userId);
-  const seller = await serviceChatsRepository.findSeller({ include: { motoboy: true }, where: { excluido_em: null, usuario_id: userId } });
+  const seller = await serviceChatsRepository.findSeller({ include: { motoboy: true, servicos: { where: { excluido_em: null } } }, where: { excluido_em: null, usuario_id: userId } });
   if (!seller) throw new AppError("Crie seu perfil de vendedor antes de ativar servicos", 428);
   if (seller.status !== "ATIVO" || seller.status_kyc !== "APROVADO") {
     throw new AppError("Conclua a verificacao comercial antes de atender servicos", 428);
@@ -620,10 +659,14 @@ export async function updateSellerService(userId, data) {
     throw new AppError("Conclua seu cadastro de motoboy antes de ficar online", 428);
   }
 
+  const existingService = seller.servicos.find((service) => service.tipo_servico_id === type.id);
+  const registration = data.registration ?? existingService?.dados_cadastro ?? null;
+  if (data.available) validateServiceRegistration(type, registration, seller.motoboy);
+
   const availabilityUpdatedAt = data.available ? new Date() : null;
   const service = await serviceChatsRepository.upsertSellerService({
-    create: { categoria: type.nome, descricao: type.descricao, disponibilidade_atualizada_em: availabilityUpdatedAt, disponivel_agora: data.available, nome: type.nome, preco_centavos: null, status: "ATIVO", tipo_servico_id: type.id, vendedor_id: seller.id },
-    update: { disponibilidade_atualizada_em: availabilityUpdatedAt, disponivel_agora: data.available, status: "ATIVO" },
+    create: { categoria: type.nome, dados_cadastro: registration, descricao: type.descricao, disponibilidade_atualizada_em: availabilityUpdatedAt, disponivel_agora: data.available, nome: type.nome, preco_centavos: null, status: "ATIVO", tipo_servico_id: type.id, vendedor_id: seller.id },
+    update: { ...(data.registration ? { dados_cadastro: data.registration } : {}), disponibilidade_atualizada_em: availabilityUpdatedAt, disponivel_agora: data.available, status: "ATIVO" },
     where: { vendedor_id_tipo_servico_id: { tipo_servico_id: type.id, vendedor_id: seller.id } },
   });
 
@@ -1387,27 +1430,29 @@ export async function disputeServiceCompletion(userId, conversationId) {
   return { conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
 }
 
-export async function createServiceConversationMessage(userId, conversationId, data, imageFile = null) {
+export async function createServiceConversationMessage(userId, conversationId, data, attachmentFile = null) {
   const conversation = await findAccessibleConversation(userId, conversationId);
   const text = String(data.message ?? "").trim();
-  if (!text && !imageFile) throw new AppError("Escreva uma mensagem ou envie uma foto", 400);
+  if (!text && !data.attachmentType) throw new AppError("Escreva uma mensagem ou envie um anexo", 400);
   if (conversation.status === "ABERTA") throw new AppError("Aguarde o prestador aceitar o chamado", 409);
   if (!["ACORDADA", "AGUARDANDO_CONFIRMACAO"].includes(conversation.status)) throw new AppError("Esta conversa esta encerrada", 409);
   const isSeller = conversation.vendedor.usuario_id === userId;
   if (isSeller) {
     await assertSellerCanOperateConversation(serviceChatsRepository, conversation, userId);
   }
-  let upload = null;
+  const attachment = await savePrivateChatAttachment(attachmentFile, data, {
+    conversationId: conversation.id,
+    scope: "service",
+  });
   try {
-    if (imageFile) upload = await saveUploadedImage(imageFile, { folder: ["conversas-servico", String(conversation.id)], profile: "serviceChat" });
-    const message = await serviceChatsRepository.createMessage({ data: { autor_usuario_id: userId, conversa_servico_id: conversation.id, imagem_url: upload?.url ?? null, lido_cliente_em: isSeller ? null : new Date(), lido_vendedor_em: isSeller ? new Date() : null, mensagem: text || null, origem: isSeller ? "VENDEDOR" : "CLIENTE" } });
+    const message = await serviceChatsRepository.createMessage({ data: { anexo_json: attachment, autor_usuario_id: userId, conversa_servico_id: conversation.id, lido_cliente_em: isSeller ? null : new Date(), lido_vendedor_em: isSeller ? new Date() : null, mensagem: text || null, origem: isSeller ? "VENDEDOR" : "CLIENTE" } });
     const savedConversation = await serviceChatsRepository.updateConversation({ include: conversationInclude, data: {}, where: { id: conversation.id } });
     const serializedConversation = serializeConversation(savedConversation, userId, { includeMessages: true });
     const serializedMessage = serializeMessage(message, userId);
     emitServiceChatMessageCreated({ conversation: serializedConversation, message: serializedMessage });
     return { message: serializedMessage };
   } catch (error) {
-    if (upload) await deleteUploadedImage(upload.url);
+    await deletePrivateChatAttachment(attachment);
     throw error;
   }
 }

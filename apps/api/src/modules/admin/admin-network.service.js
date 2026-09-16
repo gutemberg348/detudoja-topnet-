@@ -47,6 +47,9 @@ function serializeUser(user, context = {}) {
     directSponsorId: context.directSponsorId ?? null,
     directSponsorName: context.directSponsorName ?? null,
     email: user.email,
+    networkEarningsBlocked: Boolean(user.ganhos_rede_bloqueados),
+    networkEarningsBlockedAt: user.ganhos_rede_bloqueados_em?.toISOString() ?? null,
+    networkEarningsBlockReason: user.motivo_bloqueio_ganhos_rede ?? null,
     id: user.id,
     indicationStatus: context.indicationStatus ?? null,
     isDirectToRoot: context.directSponsorId === context.rootUserId,
@@ -60,7 +63,7 @@ function serializeUser(user, context = {}) {
     parentSide: context.parentSide ?? sideLabel(context.position),
     phone: user.telefone,
     position: context.position ?? null,
-    qualified: active && verified && activeVerifiedDirects >= 2,
+    qualified: active && verified && activeVerifiedDirects >= 2 && !user.ganhos_rede_bloqueados,
     reward: {
       direct: parentConnectionType === "DIRETA",
       network: parentConnectionType !== "RAIZ",
@@ -216,6 +219,7 @@ export async function getAdminNetworkOverview(query = {}) {
       summary: {
         active: 0,
         directToRoot: 0,
+        earningsBlocked: 0,
         maxDepth,
         orphans: orphanUsers.length,
         qualified: 0,
@@ -257,11 +261,41 @@ export async function getAdminNetworkOverview(query = {}) {
       maxDepth,
       orphans: orphanUsers.length,
       qualified: people.filter((person) => person.qualified).length,
+      earningsBlocked: people.filter((person) => person.networkEarningsBlocked).length,
       total: people.length,
       unallocated: unallocatedIndications.length,
       verified: people.filter((person) => person.verified).length,
     },
   };
+}
+
+export async function updateAdminNetworkEarnings(adminId, userId, data) {
+  const parsedUserId = parsePositiveId(userId, "Participante invalido");
+  const companyRoot = await findCompanyRoot();
+  if (!companyRoot) throw new AppError("Raiz da empresa nao encontrada", 409);
+  if (parsedUserId === companyRoot.id) {
+    throw new AppError("Os ganhos da raiz operacional nao podem ser alterados", 409);
+  }
+
+  await adminNetworkRepository.transaction(async (database) => {
+    const repository = createAdminNetworkRepository(database);
+    const participant = await repository.findPlacementUser(parsedUserId);
+    if (!participant) throw new AppError("Participante nao encontrado", 404);
+
+    await repository.updateNetworkEarnings(parsedUserId, {
+      ganhos_rede_bloqueados: data.blocked,
+      ganhos_rede_bloqueados_em: data.blocked ? new Date() : null,
+      motivo_bloqueio_ganhos_rede: data.blocked ? data.reason : null,
+    });
+    await repository.createAudit({
+      acao: data.blocked ? "GANHOS_REDE_BLOQUEADOS" : "GANHOS_REDE_LIBERADOS",
+      administrador_id: adminId,
+      dados_json: { blocked: data.blocked, reason: data.reason },
+      usuario_alvo_id: parsedUserId,
+    });
+  });
+
+  return getAdminNetworkOverview({ maxDepth: 20 });
 }
 
 function buildPlacementGraph(placements) {
@@ -383,6 +417,19 @@ export async function moveAdminNetworkPlacement(adminId, userId, data) {
           });
         }
       }
+
+      await repository.createAudit({
+        acao: "POSICAO_REDE_ALTERADA",
+        administrador_id: adminId,
+        dados_json: {
+          fromParentUserId: placement.alocado_sob_usuario_id,
+          fromPosition: placement.posicao_matriz,
+          reason: data.reason,
+          toParentUserId: parentUserId,
+          toPosition: data.position,
+        },
+        usuario_alvo_id: movedUserId,
+      });
     });
   } catch (error) {
     if (error?.code === "P2002") {

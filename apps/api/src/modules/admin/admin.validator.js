@@ -81,12 +81,30 @@ export const updateAdminSalesSegmentSchema = z
   })
   .refine((data) => Object.keys(data).length > 0, "Informe ao menos um campo");
 
+const serviceRegistrationRequirementsSchema = z.object({
+  requiresDriverLicense: z.boolean().default(false),
+  requiresPlate: z.boolean().default(false),
+  requiresVehicle: z.boolean().default(false),
+  vehicleKinds: z.array(z.enum(["MOTO", "CARRO", "UTILITARIO", "CAMINHAO", "BICICLETA"]))
+    .max(5)
+    .default([]),
+}).superRefine((requirements, context) => {
+  if (requirements.requiresVehicle && !requirements.vehicleKinds.length) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Selecione ao menos um tipo de veiculo",
+      path: ["vehicleKinds"],
+    });
+  }
+});
+
 const serviceTypeFields = {
   description: z.string().trim().max(1000).optional(),
   iconName: z.string().trim().max(80).optional().or(z.literal("")),
   mode: z.enum(["NEGOCIACAO_CHAT", "PRECO_FIXO"]).default("NEGOCIACAO_CHAT"),
   name: z.string().trim().min(2, "Informe o nome do servico").max(120),
   operationalType: z.enum(["GERAL", "ENTREGA_LOCAL"]).default("GERAL"),
+  registrationRequirements: serviceRegistrationRequirementsSchema.default({}),
   segmentId: segmentIdSchema,
   sortOrder: z.coerce.number().int().min(0).max(9999).default(0),
   status: z.enum(["ATIVO", "INATIVO", "PAUSADO"]).default("ATIVO"),
@@ -101,6 +119,7 @@ export const updateAdminServiceTypeSchema = z
     mode: serviceTypeFields.mode.optional(),
     name: serviceTypeFields.name.optional(),
     operationalType: serviceTypeFields.operationalType.optional(),
+    registrationRequirements: serviceTypeFields.registrationRequirements.optional(),
     segmentId: serviceTypeFields.segmentId.optional(),
     sortOrder: serviceTypeFields.sortOrder.optional(),
     status: serviceTypeFields.status.optional(),
@@ -174,6 +193,11 @@ export const moveAdminNetworkPlacementSchema = z.object({
   parentUserId: z.coerce.number().int().positive(),
   position: z.coerce.number().int().min(1).max(2),
   reason: z.string().trim().min(8, "Explique o motivo da mudanca").max(240),
+}).strict();
+
+export const updateAdminNetworkEarningsSchema = z.object({
+  blocked: z.boolean(),
+  reason: z.string().trim().min(8, "Explique o motivo da alteracao").max(500),
 }).strict();
 
 export const refundAdminPaymentSchema = z.object({

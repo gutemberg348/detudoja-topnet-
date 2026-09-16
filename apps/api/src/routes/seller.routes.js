@@ -42,6 +42,7 @@ import {
 } from "../modules/orders/orders.validator.js";
 import {
   handleUpload,
+  uploadChatAttachment,
   uploadStoreMedia,
   uploadStoreProductImage,
 } from "../modules/uploads/upload.middleware.js";
@@ -158,6 +159,7 @@ sellerRoutes.get(
 );
 sellerRoutes.post(
   "/stores/:storeId/orders/:orderId/messages",
+  handleUpload(uploadChatAttachment),
   validate(createOrderMessageSchema),
   createStoreOrderMessageController,
 );

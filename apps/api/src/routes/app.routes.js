@@ -2,6 +2,7 @@ import { Router } from "express";
 import { authRoutes } from "./auth.routes.js";
 import { bonusRoutes } from "./bonus.routes.js";
 import { courierRoutes } from "./courier.routes.js";
+import { chatMediaRoutes } from "./chat-media.routes.js";
 import { deliveriesRoutes } from "./deliveries.routes.js";
 import { kycRoutes } from "./kyc.routes.js";
 import { marketplaceRoutes } from "./marketplace.routes.js";
@@ -24,6 +25,7 @@ export const appRoutes = Router();
 
 appRoutes.use("/auth", authRoutes);
 appRoutes.use(authMiddleware);
+appRoutes.use("/chat-media", chatMediaRoutes);
 appRoutes.use("/users", usersRoutes);
 appRoutes.use("/kyc", kycRoutes);
 appRoutes.use("/merchant", merchantRoutes);

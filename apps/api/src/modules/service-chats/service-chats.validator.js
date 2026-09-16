@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { chatAttachmentFields, validateMessageAttachment } from "../chat-media/chat-media.validator.js";
 
 const positiveId = (message) => z.coerce.number().int().positive(message);
 
@@ -13,8 +14,15 @@ export const createServiceConversationSchema = z.object({
 
 export const updateSellerServiceSchema = z.object({
   available: z.coerce.boolean(),
+  registration: z.object({
+    color: z.string().trim().max(60).optional().or(z.literal("")),
+    driverLicense: z.string().trim().max(20).optional().or(z.literal("")),
+    plate: z.string().trim().max(10).optional().or(z.literal("")),
+    vehicleKind: z.enum(["MOTO", "CARRO", "UTILITARIO", "CAMINHAO", "BICICLETA"]).optional(),
+    vehicleModel: z.string().trim().max(120).optional().or(z.literal("")),
+  }).strict().optional(),
   serviceTypeId: positiveId("Servico invalido"),
-});
+}).strict();
 
 export const createServiceReviewSchema = z.object({
   comment: z.string().trim().max(600, "Comentario muito longo").optional().or(z.literal("")),
@@ -28,8 +36,9 @@ export const registerSellerServiceSchema = z.object({
 });
 
 export const createServiceConversationMessageSchema = z.object({
+  ...chatAttachmentFields,
   message: z.string().trim().max(1200, "Mensagem muito longa").optional().or(z.literal("")),
-});
+}).superRefine(validateMessageAttachment);
 
 export const createServiceConversationLocationSchema = z.object({
   label: z.enum(["RETIRADA", "DESTINO", "OUTRO"]),

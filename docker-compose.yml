@@ -57,6 +57,7 @@ services:
       - postgres_backups:/backups:ro
       - uploads_data:/uploads:ro
       - kyc_private_data:/kyc:ro
+      - chat_media_data:/chat:ro
     depends_on:
       postgres-backup:
         condition: service_started
@@ -79,10 +80,11 @@ services:
     image: alpine:3.21
     restart: "no"
     user: "0:0"
-    command: ["sh", "-c", "mkdir -p /uploads /kyc && chown -R 1000:1000 /uploads /kyc"]
+    command: ["sh", "-c", "mkdir -p /uploads /kyc /chat && chown -R 1000:1000 /uploads /kyc /chat"]
     volumes:
       - uploads_data:/uploads
       - kyc_private_data:/kyc
+      - chat_media_data:/chat
 
   api-migrate:
     build:
@@ -117,6 +119,7 @@ services:
     volumes:
       - uploads_data:/app/storage/uploads
       - kyc_private_data:/app/storage/private/kyc
+      - chat_media_data:/app/storage/private/chat
     depends_on:
       api-migrate:
         condition: service_completed_successfully
@@ -190,3 +193,4 @@ volumes:
   redis_data:
   uploads_data:
   kyc_private_data:
+  chat_media_data:

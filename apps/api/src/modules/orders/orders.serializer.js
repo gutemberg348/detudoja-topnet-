@@ -1,3 +1,5 @@
+import { serializeChatAttachment } from "../chat-media/chat-media.service.js";
+
 function cents(value) {
   return Number(value ?? 0);
 }
@@ -122,6 +124,7 @@ export function serializeOrderMessage(message) {
   const kind = messageKindByOrigin[message.origem] ?? "system";
 
   return {
+    attachment: serializeChatAttachment(message, "order", message.metadata_json?.attachment),
     author: kind,
     authorUser: message.autor
       ? {

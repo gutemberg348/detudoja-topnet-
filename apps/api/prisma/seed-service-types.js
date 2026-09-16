@@ -10,8 +10,18 @@ function slugify(value) {
 }
 
 const serviceTypes = [
-  ["Frete", "Transporte de cargas e mudancas negociado pelo chat.", "car", "GERAL"],
-  ["Motoboy", "Corridas e entregas locais solicitadas por clientes ou lojas.", "bicycle", "ENTREGA_LOCAL"],
+  ["Frete", "Transporte de cargas e mudancas negociado pelo chat.", "car", "GERAL", {
+    requiresDriverLicense: true,
+    requiresPlate: true,
+    requiresVehicle: true,
+    vehicleKinds: ["CARRO", "UTILITARIO", "CAMINHAO"],
+  }],
+  ["Motoboy", "Corridas e entregas locais solicitadas por clientes ou lojas.", "bicycle", "ENTREGA_LOCAL", {
+    requiresDriverLicense: true,
+    requiresPlate: true,
+    requiresVehicle: true,
+    vehicleKinds: ["MOTO"],
+  }],
 ];
 
 async function main() {
@@ -32,7 +42,7 @@ async function main() {
     where: { excluido_em: null, slug: "entregador" },
   });
 
-  for (const [index, [name, description, icon, operationalType]] of serviceTypes.entries()) {
+  for (const [index, [name, description, icon, operationalType, requirements]] of serviceTypes.entries()) {
     await prisma.tipoServico.upsert({
       create: {
         descricao: description,
@@ -40,6 +50,7 @@ async function main() {
         modo_atendimento: "NEGOCIACAO_CHAT",
         nome: name,
         ordem: index + 1,
+        requisitos_cadastro: requirements,
         segmento_venda_id: servicesSegment.id,
         slug: slugify(name),
         status: "ATIVO",
@@ -50,6 +61,7 @@ async function main() {
         icone: icon,
         modo_atendimento: "NEGOCIACAO_CHAT",
         ordem: index + 1,
+        requisitos_cadastro: requirements,
         segmento_venda_id: servicesSegment.id,
         status: "ATIVO",
         tipo_operacao: operationalType,

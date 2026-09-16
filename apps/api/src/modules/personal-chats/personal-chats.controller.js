@@ -63,6 +63,7 @@ export async function updateFriendAliasController(req, res, next) {
       req.auth.user.id,
       req.params.conversationId,
       req.body,
+      req.file ?? null,
     ));
   } catch (error) {
     next(error);
@@ -83,6 +84,7 @@ export async function createPersonalMessageController(req, res, next) {
       req.auth.user.id,
       req.params.conversationId,
       req.body,
+      req.file ?? null,
     ));
   } catch (error) {
     next(error);

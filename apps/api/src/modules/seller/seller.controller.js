@@ -174,6 +174,7 @@ export async function createStoreOrderMessageController(req, res, next) {
           req.params.storeId,
           req.params.orderId,
           req.body,
+          req.file ?? null,
         ),
       );
   } catch (error) {

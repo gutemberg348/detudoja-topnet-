@@ -66,7 +66,7 @@ export const personalChatsRepository = {
     });
   },
 
-  createMessage({ conversationId, recipientSide, text, userId }) {
+  createMessage({ attachment, conversationId, recipientSide, text, userId }) {
     const now = new Date();
 
     return prisma.$transaction(async (transaction) => {
@@ -89,6 +89,7 @@ export const personalChatsRepository = {
 
       const message = await transaction.conversaPessoalMensagem.create({
         data: {
+          anexo_json: attachment,
           autor_usuario_id: userId,
           conversa_id: conversationId,
           mensagem: text,

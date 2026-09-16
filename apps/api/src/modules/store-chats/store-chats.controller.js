@@ -46,6 +46,7 @@ export async function createStoreConversationMessageController(req, res, next) {
         req.auth.user.id,
         req.params.conversationId,
         req.body,
+        req.file ?? null,
       ),
     );
   } catch (error) {

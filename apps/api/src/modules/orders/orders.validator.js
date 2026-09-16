@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { chatAttachmentFields, validateMessageAttachment } from "../chat-media/chat-media.validator.js";
 
 const onlyDigits = (value) => String(value ?? "").replace(/\D/g, "");
 
@@ -88,9 +89,6 @@ export const payStoreOrderProposalSchema = z.object({
 });
 
 export const createOrderMessageSchema = z.object({
-  message: z
-    .string({ required_error: "Informe a mensagem" })
-    .trim()
-    .min(1, "Informe a mensagem")
-    .max(1200, "Mensagem muito longa"),
-});
+  ...chatAttachmentFields,
+  message: z.string().trim().max(1200, "Mensagem muito longa").optional().or(z.literal("")),
+}).superRefine(validateMessageAttachment);

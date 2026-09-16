@@ -18,6 +18,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { AppButton } from "../components/AppButton";
 import { BackHeader } from "../components/BackHeader";
 import { ChatComposer } from "../components/ChatComposer";
+import { ChatAttachment } from "../components/ChatAttachment";
 import { ContactAvatar } from "../components/ContactAvatar";
 import {
   blockPersonalConversation,
@@ -83,10 +84,10 @@ export function PersonalConversationScreen({ navigation, route }) {
     }
   }, [conversation?.messages?.length]);
 
-  async function sendMessage() {
-    const message = draft.trim();
-    if (!message || isSending) return;
-    setDraft("");
+  async function sendMessage(payload = null) {
+    const message = payload?.message ?? draft.trim();
+    if ((!message && !payload?.attachment) || isSending) return;
+    if (!payload) setDraft("");
     setIsSending(true);
     setError("");
 
@@ -94,12 +95,13 @@ export function PersonalConversationScreen({ navigation, route }) {
       const response = await sendPersonalMessage(
         session.accessToken,
         conversationId,
-        message,
+        payload ?? message,
       );
       setConversation(response.conversation);
     } catch (requestError) {
-      setDraft(message);
+      if (!payload) setDraft(message);
       setError(requestError.message);
+      throw requestError;
     } finally {
       setIsSending(false);
     }
@@ -215,16 +217,18 @@ export function PersonalConversationScreen({ navigation, route }) {
             )}
             onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
             ref={listRef}
-            renderItem={({ item }) => <MessageBubble message={item} />}
+            renderItem={({ item }) => <MessageBubble accessToken={session.accessToken} message={item} />}
             style={styles.list}
           />
         )}
 
         <ChatComposer
           draft={draft}
+          onAttachmentError={setError}
           onChangeDraft={setDraft}
           onFocus={() => setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 120)}
           onSend={sendMessage}
+          onSendAttachment={sendMessage}
           placeholder="Escreva uma mensagem"
           sending={isSending}
           style={{ paddingBottom: Math.max(spacing.sm, insets.bottom + spacing.xs) }}
@@ -258,12 +262,13 @@ export function PersonalConversationScreen({ navigation, route }) {
   );
 }
 
-function MessageBubble({ message }) {
+function MessageBubble({ accessToken, message }) {
   const time = new Date(message.createdAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
   return (
     <View style={[styles.messageLine, message.isMine && styles.messageLineMine]}>
       <View style={[styles.bubble, message.isMine && styles.bubbleMine]}>
-        <Text style={[styles.messageText, message.isMine && styles.messageTextMine]}>{message.text}</Text>
+        <ChatAttachment accessToken={accessToken} attachment={message.attachment} isMine={message.isMine} />
+        {message.text ? <Text style={[styles.messageText, message.isMine && styles.messageTextMine]}>{message.text}</Text> : null}
         <View style={styles.messageMeta}>
           <Text style={[styles.messageTime, message.isMine && styles.messageTimeMine]}>{time}</Text>
           {message.isMine ? (

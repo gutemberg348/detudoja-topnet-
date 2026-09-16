@@ -1,22 +1,24 @@
 import { z } from "zod";
+import { chatAttachmentFields, validateMessageAttachment } from "../chat-media/chat-media.validator.js";
+
+const multipartBoolean = z.preprocess((value) => {
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return value;
+}, z.boolean());
 
 export const createStoreChatMessageSchema = z
   .object({
+    ...chatAttachmentFields,
     message: z.string().trim().max(2000, "Mensagem muito longa").optional(),
     productId: z.coerce.number().int().positive().optional(),
-    support: z.boolean().optional().default(false),
+    support: multipartBoolean.optional().default(false),
     type: z
       .enum(["TEXTO", "PRODUTO", "CATEGORIA", "CATALOGO"])
       .default("TEXTO"),
   })
   .superRefine((data, context) => {
-    if (data.type === "TEXTO" && !data.message) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Escreva uma mensagem",
-        path: ["message"],
-      });
-    }
+    if (data.type === "TEXTO") validateMessageAttachment(data, context);
 
     if (data.type === "PRODUTO" && !data.productId) {
       context.addIssue({

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { chatAttachmentFields, validateMessageAttachment } from "../chat-media/chat-media.validator.js";
 
 export const createFriendInvitationSchema = z.object({
   message: z
@@ -32,9 +33,6 @@ export const updateFriendAliasSchema = z.object({
 });
 
 export const createPersonalMessageSchema = z.object({
-  message: z
-    .string()
-    .trim()
-    .min(1, "Escreva uma mensagem")
-    .max(2000, "Mensagem muito longa"),
-});
+  ...chatAttachmentFields,
+  message: z.string().trim().max(2000, "Mensagem muito longa").optional().or(z.literal("")),
+}).superRefine(validateMessageAttachment);

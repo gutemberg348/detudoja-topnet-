@@ -31,6 +31,14 @@ export function createAdminNetworkRepository(database = prisma) {
     return database.indicacao.update({ data, where: { id } });
   },
 
+  createAudit(data) {
+    return database.auditoriaAdministrativa.create({ data });
+  },
+
+  updateNetworkEarnings(userId, data) {
+    return database.usuario.update({ data, where: { id: userId } });
+  },
+
   findPlacementByUser(userId) {
     return database.indicacao.findUnique({
       include: {

@@ -72,7 +72,7 @@ export async function createCustomerOrderMessageController(req, res, next) {
   try {
     res
       .status(201)
-      .json(await createCustomerOrderMessage(req.auth.user.id, req.params.orderId, req.body));
+      .json(await createCustomerOrderMessage(req.auth.user.id, req.params.orderId, req.body, req.file ?? null));
   } catch (error) {
     next(error);
   }

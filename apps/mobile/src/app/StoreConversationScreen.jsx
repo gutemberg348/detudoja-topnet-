@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { StatePanel } from "../components/StatePanel";
 import { ChatComposer } from "../components/ChatComposer";
+import { ChatAttachment } from "../components/ChatAttachment";
 import { BackHeader } from "../components/BackHeader";
 import { CartAddButton } from "../components/CartAddButton";
 import { useConversationRealtime } from "../hooks/useConversationRealtime";
@@ -135,10 +136,10 @@ export function StoreConversationScreen({ navigation, route }) {
     onUpdate: refreshConversation,
   });
 
-  async function send() {
-    const message = draft.trim();
+  async function send(payload = null) {
+    const message = payload?.message ?? draft.trim();
 
-    if (!message || !conversation?.id || sending || !session?.accessToken) {
+    if ((!message && !payload?.attachment) || !conversation?.id || sending || !session?.accessToken) {
       return;
     }
 
@@ -149,7 +150,9 @@ export function StoreConversationScreen({ navigation, route }) {
       const response = await sendStoreConversationMessage(
         session.accessToken,
         conversation.id,
-        conversation.isStore ? message : { message, support: true },
+        conversation.isStore
+          ? (payload ?? message)
+          : { ...(payload ?? {}), message, support: true },
       );
 
       setDraft("");
@@ -157,6 +160,7 @@ export function StoreConversationScreen({ navigation, route }) {
       setConversation(response.conversation);
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel enviar a mensagem.");
+      throw requestError;
     } finally {
       setSending(false);
     }
@@ -433,6 +437,7 @@ export function StoreConversationScreen({ navigation, route }) {
         {(conversation?.messages ?? []).length ? (
           conversation.messages.map((message) => (
             <MessageBubble
+              accessToken={session.accessToken}
               key={message.id}
               loading={openingContent === String(message.id)}
               message={message}
@@ -522,6 +527,7 @@ export function StoreConversationScreen({ navigation, route }) {
           </View>
         )}
         draft={draft}
+        onAttachmentError={setError}
         leadingAction={conversation?.isStore ? (
           <Pressable
             accessibilityLabel="Compartilhar produto ou catalogo"
@@ -531,7 +537,7 @@ export function StoreConversationScreen({ navigation, route }) {
               pressed && styles.pressed,
             ]}
           >
-            <Ionicons color={colors.primaryDark} name="add" size={23} />
+            <Ionicons color={colors.primaryDark} name="albums-outline" size={21} />
           </Pressable>
         ) : null}
         onChangeDraft={setDraft}
@@ -541,6 +547,7 @@ export function StoreConversationScreen({ navigation, route }) {
           setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
         }}
         onSend={!conversation?.isStore && !supportMode ? searchCatalog : send}
+        onSendAttachment={send}
         placeholder={
           conversation?.isStore
             ? "Escreva para o cliente"
@@ -801,7 +808,7 @@ function CustomerCatalogModal({ onAddProduct, onClose, onOpenProduct, store, vis
   );
 }
 
-function MessageBubble({ loading, message, onAddProduct, onOpenContent }) {
+function MessageBubble({ accessToken, loading, message, onAddProduct, onOpenContent }) {
   if (message.author === "system" && message.content?.kind === "PRODUCT") {
     return (
       <View style={styles.journeyProduct}>
@@ -851,6 +858,7 @@ function MessageBubble({ loading, message, onAddProduct, onOpenContent }) {
         message.content?.kind === "SUPPORT" && styles.bubbleSupport,
         message.isMine && styles.bubbleMine,
       ]}>
+        <ChatAttachment accessToken={accessToken} attachment={message.attachment} isMine={message.isMine} />
         {message.author === "store" && message.sentBy?.name ? (
           <Text style={[styles.messageSender, message.isMine && styles.messageSenderMine]}>
             {message.isMine ? "Voce" : message.sentBy.name} · Atendente
@@ -868,9 +876,7 @@ function MessageBubble({ loading, message, onAddProduct, onOpenContent }) {
             </Text>
           </View>
         ) : null}
-        <Text style={[styles.messageText, message.isMine && styles.messageTextMine]}>
-          {message.text}
-        </Text>
+        {message.text ? <Text style={[styles.messageText, message.isMine && styles.messageTextMine]}>{message.text}</Text> : null}
         <Text style={[styles.messageTime, message.isMine && styles.messageTimeMine]}>
           {formatarHora(message.createdAt)}
         </Text>

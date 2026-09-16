@@ -5,6 +5,7 @@ import {
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
 import { parsePositiveId } from "../../utils/ids.js";
+import { deletePrivateChatAttachment, savePrivateChatAttachment, serializeChatAttachment } from "../chat-media/chat-media.service.js";
 import { storeChatsRepository } from "./store-chats.repository.js";
 
 function ensureStoreChatPrismaClient() {
@@ -25,6 +26,7 @@ function serializeMessage(message, viewerId) {
         : "system";
 
   return {
+    attachment: serializeChatAttachment(message, "store", message.conteudo_json?.attachment),
     author,
     content: message.conteudo_json ?? null,
     createdAt: message.criado_em.toISOString(),
@@ -353,6 +355,7 @@ export async function createStoreConversationMessage(
   userId,
   conversationId,
   data,
+  attachmentFile = null,
 ) {
   ensureStoreChatPrismaClient();
   const access = await getConversationAccess(userId, conversationId);
@@ -363,12 +366,18 @@ export async function createStoreConversationMessage(
 
   const scope = access.isCustomer ? "customer" : "seller";
   const commercialMessage = await buildCommercialMessage(access, data, scope);
-  const message = await storeChatsRepository.createMessage({
-    access,
-    commercialMessage,
-    scope,
-    userId,
+  const attachment = await savePrivateChatAttachment(attachmentFile, data, {
+    conversationId: access.conversation.id,
+    scope: "store",
   });
+  if (attachment) commercialMessage.content = { ...(commercialMessage.content ?? {}), ...attachment };
+  let message;
+  try {
+    message = await storeChatsRepository.createMessage({ access, commercialMessage, scope, userId });
+  } catch (error) {
+    await deletePrivateChatAttachment(attachment);
+    throw error;
+  }
   const conversation = await loadConversation(access.conversation.id);
   const serializedMessage = serializeMessage(message, userId);
 

@@ -1,4 +1,5 @@
 import { apiRequest } from "./api";
+import { buildChatMessageFormData } from "./chat-attachments.api";
 
 export function getPersonalChats(token) {
   return apiRequest("/api/app/personal-chats", { token });
@@ -53,9 +54,9 @@ export function getPersonalConversation(token, conversationId) {
   return apiRequest(`/api/app/personal-chats/${conversationId}`, { token });
 }
 
-export function sendPersonalMessage(token, conversationId, message) {
+export function sendPersonalMessage(token, conversationId, payload) {
   return apiRequest(`/api/app/personal-chats/${conversationId}/messages`, {
-    body: { message },
+    body: buildChatMessageFormData(payload),
     method: "POST",
     token,
   });

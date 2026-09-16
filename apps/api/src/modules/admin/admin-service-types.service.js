@@ -48,6 +48,7 @@ export async function createAdminServiceType(data) {
     modo_atendimento: data.mode,
     nome: data.name,
     ordem: data.sortOrder,
+    requisitos_cadastro: data.registrationRequirements,
     tipo_operacao: data.operationalType,
     segmento_venda_id: segmentId,
     slug,
@@ -70,6 +71,9 @@ export async function updateAdminServiceType(serviceTypeId, data) {
     ...(data.mode ? { modo_atendimento: data.mode } : {}),
     ...(data.name ? { nome: data.name, slug } : {}),
     ...(data.operationalType ? { tipo_operacao: data.operationalType } : {}),
+    ...(data.registrationRequirements !== undefined
+      ? { requisitos_cadastro: data.registrationRequirements }
+      : {}),
     ...(data.sortOrder !== undefined ? { ordem: data.sortOrder } : {}),
     ...(segmentId !== undefined ? { segmento_venda_id: segmentId } : {}),
     ...(data.status ? { status: data.status } : {}),

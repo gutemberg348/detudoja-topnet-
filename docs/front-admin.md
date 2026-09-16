@@ -114,9 +114,12 @@ categorias de loja e nao transformam toda a area comercial em chat.
 
 ### Rede
 
-- Mostra a matriz global a partir da raiz interna `DeTudoJa Empresa`.
+- Mostra a matriz global a partir da raiz interna `Brasil Cashback Empresa`.
+- O explorador lateral mantem uma pessoa em foco e exibe os dois niveis
+  seguintes. Ao abrir um descendente, ele vira o novo foco sem desenhar uma
+  piramide gigante na tela.
 - Exibe a arvore por `alocado_sob_usuario_id`, ou seja, a posicao real de cada
-  pessoa na matriz.
+  pessoa na matriz, com atalhos para subir um nivel ou voltar para a raiz.
 - As linhas da arvore representam pessoas ligadas na matriz, nao apenas
   indicacoes diretas.
 - A tabela diferencia `Direto` de `Rede`: direto tem patrocinador igual ao pai
@@ -132,6 +135,12 @@ categorias de loja e nao transformam toda a area comercial em chat.
 - `SUPER_ADMIN` pode selecionar um no da arvore ou tabela e reposicionar sua
   subarvore em um novo pai/lado. O modal deixa explicito que o patrocinador
   direto nao muda.
+- O painel do participante permite bloquear/reativar a conta e
+  bloquear/liberar novas comissoes de rede. O bloqueio de ganhos vale para o
+  bonus direto e para a matriz futura, sem apagar saldo ou recompensas ja
+  registrados.
+- Mudancas de posicao e de bloqueio de ganhos exigem motivo e geram registro em
+  `auditorias_administrativas`. A raiz operacional nao aceita essas acoes.
 - A API recusa ciclo, vaga ocupada, raiz movida, destino desconectado e arvore
   acima de 20 niveis.
 
@@ -173,7 +182,7 @@ categorias de loja e nao transformam toda a area comercial em chat.
 | `src/pages/LoginPage.jsx` | autenticacao administrativa |
 | `src/pages/DashboardPage.jsx` | indicadores e cadastros recentes |
 | `src/pages/ParticipantsPage.jsx` | listagem, filtros e detalhe de usuarios |
-| `src/pages/NetworkPage.jsx` | arvore global, tabela e diagnostico da rede |
+| `src/pages/NetworkPage.jsx` | explorador lateral, controles, tabela e diagnostico da rede |
 | `src/pages/StoresPage.jsx` | gestao administrativa de lojas e lojistas |
 | `src/pages/CategoriesPage.jsx` | CRUD de categorias |
 | `src/pages/SegmentsPage.jsx` | CRUD de segmentos de venda |
@@ -340,6 +349,12 @@ O formulario de tipos de servico possui `Uso operacional`:
 O admin continua controlando nome, descricao, segmento financeiro, modo,
 icone, ordem e status. O tipo `Motoboy` deve permanecer em
 `ENTREGA_LOCAL`; a contagem online ignora prestadores sem cadastro ativo.
+
+O mesmo formulario agora configura os requisitos de entrada de cada tipo:
+veiculo, CNH, placa e lista de veiculos permitidos. Essa configuracao e
+devolvida ao mobile em `registrationRequirements`; portanto um novo tipo pode
+ganhar cadastro proprio sem publicar outra tela fixa. Motoboy inicia com
+`MOTO`; Frete inicia com `CARRO`, `UTILITARIO` e `CAMINHAO`.
 
 ## Pagamentos e estornos (2026-08-26)
 

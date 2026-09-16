@@ -167,6 +167,7 @@ export function normalizeSellerOrderMessage(message) {
 
   return {
     author,
+    attachment: message.attachment,
     id: message.id,
     text: message.text,
     time: message.time ?? message.createdAt,

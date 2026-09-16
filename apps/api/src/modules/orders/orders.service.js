@@ -6,6 +6,7 @@ import {
   emitWalletUpdated,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
+import { deletePrivateChatAttachment, savePrivateChatAttachment } from "../chat-media/chat-media.service.js";
 import { createOrdersRepository, ordersRepository } from "./orders.repository.js";
 import { parsePositiveId } from "../../utils/ids.js";
 import { formatMoney } from "../../utils/money.js";
@@ -1350,20 +1351,30 @@ export async function payCustomerOrderProposal(userId, orderId, proposalId, data
   return { gatewayPayment, message: serializedMessage, order: serializedOrder };
 }
 
-export async function createCustomerOrderMessage(userId, orderId, data) {
+export async function createCustomerOrderMessage(userId, orderId, data, attachmentFile = null) {
   const order = await findCustomerOrder(userId, orderId);
-
-  const message = await ordersRepository.createOrderMessage({
-    data: {
-      autor_usuario_id: userId,
-      lido_cliente_em: new Date(),
-      mensagem: data.message,
-      origem: "CLIENTE",
-      pedido_id: order.id,
-      titulo: "Voce",
-    },
-    include: orderMessageInclude,
+  const attachment = await savePrivateChatAttachment(attachmentFile, data, {
+    conversationId: order.id,
+    scope: "order",
   });
+  let message;
+  try {
+    message = await ordersRepository.createOrderMessage({
+      data: {
+        autor_usuario_id: userId,
+        lido_cliente_em: new Date(),
+        mensagem: data.message || null,
+        metadata_json: attachment,
+        origem: "CLIENTE",
+        pedido_id: order.id,
+        titulo: "Voce",
+      },
+      include: orderMessageInclude,
+    });
+  } catch (error) {
+    await deletePrivateChatAttachment(attachment);
+    throw error;
+  }
 
   const serializedMessage = serializeOrderMessage(message);
 

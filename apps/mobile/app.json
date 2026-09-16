@@ -41,7 +41,7 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "O Brasil Cashback acessa suas fotos para enviar logo, banner e imagens de produtos."
+          "photosPermission": "O Brasil Cashback acessa suas fotos e videos para completar cadastros e enviar arquivos no chat."
         }
       ],
       [
@@ -63,7 +63,14 @@
           "imageWidth": 260,
           "resizeMode": "contain"
         }
-      ]
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "O Brasil Cashback usa o microfone para gravar audios enviados no chat."
+        }
+      ],
+      "expo-video"
     ],
     "extra": {
       "eas": {

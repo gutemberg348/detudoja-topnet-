@@ -1,5 +1,18 @@
 # Sistema DeTudoJa
 
+## Atualizacao 2026-09-16: entrada configuravel em servicos
+
+O catalogo de prestacao separa atividades disponiveis das ja cadastradas. O
+prestador escolhe `Quero realizar este servico`, informa apenas os documentos e
+veiculo configurados para aquele tipo e somente entao recebe o interruptor de
+disponibilidade. Motoboy exige moto, CNH e placa; Frete aceita carro, utilitario
+ou caminhao. O painel administrativo pode alterar essas regras por tipo.
+
+O cadastro de chave Pix agora e precedido obrigatoriamente pelo CPF da conta,
+sem deixar o usuario preencher a chave para so depois descobrir a pendencia.
+Solicitacoes de entrega feitas por loja ganharam sugestao de rua e bairro com a
+cidade/UF da loja como contexto.
+
 ## Atualizacao 2026-09-14: overrides completos no participante
 
 No detalhe de `Participantes`, administradores autorizados agora podem:
@@ -1419,7 +1432,7 @@ As credenciais são verificadas na tabela `administradores`, nunca em `usuarios`
 | --- | --- |
 | `DashboardPage.jsx` | métricas reais e últimos participantes cadastrados |
 | `ParticipantsPage.jsx` | busca, filtros, paginação, detalhe, saldo agregado, KYC e alteração de status |
-| `NetworkPage.jsx` | arvore global, tabela de ligacoes e diagnostico da matriz |
+| `NetworkPage.jsx` | explorador lateral em blocos de dois niveis, controles auditados, tabela de ligacoes e diagnostico da matriz |
 | `StoresPage.jsx` | gestao de lojas: editar dados, lojista, status, visibilidade, limite e taxa personalizada |
 | `CategoriesPage.jsx` | busca e CRUD de categorias com status, descrição e upload de imagem |
 | `SegmentsPage.jsx` | CRUD de segmentos de venda autonoma |
@@ -1498,7 +1511,7 @@ Resume os scripts, a integração atual e a divisão das pastas mobile.
 | `PaymentSuccessScreen.jsx` | confirmação e cashback estimado mockados |
 | `WalletScreen.jsx` | quatro carteiras, saldo total e extrato carregados da API |
 | `RewardsScreen.jsx` | recompensas liberadas e pendentes mockadas |
-| `NetworkScreen.jsx` | coordena rede real, qualificação, KYC, convite, filtros e participantes; o mapa visual fica em `app/network/NetworkMatrix.jsx`, aceita arraste, zoom e centralização dentro do quadro, e os cards ficam em `NetworkParticipantCard.jsx` |
+| `NetworkScreen.jsx` | coordena rede real, qualificação, KYC, convite, filtros e participantes; o mapa lateral fica em `app/network/NetworkMatrix.jsx`, mantém a pessoa em foco no topo e abre duas gerações por vez, e os cards ficam em `NetworkParticipantCard.jsx` |
 | `ProfileScreen.jsx` | perfil do banco, edição de dados, nível Prata/Ouro, KYC clicável, atalhos e logout |
 | `SupportScreen.jsx` | suporte via WhatsApp configurado no painel admin |
 
@@ -2574,3 +2587,15 @@ telas abertas recebem a mesma conversa, sem gerar duas cobrancas. Ao encerrar
 o atendimento, somente o cliente pode registrar uma avaliacao de 1 a 5 e um
 comentario opcional; existe uma avaliacao por conversa e a media e recalculada
 para o prestador ou motoboy.
+
+## Armazenamento privado dos chats (2026-09-16)
+
+Metadados dos anexos ficam na mensagem no PostgreSQL. Os bytes ficam no volume
+Docker `chat_media_data`, montado em `/app/storage/private/chat`, e nunca sao
+expostos pelo Nginx. `GET /api/app/chat-media/:scope/:messageId` valida o JWT e
+o vinculo do usuario com a conversa antes de servir o arquivo.
+
+O backup Restic inclui `/chat` junto do banco, uploads e KYC. Esse volume atende
+o ambiente de testes e uma VPS unica. Para escalar a API em varias instancias,
+o proximo passo e trocar apenas a camada de armazenamento por S3/R2 compativel,
+mantendo a autorizacao e os metadados atuais.

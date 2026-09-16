@@ -69,11 +69,11 @@ const networkGuideSections = [
     subtitle: "Use a arvore para contexto e a lista para localizar pessoas com rapidez.",
     title: "Explore a estrutura",
     steps: [
-      { icon: "hand-left-outline", text: "Arraste a area da arvore para mover a matriz e conferir ramos que estao fora do centro.", title: "Mova com a mao" },
+      { icon: "git-branch-outline", text: "A pessoa em foco fica no topo e os dois proximos niveis aparecem em colunas laterais.", title: "Veja dois niveis" },
       { icon: "add-circle-outline", text: "Use os controles de mais e menos para aproximar ou afastar a visualizacao.", title: "Ajuste o zoom" },
       { icon: "locate-outline", text: "O botao de centralizar recupera a escala e a posicao inicial da arvore.", title: "Volte ao centro" },
       { icon: "search-outline", text: "A busca e os filtros alteram apenas a lista de participantes; nunca mudam a matriz real.", title: "Pesquise participantes" },
-      { icon: "person-circle-outline", text: "Toque em uma pessoa para destacar o no e conferir tipo de conexao, nivel e status.", title: "Abra os detalhes" },
+      { icon: "person-circle-outline", text: "Toque em uma pessoa para coloca-la no topo e carregar mais dois niveis a partir dela.", title: "Avance pela rede" },
     ],
     tip: "Comece com poucos niveis para leitura rapida e aumente a profundidade quando precisar investigar um ramo.",
   },

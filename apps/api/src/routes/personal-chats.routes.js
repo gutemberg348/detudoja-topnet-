@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { validate } from "../middlewares/validate.middleware.js";
+import { handleUpload, uploadChatAttachment } from "../modules/uploads/upload.middleware.js";
 import {
   friendInvitationRateLimit,
   friendLookupRateLimit,
@@ -59,6 +60,7 @@ personalChatsRoutes.get("/:conversationId", getPersonalChatController);
 personalChatsRoutes.post(
   "/:conversationId/messages",
   personalMessageRateLimit,
+  handleUpload(uploadChatAttachment),
   validate(createPersonalMessageSchema),
   createPersonalMessageController,
 );

@@ -13,6 +13,8 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppButton } from "../../components/AppButton";
+import { ChatAttachment } from "../../components/ChatAttachment";
+import { ChatComposer } from "../../components/ChatComposer";
 import { ChatSystemMessage } from "../../components/ChatSystemMessage";
 import { useRealtimeOrders } from "../../hooks/useRealtimeOrders";
 import {
@@ -138,19 +140,20 @@ export function StoreOrderChatModal({
     ...chatMessages.map(normalizeSellerOrderMessage),
   ];
 
-  async function sendReply() {
-    const text = reply.trim();
-    if (!text || isSendingReply || !accessToken || !store?.id || !order?.id) return;
+  async function sendReply(payload = null) {
+    const text = payload?.message ?? reply.trim();
+    if ((!text && !payload?.attachment) || isSendingReply || !accessToken || !store?.id || !order?.id) return;
 
     setIsSendingReply(true);
     setChatError("");
 
     try {
-      const response = await sendStoreOrderMessage(accessToken, store.id, order.id, text);
+      const response = await sendStoreOrderMessage(accessToken, store.id, order.id, payload ?? text);
       setChatMessages((current) => appendUniqueSellerMessage(current, response.message));
       setReply("");
     } catch (requestError) {
       setChatError(requestError.message ?? "Nao foi possivel enviar a resposta.");
+      throw requestError;
     } finally {
       setIsSendingReply(false);
     }
@@ -306,43 +309,28 @@ export function StoreOrderChatModal({
           >
             {chatError ? <Text style={styles.modalError}>{chatError}</Text> : null}
             {messages.map((message) => (
-              <SellerChatBubble key={message.id} message={message} />
+              <SellerChatBubble accessToken={accessToken} key={message.id} message={message} />
             ))}
           </ScrollView>
 
-          <View style={styles.orderChatInputRow}>
-            <TextInput
-              multiline
-              onChangeText={setReply}
-              onFocus={() => setTimeout(scrollToLatest, 120)}
-              placeholder="Responder ao cliente"
-              placeholderTextColor={colors.textWeak}
-              style={styles.orderChatInput}
-              value={reply}
-            />
-            <Pressable
-              disabled={!reply.trim() || isSendingReply}
-              onPress={sendReply}
-              style={({ pressed }) => [
-                styles.orderChatSend,
-                (!reply.trim() || isSendingReply) && styles.orderChatSendDisabled,
-                pressed && reply.trim() && !isSendingReply && styles.pressed,
-              ]}
-            >
-              {isSendingReply ? (
-                <ActivityIndicator color={colors.card} size="small" />
-              ) : (
-                <Ionicons color={colors.card} name="send" size={17} />
-              )}
-            </Pressable>
-          </View>
+          <ChatComposer
+            draft={reply}
+            onAttachmentError={setChatError}
+            onChangeDraft={setReply}
+            onFocus={() => setTimeout(scrollToLatest, 120)}
+            onSend={sendReply}
+            onSendAttachment={sendReply}
+            placeholder="Responder ao cliente"
+            sending={isSendingReply}
+            style={{ paddingBottom: Math.max(spacing.sm, insets.bottom + spacing.xs) }}
+          />
         </View>
       </KeyboardAvoidingView>
     </Modal>
   );
 }
 
-function SellerChatBubble({ message }) {
+function SellerChatBubble({ accessToken, message }) {
   const fromStore = message.author === "store";
   const fromSystem = message.author === "system";
 
@@ -374,12 +362,13 @@ function SellerChatBubble({ message }) {
         ]}>
           {message.title}
         </Text>
-        <Text style={[
+        <ChatAttachment accessToken={accessToken} attachment={message.attachment} isMine={fromStore} />
+        {message.text ? <Text style={[
           styles.sellerChatBubbleText,
           fromStore && styles.sellerChatBubbleTextStore,
         ]}>
           {message.text}
-        </Text>
+        </Text> : null}
         <Text style={[
           styles.sellerChatBubbleTime,
           fromStore && styles.sellerChatBubbleTimeStore,

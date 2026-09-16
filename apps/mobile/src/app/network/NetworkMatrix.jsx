@@ -1,141 +1,43 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useMemo, useRef, useState } from "react";
-import {
-  Animated,
-  Modal,
-  PanResponder,
-  Platform,
-  Pressable,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../../utils/theme";
 import { connectionLabel, isDirectConnection, personInitials } from "./network.utils";
 
+const VISIBLE_GENERATIONS = 2;
+
 export function NetworkMatrix({ currentUser, levels, onSelectPerson, people, selectedPerson }) {
-  const minZoom = 0.25;
-  const maxZoom = 1.45;
-  const zoomStep = 0.1;
   const [detailsVisible, setDetailsVisible] = useState(false);
-  const [dragging, setDragging] = useState(false);
-  const [fullScreenVisible, setFullScreenVisible] = useState(false);
-  const [treeDepth, setTreeDepth] = useState(4);
-  const [zoom, setZoom] = useState(1);
-  const zoomRef = useRef(1);
-  const pan = useRef(new Animated.ValueXY()).current;
-  const pinching = useRef(false);
-  const pinchStartDistance = useRef(null);
-  const pinchStartZoom = useRef(1);
-  const panPosition = useRef({ x: 0, y: 0 });
-  const panStart = useRef({ x: 0, y: 0 });
-  const visibleTreePeople = useMemo(
-    () => people.filter((person) => person.level <= treeDepth),
-    [people, treeDepth],
+  const [focusId, setFocusId] = useState(currentUser.id);
+  const graph = useMemo(() => buildNetworkGraph(currentUser, people), [currentUser, people]);
+  const focusPerson = graph.peopleById.get(focusId) ?? graph.root;
+  const parent = graph.peopleById.get(focusPerson.parentId) ?? null;
+  const visibleLevels = useMemo(
+    () => buildVisibleLevels(focusPerson.id, graph.childrenByParent, VISIBLE_GENERATIONS),
+    [focusPerson.id, graph.childrenByParent],
   );
-  const tree = useMemo(
-    () => buildMatrixTree(currentUser, visibleTreePeople),
-    [currentUser, visibleTreePeople],
-  );
-  const panResponder = useMemo(
-    () => PanResponder.create({
-      onMoveShouldSetPanResponder: (_event, gesture) =>
-        gesture.numberActiveTouches >= 1
-        && (Math.abs(gesture.dx) > 3 || Math.abs(gesture.dy) > 3),
-      onMoveShouldSetPanResponderCapture: (_event, gesture) =>
-        gesture.numberActiveTouches >= 1
-        && (Math.abs(gesture.dx) > 3 || Math.abs(gesture.dy) > 3),
-      onPanResponderGrant: (event) => {
-        panStart.current = { ...panPosition.current };
-        const distance = touchDistance(event.nativeEvent.touches);
-        pinching.current = Boolean(distance);
-        pinchStartDistance.current = distance;
-        pinchStartZoom.current = zoomRef.current;
-        setDragging(true);
-      },
-      onPanResponderMove: (event, gesture) => {
-        const distance = touchDistance(event.nativeEvent.touches);
+  const visibleCount = visibleLevels.reduce((total, level) => total + level.length, 0);
 
-        if (distance) {
-          pinching.current = true;
+  useEffect(() => {
+    if (selectedPerson?.id && graph.peopleById.has(selectedPerson.id)) setFocusId(selectedPerson.id);
+  }, [graph.peopleById, selectedPerson?.id]);
 
-          if (!pinchStartDistance.current) {
-            pinchStartDistance.current = distance;
-            pinchStartZoom.current = zoomRef.current;
-            return;
-          }
+  useEffect(() => {
+    if (!graph.peopleById.has(focusId)) setFocusId(graph.root.id);
+  }, [focusId, graph.peopleById, graph.root.id]);
 
-          const nextZoom = Math.max(
-            minZoom,
-            Math.min(maxZoom, pinchStartZoom.current * (distance / pinchStartDistance.current)),
-          );
-          zoomRef.current = nextZoom;
-          setZoom(nextZoom);
-          return;
-        }
-
-        if (pinching.current) {
-          return;
-        }
-
-        if (gesture.numberActiveTouches !== 1) {
-          return;
-        }
-
-        const nextPosition = {
-          x: panStart.current.x + gesture.dx,
-          y: panStart.current.y + gesture.dy,
-        };
-        panPosition.current = nextPosition;
-        pan.setValue(nextPosition);
-      },
-      onPanResponderRelease: () => {
-        pinching.current = false;
-        pinchStartDistance.current = null;
-        setDragging(false);
-      },
-      onPanResponderTerminate: () => {
-        pinching.current = false;
-        pinchStartDistance.current = null;
-        setDragging(false);
-      },
-      onPanResponderTerminationRequest: () => false,
-    }),
-    [pan],
-  );
-
-  function resetViewport() {
-    panPosition.current = { x: 0, y: 0 };
-    panStart.current = { x: 0, y: 0 };
-    pan.setValue({ x: 0, y: 0 });
-    zoomRef.current = 1;
-    setZoom(1);
-  }
-
-  function changeZoom(amount) {
-    setZoom((currentZoom) => {
-      const nextZoom = Math.max(
-        minZoom,
-        Math.min(maxZoom, currentZoom + amount),
-      );
-      zoomRef.current = nextZoom;
-      return nextZoom;
-    });
-  }
-
-  function changeDepth(depth) {
-    setTreeDepth(depth);
-    resetViewport();
+  function selectFocus(person) {
+    setFocusId(person.id);
+    onSelectPerson(person.id === graph.root.id ? null : person);
   }
 
   return (
     <View style={styles.surface}>
       <View style={styles.header}>
         <View style={styles.headerCopy}>
-          <Text style={styles.eyebrow}>MAPA DA SUA REDE</Text>
-          <Text style={styles.title}>Conexoes em tempo real</Text>
-          <Text style={styles.subtitle}>Toque em uma bolinha para entender a ligacao.</Text>
+          <Text style={styles.eyebrow}>MAPA LATERAL DA REDE</Text>
+          <Text style={styles.title}>Explore por ramificacoes</Text>
+          <Text style={styles.subtitle}>Cada toque coloca a pessoa no topo e abre mais dois niveis.</Text>
         </View>
         <View style={styles.totalBubble}>
           <Text style={styles.totalValue}>{people.length}</Text>
@@ -149,103 +51,61 @@ export function NetworkMatrix({ currentUser, levels, onSelectPerson, people, sel
         <Legend icon="lock-closed" label="Ganho bloqueado" />
       </View>
 
-      <View style={styles.depthControl}>
-        <Text style={styles.depthLabel}>Visualizar</Text>
-        {[4, 8, 20].map((depth) => {
-          const active = treeDepth === depth;
-          return (
-            <Pressable
-              key={depth}
-              accessibilityRole="button"
-              onPress={() => changeDepth(depth)}
-              style={[styles.depthOption, active && styles.depthOptionActive]}
-            >
-              <Text style={[styles.depthOptionText, active && styles.depthOptionTextActive]}>
-                {depth === 20 ? "Todos" : `${depth} niveis`}
-              </Text>
+      <View style={styles.browser}>
+        <View style={styles.browserToolbar}>
+          <View style={styles.browserPath}>
+            <Ionicons color={colors.primaryDark} name="git-branch-outline" size={16} />
+            <Text numberOfLines={1} style={styles.browserPathText}>
+              {focusPerson.id === graph.root.id ? "Inicio da sua rede" : `Explorando ${focusPerson.name}`}
+            </Text>
+          </View>
+          {focusPerson.id !== graph.root.id ? (
+            <Pressable accessibilityRole="button" onPress={() => selectFocus(graph.root)} style={styles.rootButton}>
+              <Ionicons color={colors.primaryDark} name="home-outline" size={15} />
+              <Text style={styles.rootButtonText}>Minha raiz</Text>
             </Pressable>
-          );
-        })}
+          ) : null}
+        </View>
+
+        <FocusCard
+          isRoot={focusPerson.id === graph.root.id}
+          onBack={parent ? () => selectFocus(parent) : null}
+          person={focusPerson}
+        />
+
+        {visibleCount ? (
+          <ScrollView contentContainerStyle={styles.generations} horizontal showsHorizontalScrollIndicator={false}>
+            {visibleLevels.map((generation, index) => (
+              <GenerationColumn
+                generation={generation}
+                generationNumber={index + 1}
+                key={`${focusPerson.id}-${index + 1}`}
+                last={index === visibleLevels.length - 1}
+                onSelect={selectFocus}
+              />
+            ))}
+          </ScrollView>
+        ) : (
+          <View style={styles.branchEmpty}>
+            <View style={styles.branchEmptyIcon}><Ionicons color={colors.primaryDark} name="leaf-outline" size={20} /></View>
+            <View style={styles.branchEmptyCopy}>
+              <Text style={styles.branchEmptyTitle}>Fim desta ramificacao</Text>
+              <Text style={styles.branchEmptyText}>Essa pessoa ainda nao possui pessoas posicionadas abaixo dela.</Text>
+            </View>
+          </View>
+        )}
       </View>
 
-      <MatrixViewport
-        dragging={dragging}
-        maxZoom={maxZoom}
-        minZoom={minZoom}
-        onChangeZoom={changeZoom}
-        onSelectPerson={onSelectPerson}
-        onToggleFullscreen={() => setFullScreenVisible(true)}
-        onResetViewport={resetViewport}
-        pan={pan}
-        panHandlers={panResponder.panHandlers}
-        selectedPerson={selectedPerson}
-        tree={tree}
-        zoom={zoom}
-        zoomStep={zoomStep}
-      />
+      <View style={styles.navigationHint}>
+        <Ionicons color={colors.primaryDark} name="arrow-forward-circle-outline" size={20} />
+        <Text style={styles.navigationHintText}>Toque em qualquer pessoa do ultimo nivel para abrir os dois proximos niveis.</Text>
+      </View>
 
-      <Modal
-        animationType="slide"
-        onRequestClose={() => setFullScreenVisible(false)}
-        presentationStyle="fullScreen"
-        visible={fullScreenVisible}
-      >
-        <SafeAreaView style={styles.fullScreenModal}>
-          <View style={styles.fullScreenHeader}>
-            <View>
-              <Text style={styles.eyebrow}>MAPA DA SUA REDE</Text>
-              <Text style={styles.fullScreenTitle}>Explore sua matriz</Text>
-            </View>
-            <Pressable
-              accessibilityLabel="Fechar mapa em tela cheia"
-              onPress={() => setFullScreenVisible(false)}
-              style={styles.fullScreenClose}
-            >
-              <Ionicons color={colors.primaryDark} name="close" size={22} />
-            </Pressable>
-          </View>
-          <MatrixViewport
-            dragging={dragging}
-            fullScreen
-            maxZoom={maxZoom}
-            minZoom={minZoom}
-            onChangeZoom={changeZoom}
-            onSelectPerson={onSelectPerson}
-            onToggleFullscreen={() => setFullScreenVisible(false)}
-            onResetViewport={resetViewport}
-            pan={pan}
-            panHandlers={panResponder.panHandlers}
-            selectedPerson={selectedPerson}
-            tree={tree}
-            zoom={zoom}
-            zoomStep={zoomStep}
-          />
-        </SafeAreaView>
-      </Modal>
-
-      {people.length === 0 ? (
-        <View style={styles.emptyState}>
-          <View style={styles.emptyIcon}><Ionicons color={colors.primaryDark} name="git-network-outline" size={22} /></View>
-          <View style={styles.emptyCopy}>
-            <Text style={styles.emptyTitle}>Sua matriz esta pronta</Text>
-            <Text style={styles.emptyText}>Convide as primeiras pessoas para ocupar os dois lados.</Text>
-          </View>
-        </View>
-      ) : null}
-
-      {selectedPerson ? <SelectedMember person={selectedPerson} /> : null}
-
-      <Pressable
-        accessibilityRole="button"
-        onPress={() => setDetailsVisible((visible) => !visible)}
-        style={styles.detailsButton}
-      >
-        <View style={styles.detailsButtonIcon}>
-          <Ionicons color={colors.primaryDark} name="analytics-outline" size={18} />
-        </View>
+      <Pressable accessibilityRole="button" onPress={() => setDetailsVisible((visible) => !visible)} style={styles.detailsButton}>
+        <View style={styles.detailsButtonIcon}><Ionicons color={colors.primaryDark} name="analytics-outline" size={18} /></View>
         <View style={styles.detailsButtonCopy}>
-          <Text style={styles.detailsButtonTitle}>Distribuicao por nivel</Text>
-          <Text style={styles.detailsButtonText}>Veja os 20 niveis da matriz</Text>
+          <Text style={styles.detailsButtonTitle}>Distribuicao completa</Text>
+          <Text style={styles.detailsButtonText}>Resumo dos 20 niveis da matriz</Text>
         </View>
         <Ionicons color={colors.primaryDark} name={detailsVisible ? "chevron-up" : "chevron-down"} size={20} />
       </Pressable>
@@ -255,313 +115,172 @@ export function NetworkMatrix({ currentUser, levels, onSelectPerson, people, sel
   );
 }
 
-function MatrixViewport({
-  dragging,
-  fullScreen = false,
-  maxZoom,
-  minZoom,
-  onChangeZoom,
-  onResetViewport,
-  onSelectPerson,
-  onToggleFullscreen,
-  pan,
-  panHandlers,
-  selectedPerson,
-  tree,
-  zoom,
-  zoomStep,
-}) {
+function FocusCard({ isRoot, onBack, person }) {
+  const direct = isDirectConnection(person) || isRoot;
   return (
-    <View
-      {...panHandlers}
-      style={[
-        styles.treeViewport,
-        fullScreen && styles.treeViewportFullScreen,
-        dragging && styles.treeViewportDragging,
-      ]}
-    >
-      <View style={styles.viewportToolbar}>
-        <View style={styles.viewportHint}>
-          <Ionicons color={colors.primaryDark} name="hand-left-outline" size={15} />
-          <Text style={styles.viewportHintText}>
-            {fullScreen ? "Arraste ou aproxime com dois dedos" : "Arraste para explorar"}
-          </Text>
-        </View>
-        <View style={styles.zoomControls}>
-          <Pressable
-            accessibilityLabel="Diminuir zoom da matriz"
-            disabled={zoom <= minZoom}
-            onPress={() => onChangeZoom(-zoomStep)}
-            style={[styles.zoomButton, zoom <= minZoom && styles.zoomButtonDisabled]}
-          >
-            <Ionicons color={colors.primaryDark} name="remove" size={18} />
-          </Pressable>
-          <Text style={styles.zoomValue}>{Math.round(zoom * 100)}%</Text>
-          <Pressable
-            accessibilityLabel="Aumentar zoom da matriz"
-            disabled={zoom >= maxZoom}
-            onPress={() => onChangeZoom(zoomStep)}
-            style={[styles.zoomButton, zoom >= maxZoom && styles.zoomButtonDisabled]}
-          >
-            <Ionicons color={colors.primaryDark} name="add" size={18} />
-          </Pressable>
-          <Pressable
-            accessibilityLabel="Centralizar matriz"
-            onPress={onResetViewport}
-            style={styles.zoomResetButton}
-          >
-            <Ionicons color={colors.primaryDark} name="locate-outline" size={16} />
-          </Pressable>
-          <Pressable
-            accessibilityLabel={fullScreen ? "Sair da tela cheia" : "Abrir mapa em tela cheia"}
-            onPress={onToggleFullscreen}
-            style={styles.zoomFullscreenButton}
-          >
-            <Ionicons
-              color={colors.primaryDark}
-              name={fullScreen ? "contract-outline" : "expand-outline"}
-              size={16}
-            />
-          </Pressable>
-        </View>
+    <View style={styles.focusCard}>
+      {onBack ? (
+        <Pressable accessibilityLabel="Voltar uma pessoa na rede" onPress={onBack} style={styles.focusBack}>
+          <Ionicons color={colors.primaryDark} name="arrow-back" size={19} />
+        </Pressable>
+      ) : <View style={styles.focusBackPlaceholder} />}
+      <PersonAvatar large person={person} root={isRoot} />
+      <View style={styles.focusCopy}>
+        <Text style={styles.focusEyebrow}>PESSOA EM FOCO</Text>
+        <Text numberOfLines={1} style={styles.focusName}>{isRoot ? "Voce" : person.name}</Text>
+        <Text numberOfLines={1} style={[styles.focusConnection, direct ? styles.directText : styles.networkText]}>
+          {isRoot ? "Sua posicao inicial" : `${connectionLabel(person)} - nivel ${person.level}`}
+        </Text>
       </View>
-      <View style={[styles.treeClip, fullScreen && styles.treeClipFullScreen]}>
-        <Animated.View
-          style={[
-            styles.treeCanvas,
-            fullScreen && styles.treeCanvasFullScreen,
-            { transform: [{ translateX: pan.x }, { translateY: pan.y }, { scale: zoom }] },
-          ]}
-        >
-          <MatrixTreeNode
-            node={tree}
-            onSelectPerson={onSelectPerson}
-            root
-            selectedId={selectedPerson?.id}
-          />
-        </Animated.View>
+      <View style={[styles.focusStatus, person.qualified ? styles.focusStatusReady : styles.focusStatusLocked]}>
+        <Ionicons color={person.qualified ? colors.primaryDark : "#64748B"} name={person.qualified ? "checkmark-circle" : "lock-closed"} size={17} />
+        <Text style={[styles.focusStatusText, !person.qualified && styles.focusStatusTextLocked]}>{person.qualified ? "Apto" : "Bloqueado"}</Text>
       </View>
     </View>
   );
 }
 
-function touchDistance(touches) {
-  if (!touches || touches.length < 2) {
-    return null;
-  }
+function GenerationColumn({ generation, generationNumber, last, onSelect }) {
+  return (
+    <View style={styles.generationColumn}>
+      <View style={styles.generationHeader}>
+        <View style={styles.generationNumber}><Text style={styles.generationNumberText}>+{generationNumber}</Text></View>
+        <View style={styles.generationHeaderCopy}>
+          <Text style={styles.generationTitle}>{generationNumber === 1 ? "Proximo nivel" : "Nivel seguinte"}</Text>
+          <Text style={styles.generationCount}>{generation.length} {generation.length === 1 ? "pessoa" : "pessoas"}</Text>
+        </View>
+        <Ionicons color={colors.primaryLight} name="arrow-forward" size={18} />
+      </View>
+      <View style={styles.generationList}>
+        {generation.length ? generation.map((item) => (
+          <BranchPersonCard key={item.person.id} last={last} onPress={() => onSelect(item.person)} parentName={item.parentName} person={item.person} />
+        )) : (
+          <View style={styles.generationEmpty}>
+            <Ionicons color={colors.textMuted} name="remove-outline" size={18} />
+            <Text style={styles.generationEmptyText}>Nenhuma conexao neste nivel</Text>
+          </View>
+        )}
+      </View>
+    </View>
+  );
+}
 
-  const [firstTouch, secondTouch] = touches;
-  const horizontal = secondTouch.pageX - firstTouch.pageX;
-  const vertical = secondTouch.pageY - firstTouch.pageY;
+function BranchPersonCard({ last, onPress, parentName, person }) {
+  const direct = isDirectConnection(person);
+  return (
+    <Pressable accessibilityHint="Coloca esta pessoa em foco e mostra mais dois niveis" accessibilityRole="button" onPress={onPress} style={({ pressed }) => [styles.personCard, pressed && styles.personCardPressed]}>
+      <View style={[styles.personRail, direct ? styles.personRailDirect : styles.personRailNetwork]} />
+      <PersonAvatar person={person} />
+      <View style={styles.personCopy}>
+        <Text numberOfLines={1} style={styles.personName}>{person.name}</Text>
+        <Text numberOfLines={1} style={styles.personMeta}>{parentName ? `Abaixo de ${parentName}` : connectionLabel(person)}</Text>
+        {last ? <Text style={styles.advanceText}>Toque para avancar +2</Text> : null}
+      </View>
+      <View style={styles.personAction}>
+        {!person.qualified ? <Ionicons color="#64748B" name="lock-closed" size={12} /> : null}
+        <Ionicons color={colors.primaryDark} name="chevron-forward" size={17} />
+      </View>
+    </Pressable>
+  );
+}
 
-  return Math.sqrt((horizontal ** 2) + (vertical ** 2));
+function PersonAvatar({ large = false, person, root = false }) {
+  return (
+    <View style={[styles.avatar, root ? styles.avatarRoot : isDirectConnection(person) ? styles.avatarDirect : styles.avatarNetwork, large && styles.avatarLarge]}>
+      <Text style={[styles.avatarText, root && styles.avatarTextRoot, large && styles.avatarTextLarge]}>{personInitials(person.name)}</Text>
+    </View>
+  );
 }
 
 function Legend({ color, icon, label }) {
-  return (
-    <View style={styles.legendItem}>
-      {icon ? (
-        <Ionicons color="#64748B" name={icon} size={12} />
-      ) : (
-        <View style={[styles.legendDot, { backgroundColor: color }]} />
-      )}
-      <Text style={styles.legendText}>{label}</Text>
-    </View>
-  );
-}
-
-function MatrixTreeNode({ node, onSelectPerson, root = false, selectedId }) {
-  const hasChildren = node.children.length > 0;
-
-  return (
-    <View style={styles.nodeColumn}>
-      <Pressable
-        accessibilityHint={root ? "Sua posicao na matriz" : "Abre os dados desta pessoa"}
-        accessibilityRole="button"
-        disabled={root}
-        onPress={() => onSelectPerson(node.person)}
-        style={styles.nodePressable}
-      >
-        <MatrixBubble person={node.person} root={root} selected={selectedId === node.person.id} />
-      </Pressable>
-
-      {hasChildren ? (
-        <>
-          <View style={styles.downLine} />
-          <View style={styles.childrenRow}>
-            {node.children.map((child, index) => (
-              <View key={child.person.id} style={styles.childColumn}>
-                <View
-                  style={[
-                    styles.branchLine,
-                    index === 0 ? styles.branchLineLeft : styles.branchLineRight,
-                  ]}
-                />
-                <MatrixTreeNode
-                  node={child}
-                  onSelectPerson={onSelectPerson}
-                  selectedId={selectedId}
-                />
-              </View>
-            ))}
-          </View>
-        </>
-      ) : null}
-    </View>
-  );
-}
-
-function MatrixBubble({ person, root, selected }) {
-  const direct = isDirectConnection(person) || root;
-  const blocked = !person.qualified;
-
-  return (
-    <View style={styles.bubbleWrap}>
-      <View
-        style={[
-          styles.bubbleHalo,
-          root && styles.bubbleHaloRoot,
-          selected && styles.bubbleHaloSelected,
-          direct ? styles.bubbleHaloDirect : styles.bubbleHaloNetwork,
-        ]}
-      >
-        <View style={[styles.bubble, root && styles.bubbleRoot, !person.active && styles.bubbleInactive]}>
-          <Text style={[styles.bubbleInitials, root && styles.bubbleInitialsRoot]}>
-            {personInitials(person.name)}
-          </Text>
-        </View>
-        {!root ? (
-          <View style={[styles.bubbleStatus, blocked ? styles.bubbleStatusLocked : styles.bubbleStatusReady]}>
-            <Ionicons color={colors.card} name={blocked ? "lock-closed" : "checkmark"} size={11} />
-          </View>
-        ) : null}
-      </View>
-      <Text numberOfLines={1} style={[styles.bubbleName, root && styles.bubbleNameRoot]}>
-        {root ? "Voce" : person.name}
-      </Text>
-      <Text style={[styles.bubbleConnection, direct ? styles.bubbleConnectionDirect : styles.bubbleConnectionNetwork]}>
-        {root ? "Sua posicao" : connectionLabel(person)}
-      </Text>
-    </View>
-  );
-}
-
-function SelectedMember({ person }) {
-  const direct = isDirectConnection(person);
-
-  return (
-    <View style={styles.selectedMember}>
-      <View style={[styles.selectedMemberIcon, direct ? styles.selectedMemberIconDirect : styles.selectedMemberIconNetwork]}>
-        <Ionicons color={direct ? colors.primaryDark : colors.info} name={direct ? "link-outline" : "git-network-outline"} size={19} />
-      </View>
-      <View style={styles.selectedMemberCopy}>
-        <Text style={styles.selectedMemberName}>{person.name}</Text>
-        <Text style={styles.selectedMemberText}>
-          {connectionLabel(person)} - nivel {person.level} - {person.qualified ? "apto a ganhos" : "ganho bloqueado"}
-        </Text>
-      </View>
-      <Ionicons color={colors.primaryDark} name="arrow-down" size={18} />
-    </View>
-  );
+  return <View style={styles.legendItem}>{icon ? <Ionicons color="#64748B" name={icon} size={12} /> : <View style={[styles.legendDot, { backgroundColor: color }]} />}<Text style={styles.legendText}>{label}</Text></View>;
 }
 
 function LevelsTable({ levels }) {
   return (
     <View style={styles.levelTable}>
-      <View style={styles.levelHeader}>
-        <Text style={[styles.levelHeaderText, styles.levelNumberColumn]}>Nivel</Text>
-        <Text style={styles.levelHeaderText}>Esquerda</Text>
-        <Text style={styles.levelHeaderText}>Direita</Text>
-        <Text style={styles.levelHeaderText}>Total</Text>
-      </View>
-      {levels.map((level) => (
-        <View key={level.level} style={styles.levelRow}>
-          <Text style={[styles.levelNumber, styles.levelNumberColumn]}>{level.level}</Text>
-          <Text style={styles.levelValue}>{level.left}</Text>
-          <Text style={styles.levelValue}>{level.right}</Text>
-          <Text style={styles.levelTotal}>{level.total}</Text>
-        </View>
-      ))}
+      <View style={styles.levelHeader}><Text style={[styles.levelHeaderText, styles.levelNumberColumn]}>Nivel</Text><Text style={styles.levelHeaderText}>Esquerda</Text><Text style={styles.levelHeaderText}>Direita</Text><Text style={styles.levelHeaderText}>Total</Text></View>
+      {levels.map((level) => <View key={level.level} style={styles.levelRow}><Text style={[styles.levelNumberText, styles.levelNumberColumn]}>{level.level}</Text><Text style={styles.levelValue}>{level.left}</Text><Text style={styles.levelValue}>{level.right}</Text><Text style={styles.levelTotal}>{level.total}</Text></View>)}
     </View>
   );
 }
 
-function buildMatrixTree(currentUser, people) {
+function buildNetworkGraph(currentUser, people) {
+  const root = { ...currentUser, level: 0, parentId: null, placementType: "RAIZ" };
+  const peopleById = new Map([[root.id, root], ...people.map((person) => [person.id, person])]);
   const childrenByParent = new Map();
-
   people.forEach((person) => {
     const children = childrenByParent.get(person.parentId) ?? [];
     children.push(person);
     childrenByParent.set(person.parentId, children);
   });
+  childrenByParent.forEach((children) => children.sort((first, second) => {
+    if (first.position !== second.position) return (first.position ?? 0) - (second.position ?? 0);
+    return first.name.localeCompare(second.name);
+  }));
+  return { childrenByParent, peopleById, root };
+}
 
-  childrenByParent.forEach((children) => {
-    children.sort((first, second) => {
-      if (first.position !== second.position) {
-        return (first.position ?? 0) - (second.position ?? 0);
-      }
-
-      return first.name.localeCompare(second.name);
-    });
-  });
-
-  function createNode(person) {
-    return {
-      children: (childrenByParent.get(person.id) ?? []).map(createNode),
-      person,
-    };
+function buildVisibleLevels(focusId, childrenByParent, depth) {
+  const result = [];
+  let parents = [{ id: focusId, name: null }];
+  for (let index = 0; index < depth; index += 1) {
+    const generation = parents.flatMap((parent) => (childrenByParent.get(parent.id) ?? []).map((person) => ({ parentName: parent.name, person })));
+    result.push(generation);
+    parents = generation.map(({ person }) => ({ id: person.id, name: person.name }));
   }
-
-  return createNode({ ...currentUser, placementType: "RAIZ" });
+  return result;
 }
 
 const styles = StyleSheet.create({
-  branchLine: { backgroundColor: colors.primaryLight, height: 2, position: "absolute", top: 0 },
-  branchLineLeft: { left: 0, right: "50%" },
-  branchLineRight: { left: "50%", right: 0 },
-  bubble: { alignItems: "center", backgroundColor: colors.card, borderRadius: radius.round, height: 52, justifyContent: "center", width: 52 },
-  bubbleConnection: { fontFamily: fonts.bold, fontSize: 9, fontWeight: "700", textAlign: "center" },
-  bubbleConnectionDirect: { color: colors.primaryDark },
-  bubbleConnectionNetwork: { color: colors.info },
-  bubbleHalo: { alignItems: "center", borderRadius: radius.round, borderWidth: 2, height: 64, justifyContent: "center", position: "relative", width: 64 },
-  bubbleHaloDirect: { backgroundColor: colors.primarySoft, borderColor: colors.primaryLight },
-  bubbleHaloNetwork: { backgroundColor: colors.infoSoft, borderColor: "#BFDBFE" },
-  bubbleHaloRoot: { borderColor: "#8AE6B0", height: 76, width: 76 },
-  bubbleHaloSelected: { borderColor: colors.primary, borderWidth: 3 },
-  bubbleInactive: { backgroundColor: colors.cardMuted },
-  bubbleInitials: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: typography.label, fontWeight: "800" },
-  bubbleInitialsRoot: { color: colors.card },
-  bubbleName: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: 10, fontWeight: "700", maxWidth: 86, textAlign: "center" },
-  bubbleNameRoot: { fontSize: typography.caption },
-  bubbleRoot: { backgroundColor: colors.primaryDark, height: 62, width: 62 },
-  bubbleStatus: { alignItems: "center", borderColor: colors.card, borderRadius: radius.round, borderWidth: 2, bottom: -2, height: 20, justifyContent: "center", position: "absolute", right: -3, width: 20 },
-  bubbleStatusLocked: { backgroundColor: "#64748B" },
-  bubbleStatusReady: { backgroundColor: colors.primary },
-  bubbleWrap: { alignItems: "center", gap: 4, minWidth: 94 },
-  childColumn: { alignItems: "center", minWidth: 110, paddingTop: spacing.lg },
-  childrenRow: { alignItems: "flex-start", flexDirection: "row", justifyContent: "center", paddingTop: 1 },
+  advanceText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 9, fontWeight: "700", marginTop: 3 },
+  avatar: { alignItems: "center", borderRadius: radius.round, height: 38, justifyContent: "center", width: 38 },
+  avatarDirect: { backgroundColor: colors.primarySoft, borderColor: colors.primaryLight, borderWidth: 1 },
+  avatarLarge: { height: 52, width: 52 },
+  avatarNetwork: { backgroundColor: colors.infoSoft, borderColor: "#BFDBFE", borderWidth: 1 },
+  avatarRoot: { backgroundColor: colors.primaryDark },
+  avatarText: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: 11, fontWeight: "800" },
+  avatarTextLarge: { fontSize: typography.label },
+  avatarTextRoot: { color: colors.card },
+  branchEmpty: { alignItems: "center", backgroundColor: colors.backgroundSoft, borderRadius: radius.lg, flexDirection: "row", gap: spacing.md, margin: spacing.md, padding: spacing.md },
+  branchEmptyCopy: { flex: 1, gap: 2 },
+  branchEmptyIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 40, justifyContent: "center", width: 40 },
+  branchEmptyText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption, lineHeight: 17 },
+  branchEmptyTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small, fontWeight: "700" },
+  browser: { backgroundColor: "#F7F9F8", borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, overflow: "hidden" },
+  browserPath: { alignItems: "center", flex: 1, flexDirection: "row", gap: spacing.xs, minWidth: 0 },
+  browserPathText: { color: colors.primaryDark, flex: 1, fontFamily: fonts.bold, fontSize: typography.caption, fontWeight: "700" },
+  browserToolbar: { alignItems: "center", backgroundColor: colors.card, borderBottomColor: colors.border, borderBottomWidth: 1, flexDirection: "row", gap: spacing.sm, minHeight: 44, paddingHorizontal: spacing.sm },
   detailsButton: { alignItems: "center", backgroundColor: colors.backgroundSoft, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.sm, minHeight: 52, paddingHorizontal: spacing.md },
   detailsButtonCopy: { flex: 1, gap: 2 },
   detailsButtonIcon: { alignItems: "center", backgroundColor: colors.card, borderRadius: radius.round, height: 34, justifyContent: "center", width: 34 },
   detailsButtonText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption },
   detailsButtonTitle: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: typography.small, fontWeight: "700" },
-  downLine: { backgroundColor: colors.primaryLight, height: 22, marginTop: spacing.xs, width: 2 },
-  depthControl: { alignItems: "center", backgroundColor: colors.cardMuted, borderRadius: radius.lg, flexDirection: "row", gap: spacing.xs, padding: spacing.xs },
-  depthLabel: { color: colors.textMuted, fontFamily: fonts.medium, fontSize: 10, marginHorizontal: spacing.xs },
-  depthOption: { alignItems: "center", borderRadius: 10, justifyContent: "center", minHeight: 32, paddingHorizontal: spacing.sm },
-  depthOptionActive: { backgroundColor: colors.card, ...shadowSoft },
-  depthOptionText: { color: colors.textSecondary, fontFamily: fonts.bold, fontSize: 10, fontWeight: "700" },
-  depthOptionTextActive: { color: colors.primaryDark },
-  emptyCopy: { flex: 1, gap: 2 },
-  emptyIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 42, justifyContent: "center", width: 42 },
-  emptyState: { alignItems: "center", backgroundColor: colors.backgroundSoft, borderRadius: radius.lg, flexDirection: "row", gap: spacing.md, padding: spacing.md },
-  emptyText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption, lineHeight: 17 },
-  emptyTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small, fontWeight: "700" },
-  eyebrow: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 10, fontWeight: "700", textTransform: "uppercase" },
-  fullScreenClose: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 42, justifyContent: "center", width: 42 },
-  fullScreenHeader: { alignItems: "center", backgroundColor: colors.card, borderBottomColor: colors.border, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
-  fullScreenModal: { backgroundColor: colors.background, flex: 1 },
-  fullScreenTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.h3, fontWeight: "800", marginTop: 2 },
+  directText: { color: colors.primaryDark },
+  eyebrow: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 10, fontWeight: "700" },
+  focusBack: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 36, justifyContent: "center", width: 36 },
+  focusBackPlaceholder: { width: 4 },
+  focusCard: { alignItems: "center", backgroundColor: colors.card, borderBottomColor: colors.border, borderBottomWidth: 1, flexDirection: "row", gap: spacing.sm, minHeight: 86, padding: spacing.md },
+  focusConnection: { fontFamily: fonts.medium, fontSize: 10 },
+  focusCopy: { flex: 1, gap: 2, minWidth: 0 },
+  focusEyebrow: { color: colors.textMuted, fontFamily: fonts.bold, fontSize: 9, fontWeight: "700" },
+  focusName: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.label, fontWeight: "800" },
+  focusStatus: { alignItems: "center", borderRadius: radius.round, flexDirection: "row", gap: 3, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
+  focusStatusLocked: { backgroundColor: "#F1F5F9" },
+  focusStatusReady: { backgroundColor: colors.primarySoft },
+  focusStatusText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 9, fontWeight: "700" },
+  focusStatusTextLocked: { color: "#64748B" },
+  generationColumn: { borderRightColor: colors.border, borderRightWidth: 1, minWidth: 250, padding: spacing.sm, width: 278 },
+  generationCount: { color: colors.textMuted, fontFamily: fonts.regular, fontSize: 9 },
+  generationEmpty: { alignItems: "center", backgroundColor: colors.cardMuted, borderRadius: radius.md, flexDirection: "row", gap: spacing.xs, padding: spacing.md },
+  generationEmptyText: { color: colors.textMuted, fontFamily: fonts.medium, fontSize: 10 },
+  generationHeader: { alignItems: "center", flexDirection: "row", gap: spacing.sm, minHeight: 42, paddingHorizontal: spacing.xs },
+  generationHeaderCopy: { flex: 1, gap: 1 },
+  generationList: { gap: spacing.xs },
+  generationNumber: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.round, height: 28, justifyContent: "center", width: 28 },
+  generationNumberText: { color: colors.card, fontFamily: fonts.extraBold, fontSize: 10, fontWeight: "800" },
+  generations: { alignItems: "stretch" },
+  generationTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.caption, fontWeight: "700" },
   header: { alignItems: "center", flexDirection: "row", gap: spacing.md, justifyContent: "space-between" },
   headerCopy: { flex: 1, gap: 3 },
   legend: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
@@ -569,49 +288,31 @@ const styles = StyleSheet.create({
   legendItem: { alignItems: "center", flexDirection: "row", gap: 5 },
   legendText: { color: colors.textSecondary, fontFamily: fonts.medium, fontSize: 10 },
   levelHeader: { backgroundColor: colors.backgroundSoft, flexDirection: "row", paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
-  levelHeaderText: { color: colors.textMuted, flex: 1, fontFamily: fonts.bold, fontSize: 10, fontWeight: "700", textAlign: "center", textTransform: "uppercase" },
-  levelNumber: { color: colors.textSecondary, fontFamily: fonts.bold, fontSize: typography.caption, fontWeight: "700", textAlign: "center" },
+  levelHeaderText: { color: colors.textMuted, flex: 1, fontFamily: fonts.bold, fontSize: 10, fontWeight: "700", textAlign: "center" },
   levelNumberColumn: { flex: 0.7 },
+  levelNumberText: { color: colors.textSecondary, fontFamily: fonts.bold, fontSize: typography.caption, fontWeight: "700", textAlign: "center" },
   levelRow: { borderTopColor: colors.border, borderTopWidth: 1, flexDirection: "row", minHeight: 38, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   levelTable: { borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, overflow: "hidden" },
   levelTotal: { color: colors.primaryDark, flex: 1, fontFamily: fonts.extraBold, fontSize: typography.caption, fontWeight: "800", textAlign: "center" },
   levelValue: { color: colors.textPrimary, flex: 1, fontFamily: fonts.semiBold, fontSize: typography.caption, fontWeight: "600", textAlign: "center" },
-  nodeColumn: { alignItems: "center", minWidth: 110 },
-  nodePressable: { borderRadius: radius.round },
-  selectedMember: { alignItems: "center", backgroundColor: colors.cardMuted, borderRadius: radius.lg, flexDirection: "row", gap: spacing.md, padding: spacing.md },
-  selectedMemberCopy: { flex: 1, gap: 2, minWidth: 0 },
-  selectedMemberIcon: { alignItems: "center", borderRadius: radius.round, height: 40, justifyContent: "center", width: 40 },
-  selectedMemberIconDirect: { backgroundColor: colors.primarySoft },
-  selectedMemberIconNetwork: { backgroundColor: colors.infoSoft },
-  selectedMemberName: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small, fontWeight: "700" },
-  selectedMemberText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption },
+  navigationHint: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.lg, flexDirection: "row", gap: spacing.sm, padding: spacing.sm },
+  navigationHintText: { color: colors.primaryDark, flex: 1, fontFamily: fonts.medium, fontSize: 10, lineHeight: 15 },
+  networkText: { color: colors.info },
+  personAction: { alignItems: "center", flexDirection: "row", gap: 3 },
+  personCard: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: spacing.sm, minHeight: 62, overflow: "hidden", paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, ...shadowSoft },
+  personCardPressed: { opacity: 0.72, transform: [{ scale: 0.99 }] },
+  personCopy: { flex: 1, minWidth: 0 },
+  personMeta: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 9, marginTop: 2 },
+  personName: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.caption, fontWeight: "700" },
+  personRail: { alignSelf: "stretch", marginBottom: -spacing.xs, marginLeft: -spacing.sm, marginTop: -spacing.xs, width: 4 },
+  personRailDirect: { backgroundColor: colors.primary },
+  personRailNetwork: { backgroundColor: colors.info },
+  rootButton: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, flexDirection: "row", gap: 4, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
+  rootButtonText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 9, fontWeight: "700" },
   subtitle: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption, lineHeight: 17 },
-  surface: { backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, gap: spacing.lg, padding: spacing.md },
+  surface: { backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, gap: spacing.md, padding: spacing.md },
   title: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.h3, fontWeight: "800" },
   totalBubble: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.round, height: 62, justifyContent: "center", width: 62 },
   totalLabel: { color: "#D1FAE5", fontFamily: fonts.medium, fontSize: 9 },
   totalValue: { color: colors.card, fontFamily: fonts.extraBold, fontSize: typography.h3, fontWeight: "800" },
-  treeCanvas: { alignItems: "center", minWidth: 320, paddingBottom: spacing.md, paddingHorizontal: spacing.md },
-  treeCanvasFullScreen: { minWidth: 560, paddingBottom: spacing.xxxl, paddingHorizontal: spacing.xxxl, paddingTop: spacing.xl },
-  treeClip: { minHeight: 176, overflow: "hidden", paddingBottom: spacing.md, paddingHorizontal: spacing.md, paddingTop: spacing.md },
-  treeClipFullScreen: { flex: 1, minHeight: 520, paddingBottom: spacing.xxl, paddingHorizontal: spacing.xl, paddingTop: spacing.xl },
-  treeViewport: {
-    backgroundColor: "#F7F9F8",
-    borderColor: colors.primaryLight,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    overflow: "hidden",
-    ...Platform.select({ web: { cursor: "grab", touchAction: "none", userSelect: "none" } }),
-  },
-  treeViewportFullScreen: { borderRadius: 0, borderWidth: 0, flex: 1 },
-  treeViewportDragging: Platform.select({ web: { cursor: "grabbing" } }),
-  viewportHint: { alignItems: "center", flexDirection: "row", gap: 5 },
-  viewportHintText: { color: colors.primaryDark, fontFamily: fonts.medium, fontSize: 10 },
-  viewportToolbar: { alignItems: "center", backgroundColor: colors.card, borderBottomColor: colors.border, borderBottomWidth: 1, flexDirection: "row", gap: spacing.sm, justifyContent: "space-between", minHeight: 44, paddingHorizontal: spacing.sm },
-  zoomButton: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, height: 28, justifyContent: "center", width: 28 },
-  zoomButtonDisabled: { opacity: 0.4 },
-  zoomControls: { alignItems: "center", flexDirection: "row", gap: 3 },
-  zoomFullscreenButton: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, height: 28, justifyContent: "center", marginLeft: spacing.xs, width: 28 },
-  zoomResetButton: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, height: 28, justifyContent: "center", marginLeft: spacing.xs, width: 28 },
-  zoomValue: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 10, minWidth: 34, textAlign: "center" },
 });

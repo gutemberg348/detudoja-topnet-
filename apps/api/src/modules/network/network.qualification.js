@@ -19,6 +19,7 @@ export function countActiveVerifiedDirects(user) {
 export function isQualifiedForNetwork(user) {
   return (
     user?.status === "ATIVO" &&
+    !user.ganhos_rede_bloqueados &&
     user.kyc?.status === "APROVADO" &&
     countActiveVerifiedDirects(user) >= 2
   );

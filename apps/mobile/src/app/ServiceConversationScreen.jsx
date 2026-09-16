@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppButton } from "../components/AppButton";
 import { BackHeader } from "../components/BackHeader";
 import { ChatComposer } from "../components/ChatComposer";
+import { ChatAttachment } from "../components/ChatAttachment";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { StatePanel } from "../components/StatePanel";
 import { ShareAddressModal } from "./service/ShareAddressModal";
@@ -77,7 +78,6 @@ export function ServiceConversationScreen({ navigation, route }) {
   const [cancelOpen, setCancelOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
-  const [image, setImage] = useState(null);
   const [proposalForm, setProposalForm] = useState(initialProposalForm);
   const [proposalOpen, setProposalOpen] = useState(false);
   const [reviewForm, setReviewForm] = useState({ comment: "", rating: 0 });
@@ -180,39 +180,21 @@ export function ServiceConversationScreen({ navigation, route }) {
     onUpdate: refreshConversation,
   });
 
-  async function pickImage() {
-    const Picker = await import("expo-image-picker");
-    const permission = await Picker.requestMediaLibraryPermissionsAsync();
-
-    if (!permission.granted) {
-      setError("Permita acesso as fotos para enviar uma imagem.");
-      return;
-    }
-
-    const result = await Picker.launchImageLibraryAsync({
-      allowsEditing: false,
-      mediaTypes: Picker.MediaTypeOptions?.Images ?? ["images"],
-      quality: 0.8,
-    });
-
-    if (!result.canceled) setImage(result.assets?.[0] ?? null);
-  }
-
-  async function send() {
-    if ((!draft.trim() && !image) || sending || !session?.accessToken) return;
+  async function send(payload = null) {
+    if ((!draft.trim() && !payload?.attachment) || sending || !session?.accessToken) return;
     setSending(true);
     setError("");
 
     try {
       await sendServiceConversationMessage(session.accessToken, conversation.id, {
-        image,
-        message: draft,
+        ...(payload ?? {}),
+        message: payload?.message ?? draft,
       });
       setDraft("");
-      setImage(null);
       await load({ silent: true });
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel enviar.");
+      throw requestError;
     } finally {
       setSending(false);
     }
@@ -591,7 +573,7 @@ export function ServiceConversationScreen({ navigation, route }) {
       >
         {(conversation.messages ?? []).length ? (
           (conversation.messages ?? []).map((message) => (
-            <MessageBubble key={message.id} message={message} />
+            <MessageBubble accessToken={session.accessToken} key={message.id} message={message} />
           ))
         ) : (
           <View style={styles.emptyChat}>
@@ -607,31 +589,10 @@ export function ServiceConversationScreen({ navigation, route }) {
       </ScrollView>
 
       <ChatComposer
-        accessory={image ? (
-          <View style={styles.imageReady}>
-            <Ionicons color={colors.primaryDark} name="image-outline" size={18} />
-            <Text style={styles.imageReadyText}>Imagem pronta para enviar</Text>
-            <Pressable onPress={() => setImage(null)}>
-              <Ionicons color={colors.primaryDark} name="close-circle" size={20} />
-            </Pressable>
-          </View>
-        ) : null}
         disabled={!canChat}
         draft={draft}
         leadingAction={(
           <View style={styles.composerActions}>
-            <Pressable
-              accessibilityLabel="Enviar foto"
-              disabled={!canChat}
-              onPress={pickImage}
-              style={styles.photo}
-            >
-              <Ionicons
-                color={canChat ? colors.primaryDark : colors.textMuted}
-                name="camera-outline"
-                size={21}
-              />
-            </Pressable>
             {!conversation.isSeller ? (
               <Pressable
                 accessibilityLabel="Compartilhar endereco"
@@ -649,10 +610,11 @@ export function ServiceConversationScreen({ navigation, route }) {
           </View>
         )}
         onChangeDraft={setDraft}
+        onAttachmentError={setError}
         onFocus={() => setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80)}
         onSend={send}
+        onSendAttachment={send}
         placeholder={canChat ? "Escreva uma mensagem" : isAwaitingServiceAcceptance ? "Chat aguardando aceite" : "Atendimento encerrado"}
-        sendEnabled={Boolean(draft.trim() || image)}
         sending={sending}
         style={{ paddingBottom: Math.max(spacing.sm, insets.bottom + spacing.xs) }}
       />
@@ -701,7 +663,7 @@ export function ServiceConversationScreen({ navigation, route }) {
   );
 }
 
-function MessageBubble({ message }) {
+function MessageBubble({ accessToken, message }) {
   if (message.author === "system") {
     return (
       <View style={styles.systemMessage}>
@@ -719,6 +681,7 @@ function MessageBubble({ message }) {
   return (
     <View style={[styles.messageLine, message.isMine && styles.messageLineMine]}>
       <View style={[styles.bubble, message.isMine && styles.mine]}>
+        <ChatAttachment accessToken={accessToken} attachment={message.attachment} isMine={message.isMine} />
         {message.imageUrl ? (
           <Image
             source={{ uri: resolveMediaUrl(message.imageUrl) }}

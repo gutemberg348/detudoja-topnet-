@@ -20,6 +20,7 @@ import {
   payStoreOrderProposalSchema,
 } from "../modules/orders/orders.validator.js";
 import { validate } from "../middlewares/validate.middleware.js";
+import { handleUpload, uploadChatAttachment } from "../modules/uploads/upload.middleware.js";
 
 export const ordersRoutes = Router();
 
@@ -52,6 +53,7 @@ ordersRoutes.post(
 ordersRoutes.get("/:orderId/messages", listCustomerOrderMessagesController);
 ordersRoutes.post(
   "/:orderId/messages",
+  handleUpload(uploadChatAttachment),
   validate(createOrderMessageSchema),
   createCustomerOrderMessageController,
 );

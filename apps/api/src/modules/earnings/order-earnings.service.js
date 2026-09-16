@@ -161,6 +161,7 @@ async function findDirectSponsor(database, userId) {
     include: {
       indicador: {
         select: {
+          ganhos_rede_bloqueados: true,
           id: true,
           status: true,
         },
@@ -173,6 +174,7 @@ async function findDirectSponsor(database, userId) {
     !indication ||
     !validIndicationStatuses.includes(indication.status) ||
     indication.indicador.status !== "ATIVO" ||
+    indication.indicador.ganhos_rede_bloqueados ||
     indication.indicador.id === userId
   ) {
     return null;

@@ -4,6 +4,7 @@ import {
   emitOrderStatusUpdated,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
+import { deletePrivateChatAttachment, savePrivateChatAttachment } from "../chat-media/chat-media.service.js";
 import { isValidCnpj, normalizeCnpj } from "../../utils/cnpj.js";
 import { createSellerRepository, sellerRepository } from "./seller.repository.js";
 import { parsePositiveId } from "../../utils/ids.js";
@@ -1308,20 +1309,30 @@ export async function listStoreOrderMessages(userId, storeId, orderId) {
   return { messages: messages.map(serializeOrderMessage) };
 }
 
-export async function createStoreOrderMessage(userId, storeId, orderId, data) {
+export async function createStoreOrderMessage(userId, storeId, orderId, data, attachmentFile = null) {
   const order = await findStoreOrderForUser(userId, storeId, orderId);
-
-  const message = await sellerRepository.createOrderMessage({
-    data: {
-      autor_usuario_id: userId,
-      lido_loja_em: new Date(),
-      mensagem: data.message,
-      origem: "LOJA",
-      pedido_id: order.id,
-      titulo: "Loja",
-    },
-    include: orderMessageInclude,
+  const attachment = await savePrivateChatAttachment(attachmentFile, data, {
+    conversationId: order.id,
+    scope: "order",
   });
+  let message;
+  try {
+    message = await sellerRepository.createOrderMessage({
+      data: {
+        autor_usuario_id: userId,
+        lido_loja_em: new Date(),
+        mensagem: data.message || null,
+        metadata_json: attachment,
+        origem: "LOJA",
+        pedido_id: order.id,
+        titulo: "Loja",
+      },
+      include: orderMessageInclude,
+    });
+  } catch (error) {
+    await deletePrivateChatAttachment(attachment);
+    throw error;
+  }
 
   const serializedMessage = serializeOrderMessage(message);
 

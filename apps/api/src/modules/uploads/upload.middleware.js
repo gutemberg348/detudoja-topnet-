@@ -12,9 +12,18 @@ function imageFileFilter(_req, file, callback) {
   callback(null, true);
 }
 
-function createUpload(limits) {
+function chatFileFilter(_req, file, callback) {
+  if (!/^(image|video|audio)\//.test(file.mimetype ?? "")) {
+    callback(new AppError("Envie uma foto, video ou audio valido", 400));
+    return;
+  }
+
+  callback(null, true);
+}
+
+function createUpload(limits, fileFilter = imageFileFilter) {
   return multer({
-    fileFilter: imageFileFilter,
+    fileFilter,
     limits: {
       fileSize: 8 * 1024 * 1024,
       ...limits,
@@ -34,6 +43,11 @@ export const uploadStoreProductImage = createUpload({ files: 1 }).single("image"
 
 export const uploadServiceChatImage = createUpload({ files: 1 }).single("image");
 
+export const uploadChatAttachment = createUpload(
+  { fileSize: 30 * 1024 * 1024, files: 1 },
+  chatFileFilter,
+).single("attachment");
+
 export const uploadKycImages = createUpload({ files: 3 }).fields([
   { maxCount: 1, name: "documentFront" },
   { maxCount: 1, name: "documentBack" },
@@ -51,8 +65,8 @@ export function handleUpload(upload) {
       if (error instanceof multer.MulterError) {
         const message =
           error.code === "LIMIT_FILE_SIZE"
-            ? "Imagem muito grande. Envie uma imagem de ate 8 MB."
-            : "Nao foi possivel receber a imagem enviada.";
+            ? "Arquivo muito grande. Fotos e audios aceitam ate 10 MB; videos, ate 30 MB."
+            : "Nao foi possivel receber o arquivo enviado.";
         next(new AppError(message, 400));
         return;
       }

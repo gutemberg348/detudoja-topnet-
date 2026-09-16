@@ -13,3 +13,7 @@ export const uploadsRoot = process.env.UPLOADS_DIR
 export const kycPrivateRoot = process.env.KYC_PRIVATE_DIR
   ? path.resolve(process.env.KYC_PRIVATE_DIR)
   : path.resolve(repoRoot, "storage", "private", "kyc");
+
+export const chatPrivateRoot = process.env.CHAT_PRIVATE_DIR
+  ? path.resolve(process.env.CHAT_PRIVATE_DIR)
+  : path.resolve(repoRoot, "storage", "private", "chat");

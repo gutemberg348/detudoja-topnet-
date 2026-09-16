@@ -1,4 +1,5 @@
 import { apiRequest } from "./api";
+import { buildChatMessageFormData } from "./chat-attachments.api";
 
 export function createOrderIdempotencyKey(prefix = "order") {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
@@ -53,9 +54,9 @@ export function cancelCustomerOrder(accessToken, orderId) {
   });
 }
 
-export function sendCustomerOrderMessage(accessToken, orderId, message) {
+export function sendCustomerOrderMessage(accessToken, orderId, payload) {
   return apiRequest(`/api/app/orders/${orderId}/messages`, {
-    body: { message },
+    body: buildChatMessageFormData(payload),
     method: "POST",
     token: accessToken,
   });

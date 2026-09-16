@@ -69,6 +69,14 @@ export function ServiceDeskScreen({ navigation }) {
     () => services.filter((service) => service.available),
     [services],
   );
+  const catalogServices = useMemo(
+    () => services.filter((service) => !service.enabled),
+    [services],
+  );
+  const registeredServices = useMemo(
+    () => services.filter((service) => service.enabled),
+    [services],
+  );
   const courierCalls = useMemo(
     () => conversations.filter((conversation) => (
       conversation.serviceType?.operationalType === "ENTREGA_LOCAL"
@@ -186,6 +194,28 @@ export function ServiceDeskScreen({ navigation }) {
     }
   }
 
+  async function startService(service) {
+    if (!session?.accessToken || savingServiceId) return;
+    const requirements = service.registrationRequirements ?? {};
+    if (service.requiresCourierProfile || requirements.requiresVehicle || requirements.requiresDriverLicense || requirements.requiresPlate) {
+      setPendingCourierService(service);
+      setCourierError("");
+      setCourierModalOpen(true);
+      return;
+    }
+
+    setSavingServiceId(service.id);
+    setError("");
+    try {
+      await updateSellerService(session.accessToken, { available: true, serviceTypeId: service.id });
+      await load({ silent: true });
+    } catch (requestError) {
+      setError(requestError.message ?? "Nao foi possivel cadastrar este servico.");
+    } finally {
+      setSavingServiceId(null);
+    }
+  }
+
   async function submitServiceRegistration(data) {
     if (!session?.accessToken || registeringService) return;
     setRegisteringService(true);
@@ -207,12 +237,23 @@ export function ServiceDeskScreen({ navigation }) {
     setCourierError("");
 
     try {
-      const response = await saveCourierProfile(session.accessToken, data);
-      setCourierProfile(response.profile);
+      const registration = {
+        color: data.color,
+        driverLicense: data.driverLicense,
+        plate: data.plate,
+        vehicleKind: data.vehicleKind,
+        vehicleModel: data.vehicleModel,
+      };
+
+      if (!pendingCourierService || pendingCourierService.requiresCourierProfile) {
+        const response = await saveCourierProfile(session.accessToken, data);
+        setCourierProfile(response.profile);
+      }
 
       if (pendingCourierService) {
         await updateSellerService(session.accessToken, {
           available: true,
+          registration,
           serviceTypeId: pendingCourierService.id,
         });
         setServices((current) => current.map((item) => (
@@ -224,6 +265,7 @@ export function ServiceDeskScreen({ navigation }) {
 
       setPendingCourierService(null);
       setCourierModalOpen(false);
+      await load({ silent: true });
     } catch (requestError) {
       setCourierError(requestError.message ?? "Nao foi possivel salvar o cadastro de motoboy.");
     } finally {
@@ -298,19 +340,19 @@ export function ServiceDeskScreen({ navigation }) {
             </View>
           </View>
 
-          <Pressable
-            onPress={() => {
-              setRegisterServiceError("");
-              setRegisterServiceOpen(true);
-            }}
-            style={({ pressed }) => [styles.registerService, pressed && styles.pressed]}
-          >
-            <View style={styles.registerServiceIcon}><Ionicons color={colors.primaryDark} name="add-circle-outline" size={22} /></View>
-            <View style={styles.serviceCopy}>
-              <Text style={styles.registerServiceTitle}>Cadastrar servico</Text>
-              <Text style={styles.registerServiceText}>Informe o que voce faz para aparecer na busca certa.</Text>
-            </View>
-            <Ionicons color={colors.primaryDark} name="arrow-forward" size={20} />
+          {catalogServices.length ? <>
+            <SectionTitle icon="grid-outline" subtitle="Escolha uma atividade e conclua somente o cadastro necessario" title="Servicos disponiveis" />
+            <View style={styles.catalogList}>{catalogServices.map((service) => (
+              <View key={service.id} style={styles.catalogCard}>
+                <View style={styles.catalogTop}><View style={styles.catalogIcon}><Ionicons color={colors.primaryDark} name={serviceIcon(service.iconName)} size={23} /></View><View style={styles.serviceCopy}><Text style={styles.catalogName}>{service.name}</Text><Text style={styles.catalogDescription}>{service.description || "Atendimento por chamado no aplicativo."}</Text></View></View>
+                <View style={styles.requirementList}>{service.registrationRequirements?.requiresVehicle ? <Text style={styles.requirementPill}>{service.registrationRequirements.vehicleKinds?.join(" / ") || "Veiculo"}</Text> : null}{service.registrationRequirements?.requiresDriverLicense ? <Text style={styles.requirementPill}>CNH</Text> : null}{service.registrationRequirements?.requiresPlate ? <Text style={styles.requirementPill}>Placa</Text> : null}{!service.registrationRequirements?.requiresVehicle && !service.registrationRequirements?.requiresDriverLicense && !service.registrationRequirements?.requiresPlate ? <Text style={styles.requirementPill}>Cadastro rapido</Text> : null}</View>
+                <Pressable disabled={Boolean(savingServiceId)} onPress={() => startService(service)} style={({ pressed }) => [styles.performButton, pressed && styles.pressed]}>{savingServiceId === service.id ? <ActivityIndicator color={colors.card} /> : <><Text style={styles.performButtonText}>Quero realizar este servico</Text><Ionicons color={colors.card} name="arrow-forward" size={18} /></>}</Pressable>
+              </View>
+            ))}</View>
+          </> : null}
+
+          <Pressable onPress={() => { setRegisterServiceError(""); setRegisterServiceOpen(true); }} style={({ pressed }) => [styles.registerService, pressed && styles.pressed]}>
+            <View style={styles.registerServiceIcon}><Ionicons color={colors.primaryDark} name="add-circle-outline" size={22} /></View><View style={styles.serviceCopy}><Text style={styles.registerServiceTitle}>Meu servico nao esta na lista</Text><Text style={styles.registerServiceText}>Descreva sua atividade para entrar na categoria correta.</Text></View><Ionicons color={colors.primaryDark} name="arrow-forward" size={20} />
           </Pressable>
 
           {courierProfile ? (
@@ -379,9 +421,9 @@ export function ServiceDeskScreen({ navigation }) {
           ) : null}
 
           <SectionTitle icon="flash-outline" subtitle="Ative apenas o que voce consegue atender agora" title="Minha disponibilidade" />
-          {services.length ? (
+          {registeredServices.length ? (
             <View style={styles.serviceList}>
-              {services.map((service) => (
+              {registeredServices.map((service) => (
                 <View key={service.id} style={[styles.serviceCard, service.available && styles.serviceCardActive]}>
                   <View style={styles.serviceIcon}><Ionicons color={colors.primaryDark} name={serviceIcon(service.iconName)} size={21} /></View>
                   <View style={styles.serviceCopy}>
@@ -406,9 +448,7 @@ export function ServiceDeskScreen({ navigation }) {
                 </View>
               ))}
             </View>
-          ) : (
-            <StatePanel icon="construct-outline" text="Nenhum servico esta ativo no admin. Cadastre ou ative Frete ou Motoboy no painel administrativo." title="Servicos indisponiveis" />
-          )}
+          ) : <StatePanel icon="briefcase-outline" text="Escolha uma das opcoes acima para realizar seu primeiro servico." title="Nenhum servico cadastrado" />}
 
           <SectionTitle icon="chatbubbles-outline" subtitle="Conversas reais enviadas por clientes" title="Chamados" value={openCalls.length} />
           {openCalls.length ? (
@@ -436,7 +476,8 @@ export function ServiceDeskScreen({ navigation }) {
         }}
         onSubmit={submitCourierProfile}
         open={courierModalOpen}
-        profile={courierProfile}
+        profile={pendingCourierService && !pendingCourierService.requiresCourierProfile ? null : courierProfile}
+        service={pendingCourierService}
       />
       <RegisterServiceModal
         error={registerServiceError}
@@ -613,6 +654,12 @@ function CourierDispatchScope({ acceptsPlatformCalls, canUseTeamOnly, isBusy, is
 const styles = StyleSheet.create({
   acceptButton: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.lg, flexDirection: "row", gap: spacing.sm, justifyContent: "center", minHeight: 46, paddingHorizontal: spacing.md },
   acceptButtonText: { color: colors.card, flex: 1, fontFamily: fonts.bold, fontSize: typography.small, textAlign: "center" },
+  catalogCard: { backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, gap: spacing.md, padding: spacing.md, ...shadowSoft },
+  catalogDescription: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption, lineHeight: 17 },
+  catalogIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 44, justifyContent: "center", width: 44 },
+  catalogList: { gap: spacing.sm },
+  catalogName: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.label },
+  catalogTop: { alignItems: "center", flexDirection: "row", gap: spacing.md },
   callCard: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.md, minHeight: 86, padding: spacing.md, ...shadowSoft },
   callCopy: { flex: 1, gap: 3, minWidth: 0 },
   copy: { flex: 1, gap: 3, minWidth: 0 },
@@ -667,6 +714,8 @@ const styles = StyleSheet.create({
   operationMetric: { alignItems: "center", borderRightColor: colors.border, borderRightWidth: 1, flex: 1, gap: 2 },
   operationMetricLabel: { color: colors.textMuted, fontFamily: fonts.medium, fontSize: 10 },
   operationMetricValue: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.h3 },
+  performButton: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.md, flexDirection: "row", gap: spacing.sm, justifyContent: "center", minHeight: 44, paddingHorizontal: spacing.md },
+  performButtonText: { color: colors.card, flex: 1, fontFamily: fonts.bold, fontSize: typography.caption, textAlign: "center" },
   operationsEyebrow: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: 9 },
   operationsHeader: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
   operationsMetrics: { backgroundColor: colors.backgroundSoft, borderRadius: radius.md, flexDirection: "row", paddingVertical: spacing.sm },
@@ -692,6 +741,8 @@ const styles = StyleSheet.create({
   requestName: { color: colors.textPrimary, flex: 1, fontFamily: fonts.extraBold, fontSize: typography.small },
   requestNameLine: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
   requestTopline: { alignItems: "center", flexDirection: "row", gap: spacing.md },
+  requirementList: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
+  requirementPill: { backgroundColor: colors.primarySoft, borderRadius: radius.round, color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 9, overflow: "hidden", paddingHorizontal: spacing.sm, paddingVertical: 5 },
   routeBox: { backgroundColor: colors.backgroundSoft, borderRadius: radius.md, gap: spacing.sm, padding: spacing.sm },
   routeDivider: { backgroundColor: colors.border, height: 1, marginLeft: 23 },
   routeRow: { alignItems: "flex-start", flexDirection: "row", gap: spacing.sm },

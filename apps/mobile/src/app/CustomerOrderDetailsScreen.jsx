@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppButton } from "../components/AppButton";
+import { ChatAttachment } from "../components/ChatAttachment";
+import { ChatComposer } from "../components/ChatComposer";
 import { ChatSystemMessage } from "../components/ChatSystemMessage";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { useRealtimeOrders } from "../hooks/useRealtimeOrders";
@@ -91,6 +93,7 @@ function normalizeOrderMessage(message) {
 
   return {
     id: message.id,
+    attachment: message.attachment,
     kind,
     text: message.text,
     time: message.time ?? message.createdAt,
@@ -462,10 +465,10 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
     }
   }
 
-  async function sendQuestion() {
-    const text = draft.trim();
+  async function sendQuestion(payload = null) {
+    const text = payload?.message ?? draft.trim();
 
-    if (!text || isSending || !session?.accessToken || !order?.id) {
+    if ((!text && !payload?.attachment) || isSending || !session?.accessToken || !order?.id) {
       return;
     }
 
@@ -473,11 +476,12 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
     setError("");
 
     try {
-      const response = await sendCustomerOrderMessage(session.accessToken, order.id, text);
+      const response = await sendCustomerOrderMessage(session.accessToken, order.id, payload ?? text);
       setChatMessages((current) => appendUniqueMessage(current, response.message));
       setDraft("");
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel enviar a mensagem.");
+      throw requestError;
     } finally {
       setIsSending(false);
     }
@@ -595,37 +599,21 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
 
         <View style={styles.messages}>
           {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
+            <MessageBubble accessToken={session.accessToken} key={message.id} message={message} />
           ))}
         </View>
 
-        <View style={styles.questionBox}>
-          <TextInput
-            multiline
-            onChangeText={setDraft}
-            onFocus={() => setTimeout(scrollToLatest, 120)}
-            placeholder="Escreva uma duvida para a loja"
-            placeholderTextColor={colors.textWeak}
-            style={styles.questionInput}
-            value={draft}
-          />
-          <Pressable
-            accessibilityLabel="Enviar duvida"
-            disabled={!draft.trim() || isSending}
-            onPress={sendQuestion}
-            style={({ pressed }) => [
-              styles.sendButton,
-              (!draft.trim() || isSending) && styles.sendButtonDisabled,
-              pressed && draft.trim() && !isSending && styles.pressed,
-            ]}
-          >
-            {isSending ? (
-              <ActivityIndicator color={colors.card} size="small" />
-            ) : (
-              <Ionicons color={colors.card} name="send" size={18} />
-            )}
-          </Pressable>
-        </View>
+        <ChatComposer
+          draft={draft}
+          onAttachmentError={setError}
+          onChangeDraft={setDraft}
+          onFocus={() => setTimeout(scrollToLatest, 120)}
+          onSend={sendQuestion}
+          onSendAttachment={sendQuestion}
+          placeholder="Escreva uma duvida para a loja"
+          sending={isSending}
+          style={{ paddingBottom: Math.max(spacing.sm, insets.bottom + spacing.xs) }}
+        />
 
       </View>
 
@@ -736,7 +724,7 @@ function proposalStatusLabel(proposal) {
   return "Para decidir";
 }
 
-function MessageBubble({ message }) {
+function MessageBubble({ accessToken, message }) {
   const isCustomer = message.kind === "customer";
   const isSystem = message.kind === "system";
   const isRichMessage = message.type === "summary" || message.type === "items";
@@ -767,13 +755,14 @@ function MessageBubble({ message }) {
         <Text style={[styles.messageTitle, isCustomer && styles.customerMessageTitle]}>
           {message.title}
         </Text>
+        <ChatAttachment accessToken={accessToken} attachment={message.attachment} isMine={isCustomer} />
         {message.type === "summary" ? (
           <OrderSummaryMessage order={message.order} />
         ) : null}
         {message.type === "items" ? (
           <OrderItemsMessage order={message.order} />
         ) : null}
-        {!isRichMessage ? (
+        {!isRichMessage && message.text ? (
           <Text style={[styles.messageText, isCustomer && styles.customerMessageText]}>
             {message.text}
           </Text>

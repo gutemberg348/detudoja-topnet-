@@ -1,4 +1,5 @@
 import { apiRequest } from "./api";
+import { buildChatMessageFormData } from "./chat-attachments.api";
 
 const readListeners = new Set();
 
@@ -60,7 +61,7 @@ export async function getStoreConversation(token, conversationId) {
 
 export function sendStoreConversationMessage(token, conversationId, payload) {
   return apiRequest(`/api/app/store-chats/${conversationId}/messages`, {
-    body: typeof payload === "string" ? { message: payload } : payload,
+    body: buildChatMessageFormData(payload),
     method: "POST",
     token,
   });

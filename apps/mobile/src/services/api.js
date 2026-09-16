@@ -164,9 +164,9 @@ export async function apiRequest(
 
   if (!response.ok) {
     const fallbackMessage = response.status === 413
-      ? "As fotos ficaram grandes demais para o servidor. Tire novas fotos e tente novamente."
+      ? "O arquivo ficou grande demais para o servidor. Escolha outro arquivo e tente novamente."
       : response.status === 408 || response.status === 504
-        ? "O servidor demorou para receber as fotos. Confira sua conexao e tente novamente."
+        ? "O servidor demorou para receber o arquivo. Confira sua conexao e tente novamente."
         : "A solicitacao nao pode ser concluida.";
     throw new ApiError(
       data?.message ?? fallbackMessage,

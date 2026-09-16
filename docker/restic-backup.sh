@@ -15,7 +15,7 @@ fi
 
 while true; do
   echo "[offsite-backup] Sending encrypted backup"
-  restic backup /backups /uploads /kyc --tag detudoja --tag production
+  restic backup /backups /uploads /kyc /chat --tag detudoja --tag production
   restic forget --prune \
     --keep-daily "$OFFSITE_BACKUP_KEEP_DAILY" \
     --keep-weekly "$OFFSITE_BACKUP_KEEP_WEEKLY" \

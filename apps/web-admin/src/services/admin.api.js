@@ -100,6 +100,14 @@ export function moveAdminNetworkPlacement(accessToken, userId, data) {
   });
 }
 
+export function updateAdminNetworkEarnings(accessToken, userId, data) {
+  return apiRequest(`/api/admin/network/members/${userId}/earnings`, {
+    body: data,
+    method: "PATCH",
+    token: accessToken,
+  });
+}
+
 export function getAdminUsers(accessToken, params) {
   return apiGet(withQuery("/api/admin/users", params), accessToken);
 }

@@ -118,6 +118,19 @@ test("primeira mensagem abre a conversa sem aceite e o bloqueio encerra o contat
   const read = await listPersonalChats(state.bia.id);
   assert.equal(read.conversations[0].unreadCount, 0);
 
+  await createPersonalMessage(state.bia.id, conversationId, {
+    attachmentType: "LOCATION",
+    latitude: -7.0171,
+    locationLabel: "Minha localizacao",
+    longitude: -37.2747,
+    message: "Estou aqui",
+  });
+  const withLocation = await getPersonalChat(state.ana.id, conversationId);
+  const locationMessage = withLocation.conversation.messages.at(-1);
+  assert.equal(locationMessage.attachment.type, "LOCATION");
+  assert.equal(locationMessage.attachment.label, "Minha localizacao");
+  assert.match(locationMessage.attachment.mapsUrl, /-7\.0171,-37\.2747/);
+
   await assert.rejects(
     getPersonalChat(state.caio.id, conversationId),
     (error) => error.statusCode === 404,

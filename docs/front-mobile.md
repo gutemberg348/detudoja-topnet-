@@ -459,6 +459,22 @@ POST /api/app/orders/:orderId/messages
 
 A aba `Vender` usa as rotas autenticadas:
 
+Antes de abrir o formulario de chave Pix, o app verifica `cpfRequired`. Se o
+CPF ainda nao existir na conta, `CpfRequirementModal` aparece primeiro e o
+formulario Pix so e aberto depois da conclusao. Isso vale inclusive quando a
+chave escolhida nao e CPF, pois o documento identifica o titular da conta.
+
+Em `ServiceDeskScreen`, tipos ainda nao cadastrados aparecem em `Servicos
+disponiveis` com a acao `Quero realizar este servico`. O formulario seguinte e
+montado a partir de `registrationRequirements`: Motoboy pede moto, CNH e placa;
+Frete aceita carro, utilitario ou caminhao e tambem pede CNH e placa. Somente
+depois do cadastro o servico entra em `Minha disponibilidade` e ganha o
+interruptor online/offline.
+
+Na solicitacao de entrega da loja, o destino consulta a busca por endereco do
+ViaCEP apos tres caracteres, usando a cidade e UF da propria loja. As sugestoes
+mostram rua, bairro, cidade, UF e CEP e preenchem o destino com um toque.
+
 ```txt
 GET  /api/app/seller/segments
 GET  /api/app/seller/store-categories
@@ -634,22 +650,14 @@ Ativo significa `Usuario.status = ATIVO`; verificado significa
 `KycUsuario.status = APROVADO`. A qualificacao exige conta ativa, KYC aprovado
 e dois indicados diretos ativos e verificados.
 
-Em 2026-07-15, a experiencia visual de `NetworkScreen.jsx` foi refeita para
-separar o mapa da matriz da consulta de participantes. O mapa usa bolinhas
-clicaveis, com verde para indicacao direta, azul para ligacao de rede e cadeado
-quando a pessoa ainda nao esta apta aos ganhos. Para manter o app leve em redes
-grandes, o mapa abre com quatro niveis e permite escolher 8 ou todos os 20;
-a lista pesquisavel mostra participantes reais, estados de conta/KYC/ganho e
-detalhes expansiveis. A arvore sempre recebe a rede inteira da API: filtros e
-busca alteram somente a lista, nunca a estrutura da matriz.
-
-O quadro da arvore tambem possui navegacao propria: no navegador, o cursor vira
-uma mao para arrastar o mapa, com estados `grab` e `grabbing`. No aparelho, o
-arraste captura o gesto antes do scroll da pagina e o pinch de dois dedos muda
-a escala sem restaurar 100%. Os controles `-`, `+`, centralizar e expandir
-completam a navegacao; em tela cheia o canvas ocupa a area util inteira para
-explorar ramos maiores. Trocar de 4 para 8 ou 20 niveis tambem centraliza o
-mapa.
+O mapa de `NetworkScreen.jsx` usa navegacao lateral progressiva. A pessoa em
+foco aparece no topo e somente as duas geracoes seguintes ficam abertas em
+colunas laterais. Tocar em qualquer participante, inclusive no ultimo nivel,
+move essa pessoa para o topo e carrega mais duas geracoes a partir dela. Ha
+atalhos para voltar ao pai e retornar a raiz, sem alterar a posicao real de
+ninguem. Verde continua identificando indicacao direta, azul ligacao de rede e
+o cadeado indica ganho bloqueado. A lista pesquisavel permanece separada;
+filtros e busca alteram apenas a lista, nunca a estrutura da matriz.
 
 ## Ganhos em QR presencial
 
@@ -1677,3 +1685,15 @@ explicito antes do envio.
 
 A taxa nao entra na base da comissao nem no pool. O subtotal dos produtos
 continua sendo a base da porcentagem negociada do estabelecimento.
+
+## Anexos privados nos chats (2026-09-16)
+
+- Conversas pessoais, da loja, de servico e do pedido usam o mesmo compositor.
+  O botao `+` oferece foto, video e localizacao atual; o microfone grava audio
+  ao lado do campo de mensagem.
+- Foto, video e audio podem acompanhar uma legenda. Localizacao guarda somente
+  latitude, longitude e rotulo e abre no aplicativo de mapas, sem chave paga.
+- Imagens sao normalizadas para WebP no servidor. Os limites atuais sao 10 MB
+  para foto/audio, 30 MB para video e 120 segundos na gravacao do aplicativo.
+- Arquivos nao usam `/uploads`: a API devolve a midia somente com token valido
+  e depois de confirmar que a conta participa daquela conversa.

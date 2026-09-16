@@ -12,6 +12,7 @@ import {
 } from "../services/courier.api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import { getServiceConversation } from "../services/service-chats.api";
+import { searchAddresses } from "../services/cep.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
 
@@ -20,11 +21,19 @@ function storeAddress(store) {
   return [address?.street, address?.number, address?.district, address?.city, address?.state].filter(Boolean).join(", ");
 }
 
+function suggestionLabel(address) {
+  return [address.street, address.district, address.city, address.state].filter(Boolean).join(", ");
+}
+
 export function StoreCourierRequestScreen({ navigation, route }) {
   const { session } = useAuthStore();
   const store = route.params?.store;
   const [description, setDescription] = useState("");
   const [destination, setDestination] = useState("");
+  const [addressLoading, setAddressLoading] = useState(false);
+  const [addressSearched, setAddressSearched] = useState(false);
+  const [addressSuggestions, setAddressSuggestions] = useState([]);
+  const [destinationSelected, setDestinationSelected] = useState(false);
   const [dispatch, setDispatch] = useState({ currentRequest: null, platformAvailable: false, team: [] });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -41,6 +50,40 @@ export function StoreCourierRequestScreen({ navigation, route }) {
   }, [session?.accessToken, store?.id]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const query = destination.trim();
+    const city = store?.address?.city;
+    const state = store?.address?.state;
+    if (destinationSelected || query.length < 3 || !city || !state) {
+      setAddressSuggestions([]);
+      setAddressLoading(false);
+      setAddressSearched(false);
+      return undefined;
+    }
+
+    let active = true;
+    const timer = setTimeout(async () => {
+      setAddressLoading(true);
+      try {
+        const suggestions = await searchAddresses({ city, state, street: query });
+        if (active) {
+          setAddressSuggestions(suggestions);
+          setAddressSearched(true);
+        }
+      } catch {
+        if (active) {
+          setAddressSuggestions([]);
+          setAddressSearched(true);
+        }
+      } finally {
+        if (active) setAddressLoading(false);
+      }
+    }, 350);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [destination, destinationSelected, store?.address?.city, store?.address?.state]);
   useEffect(() => {
     const current = dispatch.currentRequest;
     if (!session?.accessToken || current?.status !== "ACEITA" || !current.conversationId) return;
@@ -104,7 +147,26 @@ export function StoreCourierRequestScreen({ navigation, route }) {
 
       <View style={styles.formCard}>
         <AppInput icon="location-outline" label="Retirada" onChangeText={setOrigin} value={origin} />
-        <AppInput icon="flag-outline" label="Destino" onChangeText={setDestination} placeholder="Endereco completo da entrega" value={destination} />
+        <View style={styles.destinationField}>
+          <AppInput icon="flag-outline" label="Destino" onChangeText={(value) => { if (value.trim().length < 3) setDestinationSelected(false); setDestination(value); }} placeholder="Digite ao menos 3 letras da rua" value={destination} />
+          {addressLoading ? <View style={styles.addressLoading}><ActivityIndicator color={colors.primaryDark} size="small" /><Text style={styles.addressLoadingText}>Buscando ruas e bairros...</Text></View> : null}
+          {!addressLoading && addressSearched && !addressSuggestions.length && !destinationSelected ? <Text style={styles.addressEmpty}>Nenhum endereco encontrado nessa cidade. Complete o destino manualmente.</Text> : null}
+          {addressSuggestions.length ? <View style={styles.suggestions}>{addressSuggestions.map((address, index) => (
+            <Pressable
+              key={`${address.zipCode}-${address.street}-${index}`}
+              onPress={() => {
+                setDestination(suggestionLabel(address));
+                setDestinationSelected(true);
+                setAddressSearched(false);
+                setAddressSuggestions([]);
+              }}
+              style={({ pressed }) => [styles.suggestion, pressed && styles.suggestionPressed]}
+            >
+              <View style={styles.suggestionIcon}><Ionicons color={colors.primaryDark} name="location-outline" size={17} /></View>
+              <View style={styles.copy}><Text style={styles.suggestionStreet}>{address.street || address.district}</Text><Text style={styles.suggestionMeta}>{[address.district, `${address.city}/${address.state}`, address.zipCode].filter(Boolean).join(" · ")}</Text></View>
+            </Pressable>
+          ))}</View> : null}
+        </View>
         <AppInput icon="cube-outline" label="Detalhes" multiline onChangeText={setDescription} placeholder="Pedido, volume ou referencia" value={description} />
       </View>
 
@@ -131,10 +193,14 @@ export function StoreCourierRequestScreen({ navigation, route }) {
 function SectionTitle({ subtitle, title }) { return <View style={styles.sectionHeading}><Text style={styles.sectionTitle}>{title}</Text><Text style={styles.sectionSubtitle}>{subtitle}</Text></View>; }
 
 const styles = StyleSheet.create({
+  addressLoading: { alignItems: "center", flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.sm },
+  addressLoadingText: { color: colors.textSecondary, fontFamily: fonts.medium, fontSize: 11 },
+  addressEmpty: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16, paddingHorizontal: spacing.sm },
   callButton: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.round, height: 44, justifyContent: "center", width: 44 },
   cancelButton: { alignItems: "center", backgroundColor: colors.card, borderRadius: radius.md, minHeight: 42, justifyContent: "center" },
   cancelText: { color: colors.danger, fontFamily: fonts.bold, fontSize: typography.caption },
   content: { gap: spacing.lg, paddingBottom: spacing.xxxl }, copy: { flex: 1, gap: 3, minWidth: 0 }, disabled: { opacity: 0.48 },
+  destinationField: { gap: spacing.sm, zIndex: 2 },
   formCard: { backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, gap: spacing.md, padding: spacing.md, ...shadowSoft },
   icon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, height: 42, justifyContent: "center", width: 42 },
   label: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 9 }, memberAvatar: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 42, justifyContent: "center", width: 42 },
@@ -145,6 +211,12 @@ const styles = StyleSheet.create({
   radar: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.round, height: 46, justifyContent: "center", width: 46 }, route: { color: colors.textPrimary, fontFamily: fonts.medium, fontSize: typography.caption },
   section: { gap: spacing.sm }, sectionHeading: { gap: 3 }, sectionSubtitle: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption }, sectionTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.h3 },
   storeCard: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.md, padding: spacing.md }, storeName: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.label },
+  suggestion: { alignItems: "center", flexDirection: "row", gap: spacing.sm, minHeight: 54, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  suggestionIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 34, justifyContent: "center", width: 34 },
+  suggestionMeta: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 10 },
+  suggestionPressed: { backgroundColor: colors.primarySoft },
+  suggestions: { backgroundColor: colors.card, borderColor: colors.primaryLight, borderRadius: radius.md, borderWidth: 1, overflow: "hidden" },
+  suggestionStreet: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.caption },
   teamLink: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, flexDirection: "row", gap: 5, paddingHorizontal: spacing.sm, paddingVertical: 8 }, teamLinkText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: typography.caption },
   waitingCard: { backgroundColor: "#073E31", borderRadius: radius.lg, gap: spacing.md, padding: spacing.lg, ...shadowSoft }, waitingText: { color: "#CDEFE2", fontFamily: fonts.regular, fontSize: typography.caption, lineHeight: 18 }, waitingTitle: { color: colors.card, fontFamily: fonts.extraBold, fontSize: typography.h3 }, waitingTop: { alignItems: "center", flexDirection: "row", gap: spacing.md },
 });

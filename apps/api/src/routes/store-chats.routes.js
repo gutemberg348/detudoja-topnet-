@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { validate } from "../middlewares/validate.middleware.js";
+import { handleUpload, uploadChatAttachment } from "../modules/uploads/upload.middleware.js";
 import {
   createStoreConversationMessageController,
   getStoreConversationController,
@@ -24,6 +25,7 @@ storeChatsRoutes.post(
 );
 storeChatsRoutes.post(
   "/:conversationId/messages",
+  handleUpload(uploadChatAttachment),
   validate(createStoreChatMessageSchema),
   createStoreConversationMessageController,
 );

@@ -619,28 +619,31 @@ model AuditoriaAdministrativa {
 }
 
 model Usuario {
-  id                      Int              @id @default(autoincrement())
-  nome                    String           @db.VarChar(160)
-  identificador_publico   String?          @unique @db.VarChar(80)
-  email                   String           @unique @db.VarChar(255)
-  telefone                String?          @unique @db.VarChar(30)
-  cpf                     String?          @unique @db.VarChar(14)
-  senha_hash              String           @db.VarChar(255)
-  data_nascimento         DateTime?        @db.Date
-  foto_url                String?
-  status                  StatusUsuario    @default(PENDENTE)
-  tipo_conta              TipoContaUsuario @default(CONSUMIDOR)
-  nivel_kyc               NivelKyc         @default(TIER_1)
-  loja_origem_cadastro_id Int?
-  asaas_cliente_id        String?          @unique @db.VarChar(255)
-  email_verificado        Boolean          @default(false)
-  telefone_verificado     Boolean          @default(false)
-  ultimo_login_em         DateTime?        @db.Timestamptz(3)
-  cidade_busca            String?          @db.VarChar(120)
-  estado_busca            String?          @db.Char(2)
-  criado_em               DateTime         @default(now()) @db.Timestamptz(3)
-  atualizado_em           DateTime         @updatedAt @db.Timestamptz(3)
-  excluido_em             DateTime?        @db.Timestamptz(3)
+  id                          Int              @id @default(autoincrement())
+  nome                        String           @db.VarChar(160)
+  identificador_publico       String?          @unique @db.VarChar(80)
+  email                       String           @unique @db.VarChar(255)
+  telefone                    String?          @unique @db.VarChar(30)
+  cpf                         String?          @unique @db.VarChar(14)
+  senha_hash                  String           @db.VarChar(255)
+  data_nascimento             DateTime?        @db.Date
+  foto_url                    String?
+  status                      StatusUsuario    @default(PENDENTE)
+  tipo_conta                  TipoContaUsuario @default(CONSUMIDOR)
+  nivel_kyc                   NivelKyc         @default(TIER_1)
+  ganhos_rede_bloqueados      Boolean          @default(false)
+  ganhos_rede_bloqueados_em   DateTime?        @db.Timestamptz(3)
+  motivo_bloqueio_ganhos_rede String?          @db.VarChar(500)
+  loja_origem_cadastro_id     Int?
+  asaas_cliente_id            String?          @unique @db.VarChar(255)
+  email_verificado            Boolean          @default(false)
+  telefone_verificado         Boolean          @default(false)
+  ultimo_login_em             DateTime?        @db.Timestamptz(3)
+  cidade_busca                String?          @db.VarChar(120)
+  estado_busca                String?          @db.Char(2)
+  criado_em                   DateTime         @default(now()) @db.Timestamptz(3)
+  atualizado_em               DateTime         @updatedAt @db.Timestamptz(3)
+  excluido_em                 DateTime?        @db.Timestamptz(3)
 
   enderecos                  EnderecoUsuario[]
   kyc                        KycUsuario?
@@ -689,6 +692,7 @@ model Usuario {
   @@index([identificador_publico])
   @@index([tipo_conta])
   @@index([nivel_kyc])
+  @@index([ganhos_rede_bloqueados])
   @@index([loja_origem_cadastro_id])
   @@index([estado_busca, cidade_busca])
   @@map("usuarios")
@@ -742,7 +746,8 @@ model ConversaPessoalMensagem {
   id               Int       @id @default(autoincrement())
   conversa_id      Int
   autor_usuario_id Int
-  mensagem         String    @db.VarChar(2000)
+  mensagem         String?   @db.VarChar(2000)
+  anexo_json       Json?
   lido_em          DateTime? @db.Timestamptz(3)
   criado_em        DateTime  @default(now()) @db.Timestamptz(3)
 
@@ -1136,7 +1141,7 @@ model ConversaLojaMensagem {
   autor_usuario_id Int?
   origem           OrigemMensagemConversaLoja
   tipo             TipoMensagemConversaLoja   @default(TEXTO)
-  mensagem         String
+  mensagem         String?
   conteudo_json    Json?
   lido_cliente_em  DateTime?                  @db.Timestamptz(3)
   lido_loja_em     DateTime?                  @db.Timestamptz(3)
@@ -1351,6 +1356,7 @@ model ServicoVendedor {
   status                        StatusServicoVendedor @default(ATIVO)
   disponivel_agora              Boolean               @default(false)
   disponibilidade_atualizada_em DateTime?             @db.Timestamptz(3)
+  dados_cadastro                Json?
   criado_em                     DateTime              @default(now()) @db.Timestamptz(3)
   atualizado_em                 DateTime              @updatedAt @db.Timestamptz(3)
   excluido_em                   DateTime?             @db.Timestamptz(3)
@@ -1370,19 +1376,20 @@ model ServicoVendedor {
 }
 
 model TipoServico {
-  id                Int                    @id @default(autoincrement())
-  segmento_venda_id Int?
-  nome              String                 @unique @db.VarChar(120)
-  slug              String                 @unique @db.VarChar(140)
-  descricao         String?
-  icone             String?                @db.VarChar(80)
-  modo_atendimento  ModoAtendimentoServico @default(NEGOCIACAO_CHAT)
-  tipo_operacao     TipoOperacaoServico    @default(GERAL)
-  status            StatusServicoVendedor  @default(ATIVO)
-  ordem             Int                    @default(0)
-  criado_em         DateTime               @default(now()) @db.Timestamptz(3)
-  atualizado_em     DateTime               @updatedAt @db.Timestamptz(3)
-  excluido_em       DateTime?              @db.Timestamptz(3)
+  id                  Int                    @id @default(autoincrement())
+  segmento_venda_id   Int?
+  nome                String                 @unique @db.VarChar(120)
+  slug                String                 @unique @db.VarChar(140)
+  descricao           String?
+  icone               String?                @db.VarChar(80)
+  modo_atendimento    ModoAtendimentoServico @default(NEGOCIACAO_CHAT)
+  tipo_operacao       TipoOperacaoServico    @default(GERAL)
+  requisitos_cadastro Json?
+  status              StatusServicoVendedor  @default(ATIVO)
+  ordem               Int                    @default(0)
+  criado_em           DateTime               @default(now()) @db.Timestamptz(3)
+  atualizado_em       DateTime               @updatedAt @db.Timestamptz(3)
+  excluido_em         DateTime?              @db.Timestamptz(3)
 
   segmento_venda       SegmentoVenda?       @relation(fields: [segmento_venda_id], references: [id], onDelete: SetNull)
   servicos_vendedor    ServicoVendedor[]
@@ -1542,6 +1549,7 @@ model ConversaServicoMensagem {
   origem              OrigemMensagemConversaServico
   mensagem            String?
   imagem_url          String?
+  anexo_json          Json?
   lido_cliente_em     DateTime?                     @db.Timestamptz(3)
   lido_vendedor_em    DateTime?                     @db.Timestamptz(3)
   criado_em           DateTime                      @default(now()) @db.Timestamptz(3)
@@ -1955,7 +1963,7 @@ model PedidoLojaMensagem {
   autor_usuario_id Int?
   origem           OrigemMensagemPedidoLoja
   titulo           String?                  @db.VarChar(120)
-  mensagem         String                   @db.Text
+  mensagem         String?                  @db.Text
   metadata_json    Json?
   lido_cliente_em  DateTime?                @db.Timestamptz(3)
   lido_loja_em     DateTime?                @db.Timestamptz(3)

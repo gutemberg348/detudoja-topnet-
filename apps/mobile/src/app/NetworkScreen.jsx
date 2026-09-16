@@ -163,7 +163,7 @@ export function NetworkScreen() {
   }
 
   function selectPerson(person) {
-    setSelectedPerson((current) => (current?.id === person.id ? null : person));
+    setSelectedPerson(person);
   }
 
   return (
@@ -225,7 +225,7 @@ export function NetworkScreen() {
 
       <View style={styles.section}>
         <SectionHeader
-          subtitle="A matriz continua preenchendo da esquerda para a direita."
+          subtitle="Toque em uma pessoa para coloca-la no topo e abrir mais dois niveis."
           title="Sua estrutura"
         />
         <NetworkMatrix
