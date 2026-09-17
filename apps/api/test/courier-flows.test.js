@@ -602,6 +602,11 @@ test("regular service waits for provider acceptance before releasing chat", asyn
   const customerView = await getServiceConversation(state.customer.id, created.conversation.id);
   assert.equal(customerView.conversation.status, "ACORDADA");
   assert.equal(customerView.conversation.messages.at(-1).text, "Resposta do prestador");
+  assert.ok(customerView.conversation.messages.at(-1).readAt);
+  const providerView = await getServiceConversation(state.providerUser.id, created.conversation.id);
+  assert.ok(providerView.conversation.messages.find(
+    (message) => message.text === "Mensagem depois do aceite",
+  )?.readAt);
   await cancelServiceConversation(state.customer.id, created.conversation.id);
 });
 

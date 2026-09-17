@@ -1,6 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { resolveMediaUrl } from "../utils/media";
 import { colors, fonts, radius, shadow, spacing, typography } from "../utils/theme";
 
@@ -108,11 +108,20 @@ export function SearchBar({
             {loading ? <ActivityIndicator color={colors.primaryDark} size="small" /> : null}
           </View>
           <ScrollView
+            bounces={false}
             contentContainerStyle={styles.suggestionsContent}
             keyboardShouldPersistTaps="always"
             nestedScrollEnabled
+            overScrollMode="always"
+            persistentScrollbar
+            scrollEnabled={suggestions.length > 3}
             showsVerticalScrollIndicator
-            style={styles.suggestionsScroll}
+            style={[
+              styles.suggestionsScroll,
+              Platform.OS === "android" && {
+                height: Math.min(244, Math.max(68, suggestions.length * 68)),
+              },
+            ]}
           >
             {suggestions.map((suggestion, index) => {
               const label = suggestion.label ?? suggestion.name ?? String(suggestion);

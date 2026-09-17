@@ -1,0 +1,202 @@
+PLANO FUTURO - BUSCA DE ENDERECOS E LOCAIS
+Brasil Cashback / De Tudo Ja
+
+Status: ideia aprovada para apresentacao. Implementar posteriormente.
+
+OBJETIVO
+
+Melhorar a escolha e o compartilhamento de locais nos chats, chamados de
+motoboy e fretes. O sistema devera encontrar tanto enderecos residenciais
+quanto estabelecimentos, bairros e pontos conhecidos.
+
+
+DECISAO PRINCIPAL
+
+Usaremos cada servico para uma finalidade diferente:
+
+1. ViaCEP
+   - Continua sendo usado para casas e enderecos postais.
+   - Busca por CEP, rua, bairro, cidade e UF.
+   - O usuario informa ou confirma o numero e o complemento.
+
+2. Photon + OpenStreetMap
+   - Usado para pesquisar estabelecimentos, shoppings, hospitais, comercios,
+     bairros, ruas e outros pontos conhecidos.
+   - A pesquisa sera feita pela nossa API, nunca diretamente pelo aplicativo.
+   - O resultado devera conter nome do local, endereco disponivel, latitude e
+     longitude.
+
+3. GPS do aparelho
+   - Opcao "Usar minha localizacao atual".
+   - Envia um ponto fixo com latitude e longitude.
+   - Nao representa acompanhamento em tempo real.
+
+4. Google Maps ou Apple Maps
+   - Usados somente quando a pessoa quiser abrir o local ou iniciar uma rota.
+   - No Android, priorizar Google Maps ou o aplicativo de mapas disponivel.
+   - No iPhone, priorizar Apple Maps, com alternativa para Google Maps web.
+   - Abrir a navegacao por link externo nao exige uma API paga.
+
+
+FLUXO DA PESQUISA
+
+1. Comecar a pesquisar depois de 3 caracteres.
+2. Esperar aproximadamente 500 ms depois que o usuario parar de digitar.
+3. Cancelar a busca anterior quando ele continuar digitando.
+4. Priorizar resultados proximos ao GPS do aparelho.
+5. Se o GPS nao estiver disponivel, priorizar a cidade e a UF selecionadas.
+6. Exibir no maximo 8 sugestoes.
+7. Identificar cada resultado como:
+   - Estabelecimento
+   - Endereco
+   - Rua
+   - Bairro
+   - Cidade
+8. Mostrar nome, rua, bairro, cidade/UF e distancia aproximada, quando houver.
+9. Manter ViaCEP como complemento e alternativa.
+10. Remover resultados duplicados.
+
+
+COMO A NOSSA API DEVERA FUNCIONAR
+
+O aplicativo chamara um endpoint nosso, por exemplo:
+
+GET /api/app/locations/search?q=shopping+patos&city=Patos&state=PB&lat=-7.02&lon=-37.27
+
+Nossa API consultara o Photon, aplicara cache, limite de requisicoes,
+normalizacao e ordenacao por proximidade. O aplicativo recebera sempre um
+formato controlado pelo nosso sistema.
+
+Formato esperado de um local:
+
+{
+  "id": "osm-node-123",
+  "type": "PLACE",
+  "name": "Patos Shopping",
+  "formattedAddress": "Rua exemplo, Patos/PB",
+  "street": "Rua exemplo",
+  "number": null,
+  "district": "Bairro",
+  "city": "Patos",
+  "state": "PB",
+  "zipCode": null,
+  "latitude": -7.02,
+  "longitude": -37.27,
+  "distanceMeters": 1800,
+  "provider": "OPENSTREETMAP"
+}
+
+Variaveis de ambiente planejadas:
+
+GEOCODER_PROVIDER=photon
+PHOTON_API_URL=https://photon.komoot.io
+GEOCODER_CACHE_TTL_SECONDS=86400
+GEOCODER_RATE_LIMIT_PER_MINUTE=30
+
+O servidor publico do Photon podera ser usado inicialmente nos testes. Como
+ele nao oferece garantia de disponibilidade para uso intenso, futuramente
+poderemos hospedar uma instancia propria e alterar somente PHOTON_API_URL.
+
+
+REGRAS PARA ENDERECOS
+
+- CEP continua obrigatorio no fluxo postal tradicional quando o usuario
+  cadastrar uma casa pelo ViaCEP.
+- CEP nao sera obrigatorio para um estabelecimento ou ponto encontrado pelo
+  OpenStreetMap.
+- Um local sem CEP podera ser usado quando tiver latitude e longitude validas.
+- Numero podera ser opcional para shopping, praca, hospital e outros pontos.
+- O usuario podera informar entrada, portao ou ponto de encontro no campo de
+  referencia.
+- Se nada for encontrado, permitir preenchimento manual.
+
+
+CHATS
+
+O local sera enviado como um cartao contendo:
+
+- Tipo: retirada, destino ou outro local.
+- Nome do estabelecimento, quando existir.
+- Endereco disponivel.
+- Cidade e UF.
+- CEP, somente quando existir.
+- Latitude e longitude.
+- Botao "Abrir local".
+- Botao "Tracar rota" quando fizer sentido.
+
+Exemplo:
+
+DESTINO
+Patos Shopping
+Rua exemplo - Patos/PB
+
+[ Abrir local ]  [ Tracar rota ]
+
+
+MOTOBOY E FRETE
+
+- A loja podera usar o proprio endereco como retirada.
+- Cliente e loja poderao pesquisar uma residencia ou estabelecimento.
+- Tambem poderao enviar a localizacao atual.
+- Retirada e destino serao armazenados com texto e coordenadas.
+- O motoboy podera abrir separadamente a retirada ou o destino.
+- O botao "Tracar rota" abrira o aplicativo de mapas com origem e destino.
+- O proprio Google Maps ou Apple Maps calculara o caminho.
+- Nesta etapa nao calcularemos valor do frete, distancia rodoviaria nem tempo
+  estimado dentro do nosso sistema.
+
+Exemplo de abertura de rota sem API paga:
+
+https://www.google.com/maps/dir/?api=1&origin=LATITUDE,LONGITUDE&destination=LATITUDE,LONGITUDE&travelmode=driving
+
+
+ARMAZENAMENTO PLANEJADO
+
+Hoje alguns fluxos guardam somente os textos de origem e destino. A futura
+migration devera preservar esses textos e adicionar snapshots estruturados,
+por exemplo:
+
+- origem_local_json
+- destino_local_json
+
+O snapshot devera guardar nome, endereco formatado, rua, numero, bairro,
+cidade, UF, CEP opcional, latitude, longitude e provedor.
+
+Os enderecos de usuario e loja ja possuem campos de latitude e longitude, que
+tambem deverao ser preenchidos quando o local for selecionado na nova busca.
+
+
+DISTANCIA
+
+Podemos calcular gratuitamente a distancia em linha reta entre o usuario e o
+resultado para ordenar as sugestoes e mostrar algo como "1,8 km de voce".
+
+Essa distancia nao representa a rota pelas ruas. Se futuramente precisarmos
+calcular percurso, duracao, previsao de chegada ou preco automatico, sera
+necessario adicionar um motor de rotas como OSRM, Valhalla, GraphHopper ou
+Google Routes.
+
+
+LIMITACOES E ALTERNATIVAS
+
+- Um estabelecimento so aparecera se estiver cadastrado nos dados do
+  OpenStreetMap.
+- Manteremos as opcoes de localizacao atual e preenchimento manual.
+- Nao usaremos o Nominatim publico para autocomplete a cada tecla.
+- O Photon publico sera protegido por cache, debounce e rate limit na nossa API.
+- A interface devera mostrar a atribuicao ao OpenStreetMap quando aplicavel.
+
+
+RESUMO DA IMPLEMENTACAO FUTURA
+
+1. Criar endpoint de busca de locais na API.
+2. Integrar Photon pelo servidor.
+3. Adicionar cache Redis e rate limit.
+4. Combinar Photon com ViaCEP.
+5. Atualizar autocomplete no Android e iOS.
+6. Aceitar estabelecimentos e locais sem CEP.
+7. Salvar latitude e longitude.
+8. Criar migration para snapshots de retirada e destino.
+9. Melhorar os cartoes de localizacao nos chats.
+10. Adicionar botoes para abrir o local e tracar rota externamente.
+

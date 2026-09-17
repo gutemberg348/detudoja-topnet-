@@ -32,6 +32,13 @@ function serializeMessage(message, viewerId) {
     createdAt: message.criado_em.toISOString(),
     id: message.id,
     isMine: message.autor_usuario_id === viewerId,
+    readAt: (
+      message.origem === "CLIENTE"
+        ? message.lido_loja_em
+        : message.origem === "LOJA"
+          ? message.lido_cliente_em
+          : null
+    )?.toISOString() ?? null,
     sentBy: message.origem === "LOJA" && message.autor
       ? {
           id: message.autor.id,
@@ -96,6 +103,43 @@ function serializeChatStore(store) {
         }
       : null,
   };
+}
+
+function normalizeCatalogSearch(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("pt-BR")
+    .trim();
+}
+
+function searchStoreProducts(products, query) {
+  const normalizedQuery = normalizeCatalogSearch(query);
+  if (!normalizedQuery) return [];
+  const terms = normalizedQuery.split(/\s+/).filter(Boolean);
+
+  return products
+    .map((product) => {
+      const name = normalizeCatalogSearch(product.nome);
+      const searchable = normalizeCatalogSearch([
+        product.nome,
+        product.marca,
+        product.resumo_curto,
+        product.descricao,
+      ].filter(Boolean).join(" "));
+      if (!terms.every((term) => searchable.includes(term))) return null;
+      const score = name === normalizedQuery
+        ? 4
+        : name.startsWith(normalizedQuery)
+          ? 3
+          : name.includes(normalizedQuery)
+            ? 2
+            : 1;
+      return { product, score };
+    })
+    .filter(Boolean)
+    .sort((left, right) => right.score - left.score)
+    .map(({ product }) => product);
 }
 
 function serializeConversation(
@@ -164,12 +208,31 @@ function serializeConversation(
 async function buildCommercialMessage(access, data, scope) {
   const type = data.type ?? "TEXTO";
 
-  if (scope !== "seller" && type !== "TEXTO") {
+  if (scope !== "seller" && !["TEXTO", "PRODUTO"].includes(type)) {
     throw new AppError("Somente a loja pode compartilhar o catalogo", 403);
   }
 
   if (type === "TEXTO") {
     const isSupport = scope === "customer" && data.support === true;
+    if (scope === "customer" && data.searchCatalog && data.message) {
+      const store = await storeChatsRepository.findCatalogStore(
+        access.conversation.loja_id,
+      );
+      if (!store) throw new AppError("Loja nao encontrada", 404);
+      const matches = searchStoreProducts(store.produtos, data.message);
+      return {
+        content: {
+          kind: "SEARCH",
+          productCount: matches.length,
+          products: matches.slice(0, 6).map(serializeChatProduct),
+          query: data.message,
+          store: serializeChatStore(store),
+        },
+        isSupport: false,
+        message: data.message,
+        type,
+      };
+    }
     return {
       content: isSupport ? { kind: "SUPPORT" } : null,
       isSupport,
@@ -206,7 +269,9 @@ async function buildCommercialMessage(access, data, scope) {
         product: productSnapshot,
         store: storeSnapshot,
       },
-      message: data.message || `A loja compartilhou ${product.nome}.`,
+      message: data.message || (scope === "seller"
+        ? `A loja compartilhou ${product.nome}.`
+        : `Produto selecionado: ${product.nome}.`),
       type,
     };
   }
@@ -332,16 +397,18 @@ export async function getStoreConversation(userId, conversationId) {
   ensureStoreChatPrismaClient();
   const access = await getConversationAccess(userId, conversationId);
   const scope = access.isCustomer ? "customer" : "seller";
-  await storeChatsRepository.markRead(access.conversation.id, scope);
+  const markedAsRead = await storeChatsRepository.markRead(access.conversation.id, scope);
 
   const conversation = await loadConversation(access.conversation.id);
 
-  emitStoreChatUpdated({
-    conversationId: conversation.id,
-    customerUserId: conversation.cliente_usuario_id,
-    reason: "read",
-    storeId: conversation.loja_id,
-  });
+  if (markedAsRead > 0) {
+    emitStoreChatUpdated({
+      conversationId: conversation.id,
+      customerUserId: conversation.cliente_usuario_id,
+      reason: "read",
+      storeId: conversation.loja_id,
+    });
+  }
 
   return {
     conversation: serializeConversation(conversation, userId, {

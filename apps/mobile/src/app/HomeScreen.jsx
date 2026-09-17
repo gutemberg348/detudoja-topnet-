@@ -7,6 +7,7 @@ import { useMarketplaceSuggestions } from "../hooks/useMarketplaceSuggestions";
 import { useAuthStore } from "../stores/useAuthStore";
 import { normalizeSearchText } from "../utils/search";
 import { colors, fonts, spacing, typography } from "../utils/theme";
+import { CourierHomeConversations } from "./home/CourierHomeConversations";
 import { RecentConversations } from "./home/RecentConversations";
 import { useHomeConversations } from "./home/useHomeConversations";
 
@@ -134,6 +135,14 @@ export function HomeScreen({ navigation }) {
               onPress={() => navigation.navigate("Vender")}
             />
           </View>
+
+          {recent.courierOnline ? (
+            <CourierHomeConversations
+              conversations={recent.courierConversations}
+              onOpen={(conversation) => navigation.navigate("ServiceConversation", { conversation })}
+              onViewAll={() => navigation.navigate("ServiceDesk")}
+            />
+          ) : null}
 
           <RecentConversations
             actionLabel="Conversar"

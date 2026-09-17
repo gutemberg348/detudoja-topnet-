@@ -16,9 +16,12 @@ import { ScreenContainer } from "../components/ScreenContainer";
 import { StatePanel } from "../components/StatePanel";
 import { ChatComposer } from "../components/ChatComposer";
 import { ChatAttachment } from "../components/ChatAttachment";
+import { ChatMessageMeta } from "../components/ChatMessageMeta";
+import { ChatScrollToLatestButton } from "../components/ChatScrollToLatestButton";
 import { BackHeader } from "../components/BackHeader";
 import { CartAddButton } from "../components/CartAddButton";
 import { useConversationRealtime } from "../hooks/useConversationRealtime";
+import { useChatTimeline } from "../hooks/useChatTimeline";
 import { getMarketplaceStore } from "../services/marketplace.api";
 import { realtimeEvents } from "../services/realtime";
 import {
@@ -31,7 +34,6 @@ import { useAuthStore } from "../stores/useAuthStore";
 import { useCartStore } from "../stores/useCartStore";
 import { buildCartItem } from "../utils/checkout";
 import { resolveMediaUrl } from "../utils/media";
-import { formatarHora } from "../utils/date";
 import { formatarDinheiro } from "../utils/money";
 import { matchesSearchText, normalizeSearchText } from "../utils/search";
 import {
@@ -60,7 +62,6 @@ export function StoreConversationScreen({ navigation, route }) {
   const [loading, setLoading] = useState(!initialConversation?.messages);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [openingContent, setOpeningContent] = useState("");
-  const [searchResults, setSearchResults] = useState(null);
   const [sending, setSending] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [sharing, setSharing] = useState("");
@@ -75,6 +76,10 @@ export function StoreConversationScreen({ navigation, route }) {
     ?? initialConversation?.store?.id
     ?? initialStore?.id
     ?? route.params?.storeId;
+  const timeline = useChatTimeline({
+    itemCount: conversation?.messages?.length ?? 0,
+    scrollRef,
+  });
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!session?.accessToken) {
@@ -132,14 +137,15 @@ export function StoreConversationScreen({ navigation, route }) {
       realtimeEvents.storeChatMessageCreated,
       realtimeEvents.storeChatUpdated,
     ],
-    ignoreReasons: ["read"],
     onUpdate: refreshConversation,
   });
 
   async function send(payload = null) {
-    const message = payload?.message ?? draft.trim();
+    const isCommercial = payload?.type && payload.type !== "TEXTO";
+    const message = payload?.message ?? (isCommercial ? "" : draft.trim());
+    const sendsSupport = !conversation?.isStore && supportMode && !isCommercial;
 
-    if ((!message && !payload?.attachment) || !conversation?.id || sending || !session?.accessToken) {
+    if ((!message && !payload?.attachment && !isCommercial) || !conversation?.id || sending || !session?.accessToken) {
       return;
     }
 
@@ -152,11 +158,17 @@ export function StoreConversationScreen({ navigation, route }) {
         conversation.id,
         conversation.isStore
           ? (payload ?? message)
-          : { ...(payload ?? {}), message, support: true },
+          : {
+              ...(payload ?? {}),
+              message,
+              searchCatalog: !sendsSupport && Boolean(message && !payload?.attachment && !isCommercial),
+              support: sendsSupport,
+            },
       );
 
       setDraft("");
-      setSupportMode(false);
+      if (sendsSupport) setSupportMode(false);
+      setCatalogSearchFocused(false);
       setConversation(response.conversation);
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel enviar a mensagem.");
@@ -164,21 +176,6 @@ export function StoreConversationScreen({ navigation, route }) {
     } finally {
       setSending(false);
     }
-  }
-
-  function searchCatalog() {
-    const query = draft.trim();
-    if (!query) {
-      setCatalogOpen(true);
-      return;
-    }
-    const matches = (storeCatalog?.products ?? []).filter((product) => matchesSearchText(
-      `${product.name} ${product.shortDescription ?? ""} ${product.description ?? ""} ${product.brand ?? ""}`,
-      query,
-    ));
-    setSearchResults(matches);
-    setDraft("");
-    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
   }
 
   function openProduct(product) {
@@ -199,6 +196,12 @@ export function StoreConversationScreen({ navigation, route }) {
   function addProduct(product) {
     if (!storeView || !product) return;
     addItem(buildCartItem(product), storeView, conversation?.id);
+    if (conversation?.id && session?.accessToken && !conversation.isStore) {
+      void trackStoreConversationActivity(session.accessToken, conversation.id, {
+        action: "ADD_TO_CART",
+        productId: product.id,
+      }).catch(() => {});
+    }
   }
 
   function addSharedProduct(product) {
@@ -335,7 +338,6 @@ export function StoreConversationScreen({ navigation, route }) {
   const currentStoreItemCount = hasCurrentStoreCart ? itemCount : 0;
   const normalizedDraft = normalizeSearchText(draft);
   const catalogProductSuggestions = !conversation?.isStore
-    && !supportMode
     && catalogSearchFocused
     && (normalizedDraft.length === 0 || normalizedDraft.length >= 2)
     ? (storeView?.products ?? [])
@@ -411,89 +413,62 @@ export function StoreConversationScreen({ navigation, route }) {
         </View>
       ) : null}
 
-      <ScrollView
-        automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
-        contentContainerStyle={styles.messages}
-        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-        keyboardShouldPersistTaps="handled"
-        onContentSizeChange={() =>
-          scrollRef.current?.scrollToEnd({ animated: true })
-        }
-        ref={scrollRef}
-        showsVerticalScrollIndicator={false}
-        style={styles.messageScroll}
-      >
-        {!conversation?.isStore ? (
-          <StoreWelcomeCard
-            onAddProduct={addProduct}
-            onOpenCatalog={() => setCatalogOpen(true)}
-            onOpenProduct={openProduct}
-            store={storeView}
-          />
-        ) : (
-          <StoreJourneyStatus />
-        )}
-
-        {(conversation?.messages ?? []).length ? (
-          conversation.messages.map((message) => (
-            <MessageBubble
-              accessToken={session.accessToken}
-              key={message.id}
-              loading={openingContent === String(message.id)}
-              message={message}
-              onAddProduct={!conversation?.isStore ? addSharedProduct : null}
-              onOpenContent={openCommercialContent}
+      <View style={styles.timeline}>
+        <ScrollView
+          automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+          contentContainerStyle={[styles.messages, conversation?.isStore && styles.messagesBottom]}
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+          keyboardShouldPersistTaps="handled"
+          onContentSizeChange={timeline.onContentSizeChange}
+          onScroll={timeline.onScroll}
+          ref={scrollRef}
+          scrollEventThrottle={16}
+          showsVerticalScrollIndicator={false}
+          style={styles.messageScroll}
+        >
+          {!conversation?.isStore ? (
+            <StoreWelcomeCard
+              onAddProduct={addProduct}
+              onOpenCatalog={() => setCatalogOpen(true)}
+              onOpenProduct={openProduct}
+              store={storeView}
             />
-          ))
-        ) : (
-          <View style={styles.empty}>
-            <View style={styles.emptyIcon}>
-              <Ionicons color={colors.primaryDark} name="storefront-outline" size={25} />
-            </View>
-            <Text style={styles.emptyTitle}>Fale diretamente com a loja</Text>
-            <Text style={styles.emptyText}>
-              Pergunte sobre um produto, entrega, horario ou disponibilidade.
-            </Text>
-          </View>
-        )}
+          ) : (
+            <StoreJourneyStatus />
+          )}
 
-        {searchResults !== null ? (
-          <View style={styles.searchResponse}>
-            <View style={styles.searchResponseHeading}>
-              <View>
-                <Text style={styles.searchResponseEyebrow}>RESULTADO DA BUSCA</Text>
-                <Text style={styles.searchResponseTitle}>
-                  {searchResults.length
-                    ? `${searchResults.length} produto${searchResults.length === 1 ? "" : "s"} encontrado${searchResults.length === 1 ? "" : "s"}`
-                    : "Nenhum produto encontrado"}
-                </Text>
-              </View>
-              <Pressable hitSlop={8} onPress={() => setSearchResults(null)}>
-                <Ionicons color={colors.textMuted} name="close" size={20} />
-              </Pressable>
-            </View>
-            {searchResults.length ? searchResults.slice(0, 6).map((product) => (
-              <CustomerProductRow
-                key={product.id}
-                onAdd={() => addProduct(product)}
-                onPress={() => openProduct(product)}
-                product={product}
+          {(conversation?.messages ?? []).length ? (
+            conversation.messages.map((message) => (
+              <MessageBubble
+                accessToken={session.accessToken}
+                key={message.id}
+                loading={openingContent === String(message.id)}
+                message={message}
+                onAddProduct={!conversation?.isStore ? addSharedProduct : null}
+                onOpenContent={openCommercialContent}
+                onOpenSearchProduct={!conversation?.isStore ? openProduct : null}
               />
-            )) : (
-              <Text style={styles.searchResponseText}>
-                Tente outro nome ou abra todos os produtos da loja.
+            ))
+          ) : (
+            <View style={styles.empty}>
+              <View style={styles.emptyIcon}>
+                <Ionicons color={colors.primaryDark} name="storefront-outline" size={25} />
+              </View>
+              <Text style={styles.emptyTitle}>Fale diretamente com a loja</Text>
+              <Text style={styles.emptyText}>
+                Pergunte sobre um produto, entrega, horario ou disponibilidade.
               </Text>
-            )}
-          </View>
-        ) : null}
-      </ScrollView>
+            </View>
+          )}
+        </ScrollView>
+        <ChatScrollToLatestButton onPress={timeline.scrollToLatest} unreadCount={timeline.unreadBelow} visible={!timeline.isAtBottom} />
+      </View>
 
       {catalogProductSuggestions.length ? (
         <StoreProductSuggestions
           onAdd={addProduct}
           onOpen={(product) => {
-            setCatalogSearchFocused(false);
-            openProduct(product);
+            void send({ productId: product.id, type: "PRODUTO" }).catch(() => {});
           }}
           products={catalogProductSuggestions}
           title={normalizedDraft ? "Produtos encontrados" : "Sugestoes da loja"}
@@ -501,30 +476,36 @@ export function StoreConversationScreen({ navigation, route }) {
       ) : null}
 
       <ChatComposer
-        accessory={!conversation?.isStore ? (
-          <Pressable
-            accessibilityRole="checkbox"
-            accessibilityState={{ checked: supportMode }}
-            onPress={() => setSupportMode((current) => !current)}
-            style={[styles.supportToggle, supportMode && styles.supportToggleActive]}
-          >
-            <Ionicons
-              color={supportMode ? colors.primaryDark : colors.textMuted}
-              name={supportMode ? "checkbox" : "square-outline"}
-              size={19}
-            />
-            <View style={styles.supportToggleCopy}>
-              <Text style={styles.supportToggleTitle}>Enviar como suporte</Text>
-              <Text style={styles.supportToggleText}>
-                {supportMode ? "Esta mensagem vai para os atendentes" : "Desmarcado: o campo pesquisa produtos"}
-              </Text>
-            </View>
-          </Pressable>
-        ) : (
+        accessory={conversation?.isStore ? (
           <View style={styles.searchComposerHint}>
             <Ionicons color={colors.primaryDark} name="chatbubbles-outline" size={15} />
             <Text style={styles.searchComposerHintText}>Voce pode conversar e oferecer ajuda a qualquer momento</Text>
           </View>
+        ) : (
+          <Pressable
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: supportMode }}
+            onPress={() => setSupportMode((current) => !current)}
+            style={({ pressed }) => [
+              styles.supportToggle,
+              supportMode && styles.supportToggleActive,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Ionicons
+              color={supportMode ? colors.primaryDark : colors.textMuted}
+              name={supportMode ? "checkbox" : "square-outline"}
+              size={21}
+            />
+            <View style={styles.supportToggleCopy}>
+              <Text style={styles.supportToggleTitle}>Enviar como suporte</Text>
+              <Text style={styles.supportToggleText}>
+                {supportMode
+                  ? "A loja recebera um aviso desta mensagem"
+                  : "Desmarcado: o campo pesquisa produtos sem notificar a loja"}
+              </Text>
+            </View>
+          </Pressable>
         )}
         draft={draft}
         onAttachmentError={setError}
@@ -544,16 +525,16 @@ export function StoreConversationScreen({ navigation, route }) {
         onBlur={() => setTimeout(() => setCatalogSearchFocused(false), 180)}
         onFocus={() => {
           setCatalogSearchFocused(true);
-          setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+          timeline.scrollToLatest(true);
         }}
-        onSend={!conversation?.isStore && !supportMode ? searchCatalog : send}
+        onSend={send}
         onSendAttachment={send}
         placeholder={
           conversation?.isStore
             ? "Escreva para o cliente"
             : supportMode
               ? "Escreva a mensagem para a loja"
-              : "Pesquise algo nesta loja"
+              : "Escreva ou pesquise nesta loja"
         }
         sending={sending}
         style={{ paddingBottom: Math.max(spacing.sm, insets.bottom + spacing.xs) }}
@@ -808,7 +789,14 @@ function CustomerCatalogModal({ onAddProduct, onClose, onOpenProduct, store, vis
   );
 }
 
-function MessageBubble({ accessToken, loading, message, onAddProduct, onOpenContent }) {
+function MessageBubble({
+  accessToken,
+  loading,
+  message,
+  onAddProduct,
+  onOpenContent,
+  onOpenSearchProduct,
+}) {
   if (message.author === "system" && message.content?.kind === "PRODUCT") {
     return (
       <View style={styles.journeyProduct}>
@@ -846,10 +834,14 @@ function MessageBubble({ accessToken, loading, message, onAddProduct, onOpenCont
           text={message.text}
           type={message.type}
         />
-        <Text style={styles.commercialTime}>{formatarHora(message.createdAt)}</Text>
+        <ChatMessageMeta createdAt={message.createdAt} isMine={message.isMine} readAt={message.readAt} />
       </View>
     );
   }
+
+  const searchProducts = message.content?.kind === "SEARCH"
+    ? message.content.products ?? []
+    : null;
 
   return (
     <View style={[styles.messageLine, message.isMine && styles.messageLineMine]}>
@@ -877,10 +869,67 @@ function MessageBubble({ accessToken, loading, message, onAddProduct, onOpenCont
           </View>
         ) : null}
         {message.text ? <Text style={[styles.messageText, message.isMine && styles.messageTextMine]}>{message.text}</Text> : null}
-        <Text style={[styles.messageTime, message.isMine && styles.messageTimeMine]}>
-          {formatarHora(message.createdAt)}
+        <ChatMessageMeta createdAt={message.createdAt} isMine={message.isMine} readAt={message.readAt} />
+      </View>
+      {searchProducts ? (
+        <ChatSearchResults
+          onAdd={onAddProduct}
+          onOpen={onOpenSearchProduct}
+          products={searchProducts}
+          total={message.content.productCount ?? searchProducts.length}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+function ChatSearchResults({ onAdd, onOpen, products, total }) {
+  return (
+    <View style={styles.chatSearchResults}>
+      <View style={styles.chatSearchHeading}>
+        <Ionicons color={colors.primaryDark} name="sparkles-outline" size={14} />
+        <Text style={styles.chatSearchTitle}>
+          {total > 0
+            ? `${total} produto${total === 1 ? "" : "s"} encontrado${total === 1 ? "" : "s"}`
+            : "Nenhum produto encontrado"}
         </Text>
       </View>
+      {products.length ? (
+        <View style={styles.chatSearchGrid}>
+          {products.slice(0, 4).map((product) => {
+            const imageUrl = resolveMediaUrl(product.imageUrl);
+            const soldOut = product.stockControlled && Number(product.stockQuantity ?? 0) <= 0;
+            return (
+              <View key={product.id} style={[styles.chatSearchProduct, soldOut && styles.customerProductDisabled]}>
+                <Pressable
+                  disabled={!onOpen || soldOut}
+                  onPress={() => onOpen(product)}
+                  style={({ pressed }) => [styles.chatSearchProductMain, pressed && styles.pressed]}
+                >
+                  <View style={styles.chatSearchProductImage}>
+                    {imageUrl ? (
+                      <Image source={{ uri: imageUrl }} style={styles.customerProductImageAsset} />
+                    ) : (
+                      <Ionicons color={colors.primaryDark} name="cube-outline" size={20} />
+                    )}
+                  </View>
+                  <Text numberOfLines={2} style={styles.chatSearchProductName}>{product.name}</Text>
+                  <Text style={styles.chatSearchProductPrice}>
+                    {formatarDinheiro(product.promotionalPriceCents ?? product.priceCents)}
+                  </Text>
+                </Pressable>
+                {!soldOut && onAdd ? (
+                  <View style={styles.chatSearchAdd}>
+                    <CartAddButton direction="up" name={product.name} onPress={() => onAdd(product)} size={28} />
+                  </View>
+                ) : null}
+              </View>
+            );
+          })}
+        </View>
+      ) : (
+        <Text style={styles.searchResponseText}>Tente outro nome ou veja o catalogo completo.</Text>
+      )}
     </View>
   );
 }
@@ -1324,6 +1373,73 @@ const styles = StyleSheet.create({
     fontFamily: fonts.extraBold,
     fontSize: typography.label,
   },
+  chatSearchAdd: {
+    bottom: spacing.xs,
+    position: "absolute",
+    right: spacing.xs,
+  },
+  chatSearchGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+  },
+  chatSearchHeading: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.xs,
+  },
+  chatSearchProduct: {
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    minHeight: 142,
+    overflow: "visible",
+    padding: spacing.xs,
+    position: "relative",
+    width: "48.5%",
+  },
+  chatSearchProductImage: {
+    alignItems: "center",
+    aspectRatio: 1.55,
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.sm,
+    justifyContent: "center",
+    overflow: "hidden",
+    width: "100%",
+  },
+  chatSearchProductMain: { flex: 1, gap: 3 },
+  chatSearchProductName: {
+    color: colors.textPrimary,
+    fontFamily: fonts.bold,
+    fontSize: 11,
+    lineHeight: 14,
+    paddingRight: spacing.xl,
+  },
+  chatSearchProductPrice: {
+    color: colors.primaryDark,
+    fontFamily: fonts.extraBold,
+    fontSize: 11,
+    paddingRight: spacing.xl,
+  },
+  chatSearchResults: {
+    alignSelf: "stretch",
+    backgroundColor: colors.cardMuted,
+    borderColor: colors.primaryLight,
+    borderRadius: radius.lg,
+    borderTopRightRadius: radius.sm,
+    borderWidth: 1,
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+    maxWidth: 390,
+    padding: spacing.sm,
+    width: "92%",
+  },
+  chatSearchTitle: {
+    color: colors.textPrimary,
+    fontFamily: fonts.extraBold,
+    fontSize: 11,
+  },
   compactProduct: {
     backgroundColor: colors.cardMuted,
     borderColor: colors.border,
@@ -1626,6 +1742,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     padding: spacing.lg,
   },
+  messagesBottom: { justifyContent: "flex-end" },
+  timeline: { flex: 1, position: "relative" },
   infoChip: {
     alignItems: "center",
     backgroundColor: colors.primarySoft,

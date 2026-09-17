@@ -19,10 +19,13 @@ import { AppButton } from "../components/AppButton";
 import { BackHeader } from "../components/BackHeader";
 import { ChatComposer } from "../components/ChatComposer";
 import { ChatAttachment } from "../components/ChatAttachment";
+import { ChatMessageMeta } from "../components/ChatMessageMeta";
+import { ChatScrollToLatestButton } from "../components/ChatScrollToLatestButton";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { StatePanel } from "../components/StatePanel";
 import { ShareAddressModal } from "./service/ShareAddressModal";
 import { useConversationRealtime } from "../hooks/useConversationRealtime";
+import { useChatTimeline } from "../hooks/useChatTimeline";
 import { getGeneratedChargeQr } from "../services/seller.api";
 import {
   acceptServiceConversation,
@@ -84,6 +87,10 @@ export function ServiceConversationScreen({ navigation, route }) {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [shareAddressOpen, setShareAddressOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  const timeline = useChatTimeline({
+    itemCount: conversation?.messages?.length ?? 0,
+    scrollRef,
+  });
 
   const latestProposal = useMemo(
     () => [...(conversation?.proposals ?? [])].reverse()[0] ?? null,
@@ -157,11 +164,11 @@ export function ServiceConversationScreen({ navigation, route }) {
   useEffect(() => {
     const eventName = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const subscription = Keyboard.addListener(eventName, () => {
-      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+      timeline.scrollToLatest(true);
     });
 
     return () => subscription.remove();
-  }, []);
+  }, [timeline.scrollToLatest]);
 
   const refreshConversation = useCallback(() => {
     load({ silent: true });
@@ -176,7 +183,6 @@ export function ServiceConversationScreen({ navigation, route }) {
       realtimeEvents.serviceChatUpdated,
       realtimeEvents.chargeUpdated,
     ],
-    ignoreReasons: ["read"],
     onUpdate: refreshConversation,
   });
 
@@ -561,32 +567,37 @@ export function ServiceConversationScreen({ navigation, route }) {
         </View>
       ) : null}
 
-      <ScrollView
-        automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
-        contentContainerStyle={styles.messages}
-        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-        keyboardShouldPersistTaps="handled"
-        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
-        ref={scrollRef}
-        showsVerticalScrollIndicator={false}
-        style={styles.messagesScroll}
-      >
-        {(conversation.messages ?? []).length ? (
-          (conversation.messages ?? []).map((message) => (
-            <MessageBubble accessToken={session.accessToken} key={message.id} message={message} />
-          ))
-        ) : (
-          <View style={styles.emptyChat}>
-            <View style={styles.emptyChatIcon}>
-              <Ionicons color={colors.primaryDark} name="chatbubbles-outline" size={25} />
+      <View style={styles.timeline}>
+        <ScrollView
+          automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+          contentContainerStyle={styles.messages}
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+          keyboardShouldPersistTaps="handled"
+          onContentSizeChange={timeline.onContentSizeChange}
+          onScroll={timeline.onScroll}
+          ref={scrollRef}
+          scrollEventThrottle={16}
+          showsVerticalScrollIndicator={false}
+          style={styles.messagesScroll}
+        >
+          {(conversation.messages ?? []).length ? (
+            (conversation.messages ?? []).map((message) => (
+              <MessageBubble accessToken={session.accessToken} key={message.id} message={message} />
+            ))
+          ) : (
+            <View style={styles.emptyChat}>
+              <View style={styles.emptyChatIcon}>
+                <Ionicons color={colors.primaryDark} name="chatbubbles-outline" size={25} />
+              </View>
+              <Text style={styles.emptyChatTitle}>Comece pelos detalhes</Text>
+              <Text style={styles.emptyChatText}>
+                Informe local, horario, o que precisa ser feito e envie fotos quando ajudar.
+              </Text>
             </View>
-            <Text style={styles.emptyChatTitle}>Comece pelos detalhes</Text>
-            <Text style={styles.emptyChatText}>
-              Informe local, horario, o que precisa ser feito e envie fotos quando ajudar.
-            </Text>
-          </View>
-        )}
-      </ScrollView>
+          )}
+        </ScrollView>
+        <ChatScrollToLatestButton onPress={timeline.scrollToLatest} unreadCount={timeline.unreadBelow} visible={!timeline.isAtBottom} />
+      </View>
 
       <ChatComposer
         disabled={!canChat}
@@ -595,23 +606,24 @@ export function ServiceConversationScreen({ navigation, route }) {
           <View style={styles.composerActions}>
             {!conversation.isSeller ? (
               <Pressable
-                accessibilityLabel="Compartilhar endereco"
+                accessibilityLabel="Enviar endereco de retirada, destino ou outro ponto da rota"
                 disabled={!canChat}
                 onPress={() => setShareAddressOpen(true)}
-                style={styles.photo}
+                style={styles.routeAddressAction}
               >
                 <Ionicons
                   color={canChat ? colors.primaryDark : colors.textMuted}
-                  name="location-outline"
-                  size={21}
+                  name="map-outline"
+                  size={18}
                 />
+                <Text style={[styles.routeAddressActionText, !canChat && styles.routeAddressActionTextDisabled]}>Endereco</Text>
               </Pressable>
             ) : null}
           </View>
         )}
         onChangeDraft={setDraft}
         onAttachmentError={setError}
-        onFocus={() => setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80)}
+        onFocus={() => timeline.scrollToLatest(true)}
         onSend={send}
         onSendAttachment={send}
         placeholder={canChat ? "Escreva uma mensagem" : isAwaitingServiceAcceptance ? "Chat aguardando aceite" : "Atendimento encerrado"}
@@ -682,7 +694,7 @@ function MessageBubble({ accessToken, message }) {
     <View style={[styles.messageLine, message.isMine && styles.messageLineMine]}>
       <View style={[styles.bubble, message.isMine && styles.mine]}>
         <ChatAttachment accessToken={accessToken} attachment={message.attachment} isMine={message.isMine} />
-        {message.imageUrl ? (
+        {message.imageUrl && !message.attachment ? (
           <Image
             source={{ uri: resolveMediaUrl(message.imageUrl) }}
             style={styles.messageImage}
@@ -693,9 +705,7 @@ function MessageBubble({ accessToken, message }) {
             {message.text}
           </Text>
         ) : null}
-        <Text style={[styles.messageTime, message.isMine && styles.mineTime]}>
-          {formatarHora(message.createdAt)}
-        </Text>
+        <ChatMessageMeta createdAt={message.createdAt} isMine={message.isMine} readAt={message.readAt} />
       </View>
     </View>
   );
@@ -743,9 +753,7 @@ function LocationMessageCard({ message }) {
             Referencia: {location.reference}
           </Text>
         ) : null}
-        <Text style={[styles.messageTime, message.isMine && styles.mineTime]}>
-          {formatarHora(message.createdAt)}
-        </Text>
+        <ChatMessageMeta createdAt={message.createdAt} isMine={message.isMine} readAt={message.readAt} />
       </View>
     </View>
   );
@@ -1291,8 +1299,9 @@ const styles = StyleSheet.create({
   messageLineMine: { alignItems: "flex-end" },
   messageText: { color: colors.textPrimary, fontFamily: fonts.regular, fontSize: typography.small, lineHeight: 20 },
   messageTime: { alignSelf: "flex-end", color: colors.textMuted, fontFamily: fonts.medium, fontSize: 9 },
-  messages: { flexGrow: 1, gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  messages: { flexGrow: 1, gap: spacing.sm, justifyContent: "flex-end", paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   messagesScroll: { flex: 1 },
+  timeline: { flex: 1, position: "relative" },
   mine: { backgroundColor: colors.primaryDark, borderBottomLeftRadius: radius.lg, borderBottomRightRadius: 4 },
   mineText: { color: colors.card },
   mineTime: { color: "#BDE5D6" },
@@ -1343,6 +1352,9 @@ const styles = StyleSheet.create({
   reviewPromptTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.small },
   reviewSaved: { alignItems: "center", backgroundColor: colors.primarySoft, flexDirection: "row", gap: spacing.xs, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
   reviewSavedText: { color: colors.primaryDark, flex: 1, fontFamily: fonts.medium, fontSize: typography.caption },
+  routeAddressAction: { alignItems: "center", backgroundColor: colors.primarySoft, borderColor: colors.primaryLight, borderRadius: radius.round, borderWidth: 1, flexDirection: "row", gap: 4, height: 40, justifyContent: "center", paddingHorizontal: spacing.sm },
+  routeAddressActionText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 10 },
+  routeAddressActionTextDisabled: { color: colors.textMuted },
   send: { alignItems: "center", backgroundColor: colors.primary, borderRadius: radius.md, height: 40, justifyContent: "center", width: 40 },
   sendDisabled: { backgroundColor: colors.textMuted },
   serviceName: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: 10, textTransform: "uppercase" },

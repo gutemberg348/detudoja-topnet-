@@ -1,3 +1,5 @@
+import { File } from "expo-file-system";
+import { Platform } from "react-native";
 import { apiRequest } from "./api";
 
 function appendImage(body, field, image) {
@@ -7,6 +9,11 @@ function appendImage(body, field, image) {
 
   if (image.file) {
     body.append(field, image.file, filename);
+    return;
+  }
+
+  if (Platform.OS !== "web") {
+    body.append(field, new File(image.uri), filename);
     return;
   }
 

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { getCustomerOrders } from "../../services/orders.api";
 import { getPersonalChats } from "../../services/personal-chats.api";
 import { getRealtimeSocket, realtimeEvents } from "../../services/realtime";
+import { getSellerServices, getServiceConversations, heartbeatSellerServices } from "../../services/service-chats.api";
 import { getStoreConversations } from "../../services/store-chats.api";
 
 function serializeOrderConversation(order) {
@@ -44,6 +45,8 @@ export function useHomeConversations(accessToken) {
   const [orders, setOrders] = useState([]);
   const [personalChats, setPersonalChats] = useState([]);
   const [pendingFriendRequests, setPendingFriendRequests] = useState(0);
+  const [sellerServices, setSellerServices] = useState([]);
+  const [serviceConversations, setServiceConversations] = useState([]);
   const [storeConversations, setStoreConversations] = useState([]);
 
   const load = useCallback(async () => {
@@ -51,15 +54,20 @@ export function useHomeConversations(accessToken) {
       setOrders([]);
       setPersonalChats([]);
       setPendingFriendRequests(0);
+      setSellerServices([]);
+      setServiceConversations([]);
       setStoreConversations([]);
       setIsLoading(false);
       return;
     }
 
-    const [ordersResult, storesResult, personalResult] = await Promise.allSettled([
+    await heartbeatSellerServices(accessToken).catch(() => {});
+    const [ordersResult, storesResult, personalResult, servicesResult, serviceConversationsResult] = await Promise.allSettled([
       getCustomerOrders(accessToken),
       getStoreConversations(accessToken),
       getPersonalChats(accessToken),
+      getSellerServices(accessToken),
+      getServiceConversations(accessToken),
     ]);
 
     if (ordersResult.status === "fulfilled") {
@@ -77,6 +85,14 @@ export function useHomeConversations(accessToken) {
           (request) => request.invitationDirection === "incoming",
         ).length,
       );
+    }
+
+    if (servicesResult.status === "fulfilled") {
+      setSellerServices(servicesResult.value.services ?? []);
+    }
+
+    if (serviceConversationsResult.status === "fulfilled") {
+      setServiceConversations(serviceConversationsResult.value.conversations ?? []);
     }
 
     setIsLoading(false);
@@ -102,6 +118,10 @@ export function useHomeConversations(accessToken) {
     socket?.on(realtimeEvents.storeChatCreated, load);
     socket?.on(realtimeEvents.storeChatMessageCreated, load);
     socket?.on(realtimeEvents.storeChatUpdated, load);
+    socket?.on(realtimeEvents.serviceAvailabilityUpdated, load);
+    socket?.on(realtimeEvents.serviceChatCreated, load);
+    socket?.on(realtimeEvents.serviceChatMessageCreated, load);
+    socket?.on(realtimeEvents.serviceChatUpdated, load);
 
     return () => {
       socket?.off(realtimeEvents.orderCreated, load);
@@ -113,6 +133,10 @@ export function useHomeConversations(accessToken) {
       socket?.off(realtimeEvents.storeChatCreated, load);
       socket?.off(realtimeEvents.storeChatMessageCreated, load);
       socket?.off(realtimeEvents.storeChatUpdated, load);
+      socket?.off(realtimeEvents.serviceAvailabilityUpdated, load);
+      socket?.off(realtimeEvents.serviceChatCreated, load);
+      socket?.off(realtimeEvents.serviceChatMessageCreated, load);
+      socket?.off(realtimeEvents.serviceChatUpdated, load);
     };
   }, [accessToken, isFocused, load]);
 
@@ -132,5 +156,16 @@ export function useHomeConversations(accessToken) {
     pendingFriendRequests,
   );
 
-  return { conversations, isLoading, personalUnreadCount };
+  const courierOnline = sellerServices.some((service) => (
+    service.available
+    && (service.requiresCourierProfile || service.operationalType === "ENTREGA_LOCAL")
+  ));
+  const courierConversations = serviceConversations
+    .filter((conversation) => (
+      conversation.isSeller
+      && conversation.serviceType?.operationalType === "ENTREGA_LOCAL"
+    ))
+    .sort((first, second) => new Date(second.updatedAt ?? 0) - new Date(first.updatedAt ?? 0));
+
+  return { conversations, courierConversations, courierOnline, isLoading, personalUnreadCount };
 }

@@ -934,7 +934,9 @@ export const sellerStyles = StyleSheet.create({
     width: 42,
   },
   orderChatBody: {
+    flexGrow: 1,
     gap: 10,
+    justifyContent: "flex-end",
     padding: spacing.sm,
   },
   orderChatBubbleSpacer: {
@@ -989,6 +991,7 @@ export const sellerStyles = StyleSheet.create({
     backgroundColor: colors.card,
     borderRadius: 18,
     gap: spacing.md,
+    height: "92%",
     maxHeight: "92%",
     maxWidth: 520,
     padding: spacing.md,
@@ -1000,8 +1003,13 @@ export const sellerStyles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radius.lg,
     borderWidth: 1,
-    flexShrink: 1,
+    flex: 1,
     minHeight: 96,
+  },
+  orderChatTimeline: {
+    flex: 1,
+    minHeight: 96,
+    position: "relative",
   },
   orderChatSend: {
     alignItems: "center",

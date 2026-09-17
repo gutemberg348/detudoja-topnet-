@@ -41,7 +41,19 @@
       [
         "expo-image-picker",
         {
+          "cameraPermission": "O Brasil Cashback usa a camera para tirar fotos e enviar no chat.",
           "photosPermission": "O Brasil Cashback acessa suas fotos e videos para completar cadastros e enviar arquivos no chat."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "O Brasil Cashback acessa sua galeria somente quando voce escolhe uma midia.",
+          "savePhotosPermission": "O Brasil Cashback salva na galeria apenas as fotos que voce mandar baixar.",
+          "granularPermissions": [
+            "photo",
+            "video"
+          ]
         }
       ],
       [

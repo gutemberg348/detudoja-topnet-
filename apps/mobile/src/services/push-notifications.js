@@ -1,18 +1,30 @@
 import Constants from "expo-constants";
 import * as Device from "expo-device";
-import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import { registerExpoPushToken } from "./notifications.api";
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+const isExpoGo = Constants.appOwnership === "expo"
+  || Constants.executionEnvironment === "storeClient";
+let notificationsPromise = null;
+
+function getNotifications() {
+  if (isExpoGo || Platform.OS === "web") return Promise.resolve(null);
+  if (!notificationsPromise) {
+    notificationsPromise = import("expo-notifications").then((Notifications) => {
+      Notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldPlaySound: true,
+          shouldSetBadge: false,
+          shouldShowBanner: true,
+          shouldShowList: true,
+        }),
+      });
+      return Notifications;
+    });
+  }
+  return notificationsPromise;
+}
 
 function easProjectId() {
   return Constants.easConfig?.projectId
@@ -22,7 +34,9 @@ function easProjectId() {
 }
 
 export async function registerDeviceForPushNotifications(accessToken) {
-  if (Platform.OS === "web" || !Device.isDevice || !accessToken) return null;
+  if (isExpoGo || Platform.OS === "web" || !Device.isDevice || !accessToken) return null;
+  const Notifications = await getNotifications();
+  if (!Notifications) return null;
 
   if (Platform.OS === "android") {
     await Notifications.setNotificationChannelAsync("courier-calls", {
@@ -49,12 +63,27 @@ export async function registerDeviceForPushNotifications(accessToken) {
 }
 
 export function subscribePushNotificationResponses(onResponse) {
-  return Notifications.addNotificationResponseReceivedListener((response) => {
-    onResponse(response.notification.request.content.data ?? {});
+  let active = true;
+  let subscription = null;
+
+  void getNotifications().then((Notifications) => {
+    if (!active || !Notifications) return;
+    subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      onResponse(response.notification.request.content.data ?? {});
+    });
   });
+
+  return {
+    remove() {
+      active = false;
+      subscription?.remove();
+    },
+  };
 }
 
 export async function getInitialPushNotificationData() {
+  const Notifications = await getNotifications();
+  if (!Notifications) return null;
   const response = await Notifications.getLastNotificationResponseAsync();
   return response?.notification.request.content.data ?? null;
 }

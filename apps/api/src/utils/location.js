@@ -45,10 +45,18 @@ export async function getUserBaseAddress(database, userId) {
 
 export async function requireUserBaseAddress(database, userId) {
   const address = await getUserBaseAddress(database, userId);
+  const isComplete = address && [
+    address.cep,
+    address.bairro,
+    address.rua,
+    address.numero,
+    address.cidade,
+    address.estado,
+  ].every((value) => String(value ?? "").trim());
 
-  if (!address) {
+  if (!isComplete) {
     throw new AppError(
-      "Complete seu CEP e endereco no perfil antes de usar o comercio da sua cidade",
+      "Informe seu CEP e endereco nesta etapa para continuar",
       428,
     );
   }

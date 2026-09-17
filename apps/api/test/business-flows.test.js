@@ -457,7 +457,7 @@ test("CPF monthly limit is shared by stores and autonomous sales and reserves pe
   }
 });
 
-test("store journey is visible and support is marked per customer message", async () => {
+test("store journey, persistent search and customer product cards share one chat", async () => {
   await assert.rejects(
     openStoreConversation(state.seller.id, state.store.id),
     (error) => error.statusCode === 409
@@ -466,6 +466,17 @@ test("store journey is visible and support is marked per customer message", asyn
 
   const opened = await openStoreConversation(state.buyer.id, state.store.id);
   assert.equal(opened.conversation.messages[0].text, "Cliente entrou na loja e iniciou a navegacao.");
+
+  const browsingBeforeSupport = await createStoreConversationMessage(
+    state.buyer.id,
+    opened.conversation.id,
+    { message: state.product.nome, searchCatalog: true },
+  );
+  assert.equal(browsingBeforeSupport.message.content.kind, "SEARCH");
+  const browsingNotification = await prisma.conversaLoja.findUniqueOrThrow({
+    where: { id: opened.conversation.id },
+  });
+  assert.equal(browsingNotification.nao_lidas_loja, 0);
 
   await createStoreConversationMessage(state.seller.id, opened.conversation.id, {
     message: "Posso ajudar com algum produto?",
@@ -480,6 +491,10 @@ test("store journey is visible and support is marked per customer message", asyn
     support: true,
   });
   assert.equal(support.message.content.kind, "SUPPORT");
+  const supportNotification = await prisma.conversaLoja.findUniqueOrThrow({
+    where: { id: opened.conversation.id },
+  });
+  assert.equal(supportNotification.nao_lidas_loja, 1);
 
   await assert.rejects(
     getStoreConversation(state.outsider.id, opened.conversation.id),
@@ -492,12 +507,43 @@ test("store journey is visible and support is marked per customer message", asyn
   ), true);
   assert.equal(sellerView.conversation.messages.at(-1).text, "Mensagem do comprador");
   assert.equal(sellerView.conversation.messages.at(-1).content.kind, "SUPPORT");
+  assert.ok(sellerView.conversation.messages.at(-1).readAt);
+  const clearedSupportNotification = await prisma.conversaLoja.findUniqueOrThrow({
+    where: { id: opened.conversation.id },
+  });
+  assert.equal(clearedSupportNotification.nao_lidas_loja, 0);
+
+  const search = await createStoreConversationMessage(state.buyer.id, opened.conversation.id, {
+    message: state.product.nome,
+    searchCatalog: true,
+  });
+  assert.equal(search.message.content.kind, "SEARCH");
+  assert.equal(search.message.content.products[0].id, state.product.id);
+  assert.equal(search.message.content.productCount >= 1, true);
+  const searchNotification = await prisma.conversaLoja.findUniqueOrThrow({
+    where: { id: opened.conversation.id },
+  });
+  assert.equal(searchNotification.nao_lidas_loja, 0);
+
+  const selectedProduct = await createStoreConversationMessage(
+    state.buyer.id,
+    opened.conversation.id,
+    { productId: state.product.id, type: "PRODUTO" },
+  );
+  assert.equal(selectedProduct.message.author, "customer");
+  assert.equal(selectedProduct.message.content.kind, "PRODUCT");
+  assert.equal(selectedProduct.message.content.product.id, state.product.id);
+  const productNotification = await prisma.conversaLoja.findUniqueOrThrow({
+    where: { id: opened.conversation.id },
+  });
+  assert.equal(productNotification.nao_lidas_loja, 0);
 
   await createStoreConversationMessage(state.seller.id, opened.conversation.id, {
     message: "Resposta da loja",
   });
   const buyerView = await getStoreConversation(state.buyer.id, opened.conversation.id);
   assert.equal(buyerView.conversation.messages.at(-1).text, "Resposta da loja");
+  assert.ok(buyerView.conversation.messages.at(-1).readAt);
   assert.equal(buyerView.conversation.unreadCount, 0);
 });
 
@@ -651,7 +697,9 @@ test("wallet checkout creates an order chat visible only to buyer and store", as
 
   assert.equal(created.order.payment.status, "PAGO");
   assert.equal(buyerMessages.messages.at(-1).text, "Resposta no pedido");
+  assert.ok(buyerMessages.messages.at(-1).readAt);
   assert.equal(sellerMessages.messages.at(-1).text, "Resposta no pedido");
+  assert.ok(sellerMessages.messages.find((message) => message.text === "Duvida do pedido")?.readAt);
   await assert.rejects(
     listCustomerOrderMessages(state.outsider.id, orderId),
     (error) => error.statusCode === 404,

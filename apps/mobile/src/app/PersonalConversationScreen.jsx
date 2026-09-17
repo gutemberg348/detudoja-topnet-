@@ -19,7 +19,10 @@ import { AppButton } from "../components/AppButton";
 import { BackHeader } from "../components/BackHeader";
 import { ChatComposer } from "../components/ChatComposer";
 import { ChatAttachment } from "../components/ChatAttachment";
+import { ChatMessageMeta } from "../components/ChatMessageMeta";
+import { ChatScrollToLatestButton } from "../components/ChatScrollToLatestButton";
 import { ContactAvatar } from "../components/ContactAvatar";
+import { useChatTimeline } from "../hooks/useChatTimeline";
 import {
   blockPersonalConversation,
   getPersonalConversation,
@@ -43,6 +46,10 @@ export function PersonalConversationScreen({ navigation, route }) {
   const [isLoading, setIsLoading] = useState(!initialConversation?.messages);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState("");
+  const timeline = useChatTimeline({
+    itemCount: conversation?.messages?.length ?? 0,
+    scrollRef: listRef,
+  });
 
   const load = useCallback(async () => {
     if (!session?.accessToken || !conversationId) return;
@@ -77,12 +84,6 @@ export function PersonalConversationScreen({ navigation, route }) {
       socket?.off(realtimeEvents.personalChatUpdated, onMessage);
     };
   }, [conversationId, load, session?.accessToken]);
-
-  useEffect(() => {
-    if (conversation?.messages?.length) {
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
-    }
-  }, [conversation?.messages?.length]);
 
   async function sendMessage(payload = null) {
     const message = payload?.message ?? draft.trim();
@@ -199,34 +200,39 @@ export function PersonalConversationScreen({ navigation, route }) {
             <ActivityIndicator color={colors.primary} size="large" />
           </View>
         ) : (
-          <FlatList
-            automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
-            contentContainerStyle={styles.messages}
-            data={conversation?.messages ?? []}
-            keyExtractor={(item) => String(item.id)}
-            keyboardDismissMode="interactive"
-            keyboardShouldPersistTaps="handled"
-            ListEmptyComponent={(
-              <View style={styles.empty}>
-                <View style={styles.emptyIcon}>
-                  <Ionicons color={colors.primaryDark} name="chatbubble-ellipses-outline" size={27} />
+          <View style={styles.timeline}>
+            <FlatList
+              automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+              contentContainerStyle={styles.messages}
+              data={conversation?.messages ?? []}
+              keyExtractor={(item) => String(item.id)}
+              keyboardDismissMode="interactive"
+              keyboardShouldPersistTaps="handled"
+              ListEmptyComponent={(
+                <View style={styles.empty}>
+                  <View style={styles.emptyIcon}>
+                    <Ionicons color={colors.primaryDark} name="chatbubble-ellipses-outline" size={27} />
+                  </View>
+                  <Text style={styles.emptyTitle}>Comece a conversa</Text>
+                  <Text style={styles.emptyText}>Agora voces podem trocar mensagens dentro do Brasil Cashback.</Text>
                 </View>
-                <Text style={styles.emptyTitle}>Comece a conversa</Text>
-                <Text style={styles.emptyText}>Agora voces podem trocar mensagens dentro do Brasil Cashback.</Text>
-              </View>
-            )}
-            onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
-            ref={listRef}
-            renderItem={({ item }) => <MessageBubble accessToken={session.accessToken} message={item} />}
-            style={styles.list}
-          />
+              )}
+              onContentSizeChange={timeline.onContentSizeChange}
+              onScroll={timeline.onScroll}
+              ref={listRef}
+              renderItem={({ item }) => <MessageBubble accessToken={session.accessToken} message={item} />}
+              scrollEventThrottle={16}
+              style={styles.list}
+            />
+            <ChatScrollToLatestButton onPress={timeline.scrollToLatest} unreadCount={timeline.unreadBelow} visible={!timeline.isAtBottom} />
+          </View>
         )}
 
         <ChatComposer
           draft={draft}
           onAttachmentError={setError}
           onChangeDraft={setDraft}
-          onFocus={() => setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 120)}
+          onFocus={() => timeline.scrollToLatest(true)}
           onSend={sendMessage}
           onSendAttachment={sendMessage}
           placeholder="Escreva uma mensagem"
@@ -263,18 +269,12 @@ export function PersonalConversationScreen({ navigation, route }) {
 }
 
 function MessageBubble({ accessToken, message }) {
-  const time = new Date(message.createdAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
   return (
     <View style={[styles.messageLine, message.isMine && styles.messageLineMine]}>
       <View style={[styles.bubble, message.isMine && styles.bubbleMine]}>
         <ChatAttachment accessToken={accessToken} attachment={message.attachment} isMine={message.isMine} />
         {message.text ? <Text style={[styles.messageText, message.isMine && styles.messageTextMine]}>{message.text}</Text> : null}
-        <View style={styles.messageMeta}>
-          <Text style={[styles.messageTime, message.isMine && styles.messageTimeMine]}>{time}</Text>
-          {message.isMine ? (
-            <Ionicons color={message.readAt ? "#A7F3D0" : "#BDE5D6"} name="checkmark-done" size={13} />
-          ) : null}
-        </View>
+        <ChatMessageMeta createdAt={message.createdAt} isMine={message.isMine} readAt={message.readAt} />
       </View>
     </View>
   );
@@ -300,12 +300,9 @@ const styles = StyleSheet.create({
   loading: { alignItems: "center", flex: 1, justifyContent: "center" },
   messageLine: { alignItems: "flex-start" },
   messageLineMine: { alignItems: "flex-end" },
-  messageMeta: { alignItems: "center", alignSelf: "flex-end", flexDirection: "row", gap: 3 },
   messageText: { color: colors.textPrimary, fontFamily: fonts.regular, fontSize: typography.small, lineHeight: 20 },
   messageTextMine: { color: colors.card },
-  messageTime: { color: colors.textMuted, fontFamily: fonts.medium, fontSize: 9 },
-  messageTimeMine: { color: "#BDE5D6" },
-  messages: { flexGrow: 1, gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  messages: { flexGrow: 1, gap: spacing.sm, justifyContent: "flex-end", paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   modalCard: { alignItems: "stretch", backgroundColor: colors.card, borderRadius: radius.lg, gap: spacing.md, maxWidth: 400, padding: spacing.xl, width: "92%", ...shadowSoft },
   modalIcon: { alignItems: "center", alignSelf: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 54, justifyContent: "center", width: 54 },
   modalOverlay: { alignItems: "center", backgroundColor: "rgba(8, 24, 18, 0.52)", flex: 1, justifyContent: "center", padding: spacing.lg },
@@ -314,4 +311,5 @@ const styles = StyleSheet.create({
   personId: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption, marginTop: 2 },
   personName: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.label },
   safeArea: { backgroundColor: colors.background, flex: 1 },
+  timeline: { flex: 1, position: "relative" },
 });

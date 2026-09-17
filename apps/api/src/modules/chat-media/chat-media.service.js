@@ -47,7 +47,7 @@ export function serializeChatAttachment(message, scope, metadata = null) {
     const longitude = Number(attachment.longitude);
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
     return {
-      label: attachment.label || "Localizacao atual",
+      label: attachment.label || "Ponto GPS atual",
       latitude,
       longitude,
       mapsUrl: `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`,
@@ -77,7 +77,7 @@ export async function savePrivateChatAttachment(file, data, { conversationId, sc
     }
     return {
       attachment: {
-        label: String(data.locationLabel ?? "Localizacao atual").trim().slice(0, 120),
+        label: String(data.locationLabel ?? "Ponto GPS atual").trim().slice(0, 120),
         latitude,
         longitude,
         type,

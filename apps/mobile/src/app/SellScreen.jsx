@@ -1,5 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useNavigation } from "@react-navigation/native";
+import { useIsFocused, useNavigation } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -84,6 +84,7 @@ import {
   subscribeStoreConversationRead,
 } from "../services/store-chats.api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
+import { updateCurrentUser } from "../services/users.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { ApiError } from "../services/api";
 import { colors } from "../utils/theme";
@@ -100,6 +101,7 @@ function countNewStoreOrders(store) {
 
 export function SellScreen() {
   const navigation = useNavigation();
+  const isFocused = useIsFocused();
   const { session } = useAuthStore();
   const [chargeForm, setChargeForm] = useState({ amount: "", description: "", title: "" });
   const [chargeStore, setChargeStore] = useState(null);
@@ -144,6 +146,7 @@ export function SellScreen() {
   const [selectedStore, setSelectedStore] = useState(null);
   const hasActivePayoutAccount = payoutAccount?.status === "ATIVA";
   const guideCheckedUserRef = useRef(null);
+  const storeChatRefreshTimerRef = useRef(null);
 
   const autonomousSegment = useMemo(
     () => segments.find((segment) => segment.slug === "venda-autonoma"),
@@ -206,6 +209,28 @@ export function SellScreen() {
     }
   }, [session?.accessToken]);
 
+  const loadStoreChatConversations = useCallback(async () => {
+    if (!session?.accessToken) return;
+    try {
+      const response = await getStoreConversations(session.accessToken, { scope: "seller" });
+      setStoreConversations(response.conversations ?? []);
+    } catch {
+      // A proxima atualizacao em tempo real ou o foco da tela tenta novamente.
+    }
+  }, [session?.accessToken]);
+
+  const scheduleStoreChatRefresh = useCallback(() => {
+    if (storeChatRefreshTimerRef.current) clearTimeout(storeChatRefreshTimerRef.current);
+    storeChatRefreshTimerRef.current = setTimeout(() => {
+      storeChatRefreshTimerRef.current = null;
+      loadStoreChatConversations();
+    }, 250);
+  }, [loadStoreChatConversations]);
+
+  useEffect(() => () => {
+    if (storeChatRefreshTimerRef.current) clearTimeout(storeChatRefreshTimerRef.current);
+  }, []);
+
   useEffect(() => {
     loadSeller();
   }, [loadSeller]);
@@ -237,28 +262,29 @@ export function SellScreen() {
   }, [loadSeller, navigation]);
 
   useEffect(() => {
-    if (!session?.accessToken) return undefined;
+    if (!session?.accessToken || !isFocused) return undefined;
     const socket = getRealtimeSocket(session.accessToken);
     const refresh = () => loadSeller({ silent: true });
+    const refreshStoreChats = () => scheduleStoreChatRefresh();
     socket?.on(realtimeEvents.serviceChatCreated, refresh);
     socket?.on(realtimeEvents.serviceChatMessageCreated, refresh);
     socket?.on(realtimeEvents.serviceChatUpdated, refresh);
-    socket?.on(realtimeEvents.storeChatCreated, refresh);
-    socket?.on(realtimeEvents.storeChatMessageCreated, refresh);
-    socket?.on(realtimeEvents.storeChatUpdated, refresh);
+    socket?.on(realtimeEvents.storeChatCreated, refreshStoreChats);
+    socket?.on(realtimeEvents.storeChatMessageCreated, refreshStoreChats);
+    socket?.on(realtimeEvents.storeChatUpdated, refreshStoreChats);
     socket?.on(realtimeEvents.chargeUpdated, refresh);
     socket?.on(realtimeEvents.walletUpdated, refresh);
     return () => {
       socket?.off(realtimeEvents.serviceChatCreated, refresh);
       socket?.off(realtimeEvents.serviceChatMessageCreated, refresh);
       socket?.off(realtimeEvents.serviceChatUpdated, refresh);
-      socket?.off(realtimeEvents.storeChatCreated, refresh);
-      socket?.off(realtimeEvents.storeChatMessageCreated, refresh);
-      socket?.off(realtimeEvents.storeChatUpdated, refresh);
+      socket?.off(realtimeEvents.storeChatCreated, refreshStoreChats);
+      socket?.off(realtimeEvents.storeChatMessageCreated, refreshStoreChats);
+      socket?.off(realtimeEvents.storeChatUpdated, refreshStoreChats);
       socket?.off(realtimeEvents.chargeUpdated, refresh);
       socket?.off(realtimeEvents.walletUpdated, refresh);
     };
-  }, [loadSeller, session?.accessToken]);
+  }, [isFocused, loadSeller, scheduleStoreChatRefresh, session?.accessToken]);
 
   useEffect(
     () => subscribeStoreConversationRead(({ conversationId, scope }) => {
@@ -660,10 +686,21 @@ export function SellScreen() {
     setError("");
 
     try {
-      const response = await createSellerStore(session.accessToken, {
+      const payload = {
         ...storeForm,
         deliveryFeeCents: parseMoneyToCents(storeForm.deliveryFee),
-      });
+      };
+      let response;
+      try {
+        response = await createSellerStore(session.accessToken, payload);
+      } catch (requestError) {
+        if (!(requestError instanceof ApiError) || requestError.status !== 428) throw requestError;
+        await updateCurrentUser(session.accessToken, {
+          address: storeForm.address,
+          location: { city: storeForm.address.city, state: storeForm.address.state },
+        });
+        response = await createSellerStore(session.accessToken, payload);
+      }
       setStores((current) => [response.store, ...current]);
       setSelectedStore(response.store);
       setStoreOpen(false);

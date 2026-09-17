@@ -136,6 +136,13 @@ export function serializeOrderMessage(message) {
     id: message.id,
     kind,
     metadata: message.metadata_json ?? null,
+    readAt: (
+      message.origem === "CLIENTE"
+        ? message.lido_loja_em
+        : ["LOJA", "ADMIN"].includes(message.origem)
+          ? message.lido_cliente_em
+          : null
+    )?.toISOString() ?? null,
     source: message.origem,
     text: message.mensagem,
     time: message.criado_em.toISOString(),

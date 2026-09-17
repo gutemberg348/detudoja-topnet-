@@ -167,9 +167,10 @@ export function normalizeSellerOrderMessage(message) {
 
   return {
     author,
-    attachment: message.attachment,
-    id: message.id,
-    text: message.text,
+      attachment: message.attachment,
+      id: message.id,
+      readAt: message.readAt,
+      text: message.text,
     time: message.time ?? message.createdAt,
     title: message.title ?? (author === "customer" ? "Cliente" : author === "system" ? "Atualizacao" : "Loja"),
   };

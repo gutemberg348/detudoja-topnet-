@@ -818,7 +818,7 @@ async function findCustomerOrder(userId, orderId, select = { id: true, loja_id: 
 export async function listCustomerOrderMessages(userId, orderId) {
   const order = await findCustomerOrder(userId, orderId);
 
-  await ordersRepository.updateOrderMessages({
+  const markedAsRead = await ordersRepository.updateOrderMessages({
     data: { lido_cliente_em: new Date() },
     where: {
       lido_cliente_em: null,
@@ -826,6 +826,14 @@ export async function listCustomerOrderMessages(userId, orderId) {
       pedido_id: order.id,
     },
   });
+
+  if (markedAsRead.count > 0) {
+    const realtimeOrder = await ordersRepository.findUniqueOrder({
+      include: orderInclude,
+      where: { id: order.id },
+    });
+    emitOrderStatusUpdated(serializeOrder(realtimeOrder, { audience: "customer" }));
+  }
 
   const messages = await ordersRepository.findManyOrderMessages({
     include: orderMessageInclude,

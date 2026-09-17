@@ -139,12 +139,14 @@ export const storeChatsRepository = {
       });
       await transaction.conversaLoja.update({
         data: {
-          ...(scope === "customer"
-            ? { nao_lidas_loja: { increment: 1 } }
-            : { nao_lidas_cliente: { increment: 1 } }),
-          ...(commercialMessage.isSupport
-            ? { atendimento_solicitado_em: now }
-            : {}),
+          ...(scope === "seller"
+            ? { nao_lidas_cliente: { increment: 1 } }
+            : commercialMessage.isSupport
+              ? {
+                  atendimento_solicitado_em: now,
+                  nao_lidas_loja: { increment: 1 },
+                }
+              : {}),
           ultima_mensagem_em: now,
         },
         where: { id: access.conversation.id },
@@ -254,10 +256,11 @@ export const storeChatsRepository = {
         await transaction.conversaLoja.update({
           data: scope === "customer"
             ? { nao_lidas_cliente: { decrement: readMessages.count } }
-            : { nao_lidas_loja: { decrement: readMessages.count } },
+            : { nao_lidas_loja: 0 },
           where: { id: conversationId },
         });
       }
+      return readMessages.count;
     });
   },
 };

@@ -20,6 +20,7 @@ import {
   updateSellerService,
 } from "../services/service-chats.api";
 import { useAuthStore } from "../stores/useAuthStore";
+import { getCurrentUserAddresses, updateCurrentUser } from "../services/users.api";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
 import { CourierRegistrationModal } from "./service/CourierRegistrationModal";
 import { RegisterServiceModal } from "./service/RegisterServiceModal";
@@ -47,6 +48,7 @@ function conversationStatus(conversation) {
 export function ServiceDeskScreen({ navigation }) {
   const { session } = useAuthStore();
   const [conversations, setConversations] = useState([]);
+  const [accountAddress, setAccountAddress] = useState(null);
   const [courierRequests, setCourierRequests] = useState([]);
   const [courierError, setCourierError] = useState("");
   const [courierDashboard, setCourierDashboard] = useState(null);
@@ -77,12 +79,17 @@ export function ServiceDeskScreen({ navigation }) {
     () => services.filter((service) => service.enabled),
     [services],
   );
-  const courierCalls = useMemo(
+  const courierConversations = useMemo(
     () => conversations.filter((conversation) => (
       conversation.serviceType?.operationalType === "ENTREGA_LOCAL"
-      && ["ABERTA", "ACORDADA", "AGUARDANDO_CONFIRMACAO"].includes(conversation.status)
     )),
     [conversations],
+  );
+  const courierCalls = useMemo(
+    () => courierConversations.filter((conversation) => (
+      ["ABERTA", "ACORDADA", "AGUARDANDO_CONFIRMACAO"].includes(conversation.status)
+    )),
+    [courierConversations],
   );
   const openCalls = useMemo(
     () => conversations.filter((conversation) => (
@@ -107,11 +114,12 @@ export function ServiceDeskScreen({ navigation }) {
     }
 
     try {
-      const [profileResponse, servicesResponse, conversationsResponse, requestsResponse] = await Promise.all([
+      const [profileResponse, servicesResponse, conversationsResponse, requestsResponse, addressesResponse] = await Promise.all([
         getSellerProfile(session.accessToken),
         getSellerServices(session.accessToken),
         getServiceConversations(session.accessToken),
         getCourierRequests(session.accessToken),
+        getCurrentUserAddresses(session.accessToken),
       ]);
       setProfile(profileResponse.profile ?? null);
       setCourierProfile(servicesResponse.courierProfile ?? null);
@@ -119,6 +127,7 @@ export function ServiceDeskScreen({ navigation }) {
       setConversations((conversationsResponse.conversations ?? []).filter((conversation) => conversation.isSeller));
       setCourierRequests(requestsResponse.requests ?? []);
       setCourierDashboard(requestsResponse.dashboard ?? null);
+      setAccountAddress(addressesResponse.addresses?.[0] ?? null);
     } catch (requestError) {
       if (!silent) setError(requestError.message ?? "Nao foi possivel carregar seus servicos.");
     } finally {
@@ -237,16 +246,24 @@ export function ServiceDeskScreen({ navigation }) {
     setCourierError("");
 
     try {
+      const { accountAddress: inlineAddress, ...profileData } = data;
+      if (inlineAddress) {
+        const addressResponse = await updateCurrentUser(session.accessToken, {
+          address: inlineAddress,
+          location: { city: inlineAddress.city, state: inlineAddress.state },
+        });
+        setAccountAddress(addressResponse.user?.addresses?.[0] ?? { ...inlineAddress, complete: true });
+      }
       const registration = {
-        color: data.color,
-        driverLicense: data.driverLicense,
-        plate: data.plate,
-        vehicleKind: data.vehicleKind,
-        vehicleModel: data.vehicleModel,
+        color: profileData.color,
+        driverLicense: profileData.driverLicense,
+        plate: profileData.plate,
+        vehicleKind: profileData.vehicleKind,
+        vehicleModel: profileData.vehicleModel,
       };
 
       if (!pendingCourierService || pendingCourierService.requiresCourierProfile) {
-        const response = await saveCourierProfile(session.accessToken, data);
+        const response = await saveCourierProfile(session.accessToken, profileData);
         setCourierProfile(response.profile);
       }
 
@@ -396,6 +413,25 @@ export function ServiceDeskScreen({ navigation }) {
                 onOpenRide={openCourierRide}
                 pendingCount={courierRequests.length}
               />
+              {courierConversations.length ? (
+                <>
+                  <SectionTitle
+                    icon="chatbubbles-outline"
+                    subtitle="Corridas ativas e historico continuam aqui mesmo quando voce ficar offline"
+                    title="Conversas do motoboy"
+                    value={courierConversations.length}
+                  />
+                  <View style={styles.callsList}>
+                    {courierConversations.map((conversation) => (
+                      <ServiceCallCard
+                        conversation={conversation}
+                        key={conversation.id}
+                        onPress={() => navigation.navigate("ServiceConversation", { conversation })}
+                      />
+                    ))}
+                  </View>
+                </>
+              ) : null}
             </>
           ) : null}
 
@@ -467,6 +503,7 @@ export function ServiceDeskScreen({ navigation }) {
         </>
       ) : null}
       <CourierRegistrationModal
+        accountAddress={accountAddress}
         error={courierError}
         loading={courierSaving}
         onClose={() => {

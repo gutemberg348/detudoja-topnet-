@@ -52,7 +52,11 @@ export function SellerDashboard({
     .filter((charge) => charge.status === "PAGA")
     .reduce((total, charge) => total + Number(charge.amountCents ?? 0), 0);
   const serviceOperationCreated = sellerServices.some((service) => service.enabled);
+  const enabledServiceCount = sellerServices.filter((service) => service.enabled).length;
   const activeServiceCount = sellerServices.filter((service) => service.available).length;
+  const servicesFirst = serviceOperationCreated && stores.length === 0;
+  const hasBothOperations = serviceOperationCreated && stores.length > 0;
+  const openStoreCount = stores.filter((store) => store.openForOrders !== false).length;
   const storeChatUnreadCount = storeConversations.reduce(
     (total, conversation) => total + Number(conversation.unreadCount ?? 0),
     0,
@@ -84,7 +88,7 @@ export function SellerDashboard({
             <View style={styles.heroHeadingIcon}>
               <Ionicons color={colors.primaryDark} name="analytics-outline" size={19} />
             </View>
-            <Text style={styles.heroHeadingText}>Central de vendas</Text>
+            <Text style={styles.heroHeadingText}>Central de trabalho</Text>
           </View>
           <Pressable
             accessibilityLabel="Abrir guia de como vender"
@@ -95,20 +99,54 @@ export function SellerDashboard({
             <Text style={styles.guideButtonText}>Guia</Text>
           </Pressable>
         </View>
-        <Text style={styles.heroSubtitle}>Acompanhe operacoes, pedidos e recebimentos.</Text>
+        <Text style={styles.heroSubtitle}>Seus comercios e servicos, cada um no seu lugar.</Text>
 
-        <View style={styles.metrics}>
-          <HeroMetric icon="storefront-outline" label="Lojas" value={String(stores.length)} />
-          <View style={styles.metricDivider} />
-          <HeroMetric
-            icon="notifications-outline"
-            label="Pedidos novos"
-            tone={totalNewOrders > 0 ? "danger" : "default"}
-            value={String(totalNewOrders)}
-          />
-          <View style={styles.metricDivider} />
-          <HeroMetric icon="time-outline" label="QR em aberto" value={String(activeCharges)} />
-        </View>
+        {hasBothOperations ? (
+          <>
+            <View style={styles.operationSummaryGrid}>
+              <OperationSummaryCard
+                detail={`${openStoreCount} recebendo pedido${openStoreCount === 1 ? "" : "s"}`}
+                icon="storefront-outline"
+                label="Comercios"
+                value={stores.length}
+              />
+              <OperationSummaryCard
+                active={activeServiceCount > 0}
+                detail={activeServiceCount ? `${activeServiceCount} online agora` : "Todos offline"}
+                icon="briefcase-outline"
+                label="Servicos"
+                value={enabledServiceCount}
+              />
+            </View>
+            <View style={[styles.metrics, styles.metricsCompact]}>
+              <HeroMetric
+                icon="notifications-outline"
+                label="Pedidos novos"
+                tone={totalNewOrders > 0 ? "danger" : "default"}
+                value={String(totalNewOrders)}
+              />
+              <View style={styles.metricDivider} />
+              <HeroMetric icon="time-outline" label="QR em aberto" value={String(activeCharges)} />
+            </View>
+          </>
+        ) : (
+          <View style={styles.metrics}>
+            <HeroMetric
+              icon={servicesFirst ? "briefcase-outline" : "storefront-outline"}
+              label={servicesFirst ? "Servicos" : "Lojas"}
+              value={String(servicesFirst ? enabledServiceCount : stores.length)}
+            />
+            <View style={styles.metricDivider} />
+            <HeroMetric
+              icon="notifications-outline"
+              label="Pedidos novos"
+              tone={totalNewOrders > 0 ? "danger" : "default"}
+              value={String(totalNewOrders)}
+            />
+            <View style={styles.metricDivider} />
+            <HeroMetric icon="time-outline" label="QR em aberto" value={String(activeCharges)} />
+          </View>
+        )}
       </View>
 
       <Pressable
@@ -155,32 +193,22 @@ export function SellerDashboard({
 
       <View style={styles.commandGrid}>
         <CommandCard
-          hint={profile ? "Ative seus servicos e acompanhe chamados" : "Crie seu perfil de prestador"}
-          icon="briefcase-outline"
-          label="Servicos"
-          onPress={onOpenServiceDesk}
-        />
-        <CommandCard
           accent
           hint={stores.length ? "Cobranca rapida da sua loja" : "Venda presencial sem loja"}
           icon="qr-code-outline"
           label="Cobrar agora"
           onPress={onCreateSale}
         />
-        <CommandCard
-          hint="Abra as conversas gerais das suas lojas"
-          icon="chatbubbles-outline"
-          label="Conversas"
-          notificationCount={storeChatUnreadCount}
-          notificationTone="conversation"
-          onPress={onOpenStoreChats}
-        />
-        <CommandCard
-          hint="Cadastre uma nova loja"
-          icon="add-circle-outline"
-          label="Nova loja"
-          onPress={onCreateStore}
-        />
+        {stores.length ? (
+          <CommandCard
+            hint="Abra as conversas gerais das suas lojas"
+            icon="chatbubbles-outline"
+            label="Conversas das lojas"
+            notificationCount={storeChatUnreadCount}
+            notificationTone="conversation"
+            onPress={onOpenStoreChats}
+          />
+        ) : null}
       </View>
 
       {storeChatUnreadCount > 0 ? (
@@ -227,38 +255,36 @@ export function SellerDashboard({
         </Pressable>
       ) : null}
 
-      <SectionHeading
-        action="Nova loja"
-        icon="storefront-outline"
-        imageUrl={stores[0]?.logoUrl}
-        onPress={onCreateStore}
-        subtitle="Lojas e servicos em um unico lugar"
-        title="Minhas operacoes"
+      {servicesFirst ? (
+        <ServiceSection
+          activeCount={activeServiceCount}
+          callsCount={serviceCallsCount}
+          notificationCount={serviceNotificationCount}
+          onOpen={onOpenServiceDesk}
+          profile={profile}
+          serviceOperationCreated={serviceOperationCreated}
+          servicesCount={enabledServiceCount}
+        />
+      ) : null}
+
+      <CommerceSection
+        onCreateStore={onCreateStore}
+        onOpenStore={onOpenStore}
+        storeChatUnreadByStore={storeChatUnreadByStore}
+        stores={stores}
       />
-      {stores.length || serviceOperationCreated ? (
-        <View style={styles.list}>
-          {serviceOperationCreated ? (
-            <ServiceOperationRow
-              activeCount={activeServiceCount}
-              callsCount={serviceCallsCount}
-              notificationCount={serviceNotificationCount}
-              onPress={onOpenServiceDesk}
-              profile={profile}
-              servicesCount={sellerServices.filter((service) => service.enabled).length}
-            />
-          ) : null}
-          {stores.map((store) => (
-            <StoreRow
-              chatUnreadCount={storeChatUnreadByStore.get(Number(store.id)) ?? 0}
-              key={store.id}
-              onPress={onOpenStore}
-              store={store}
-            />
-          ))}
-        </View>
-      ) : (
-        <EmptyState icon="storefront-outline" text="Cadastre uma loja ou ative seus servicos para criar uma operacao." title="Sua operacao comeca aqui" />
-      )}
+
+      {!servicesFirst ? (
+        <ServiceSection
+          activeCount={activeServiceCount}
+          callsCount={serviceCallsCount}
+          notificationCount={serviceNotificationCount}
+          onOpen={onOpenServiceDesk}
+          profile={profile}
+          serviceOperationCreated={serviceOperationCreated}
+          servicesCount={enabledServiceCount}
+        />
+      ) : null}
 
       <Pressable
         accessibilityHint="Abre ou fecha as cobrancas recentes"
@@ -332,6 +358,84 @@ export function SellerDashboard({
   );
 }
 
+function CommerceSection({ onCreateStore, onOpenStore, storeChatUnreadByStore, stores }) {
+  return (
+    <>
+      <SectionHeading
+        action={stores.length ? "Nova loja" : "Criar loja"}
+        icon="storefront-outline"
+        imageUrl={stores[0]?.logoUrl}
+        onPress={onCreateStore}
+        subtitle={stores.length ? "Pedidos, produtos e equipe de cada loja" : "Cadastre seu primeiro comercio"}
+        title="Meus comercios"
+      />
+      {stores.length ? (
+        <View style={styles.list}>
+          {stores.map((store) => (
+            <StoreRow
+              chatUnreadCount={storeChatUnreadByStore.get(Number(store.id)) ?? 0}
+              key={store.id}
+              onPress={onOpenStore}
+              store={store}
+            />
+          ))}
+        </View>
+      ) : (
+        <OperationStartCard
+          icon="storefront-outline"
+          onPress={onCreateStore}
+          text="Crie sua vitrine, cadastre produtos e comece a receber pedidos."
+          title="Criar minha loja"
+        />
+      )}
+    </>
+  );
+}
+
+function ServiceSection({ activeCount, callsCount, notificationCount, onOpen, profile, serviceOperationCreated, servicesCount }) {
+  return (
+    <>
+      <SectionHeading
+        action={serviceOperationCreated ? "Gerenciar" : "Comecar"}
+        icon="briefcase-outline"
+        onPress={onOpen}
+        subtitle="Perfil profissional, disponibilidade e atendimentos"
+        title="Meus servicos"
+      />
+      {serviceOperationCreated ? (
+        <ServiceOperationRow
+          activeCount={activeCount}
+          callsCount={callsCount}
+          notificationCount={notificationCount}
+          onPress={onOpen}
+          profile={profile}
+          servicesCount={servicesCount}
+        />
+      ) : (
+        <OperationStartCard
+          icon="person-add-outline"
+          onPress={onOpen}
+          text="Escolha o que voce faz e fique online para receber chamados. Nao precisa criar loja."
+          title="Quero prestar servicos"
+        />
+      )}
+    </>
+  );
+}
+
+function OperationStartCard({ icon, onPress, text, title }) {
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.operationStart, pressed && styles.pressed]}>
+      <View style={styles.operationStartIcon}><Ionicons color={colors.card} name={icon} size={21} /></View>
+      <View style={styles.rowCopy}>
+        <Text style={styles.operationStartTitle}>{title}</Text>
+        <Text style={styles.operationStartText}>{text}</Text>
+      </View>
+      <View style={styles.operationStartArrow}><Ionicons color={colors.primaryDark} name="arrow-forward" size={18} /></View>
+    </Pressable>
+  );
+}
+
 function ServiceOperationRow({
   activeCount,
   callsCount,
@@ -366,6 +470,21 @@ function ServiceOperationRow({
       ) : null}
       <Ionicons color={colors.primaryDark} name="chevron-forward" size={19} />
     </Pressable>
+  );
+}
+
+function OperationSummaryCard({ active = false, detail, icon, label, value }) {
+  return (
+    <View style={[styles.operationSummaryCard, active && styles.operationSummaryCardActive]}>
+      <View style={[styles.operationSummaryIcon, active && styles.operationSummaryIconActive]}>
+        <Ionicons color={active ? colors.card : colors.primaryDark} name={icon} size={20} />
+      </View>
+      <View style={styles.operationSummaryCopy}>
+        <Text style={styles.operationSummaryLabel}>{label}</Text>
+        <Text numberOfLines={1} style={[styles.operationSummaryDetail, active && styles.operationSummaryDetailActive]}>{detail}</Text>
+      </View>
+      <Text style={styles.operationSummaryValue}>{value}</Text>
+    </View>
   );
 }
 
@@ -627,6 +746,17 @@ const styles = StyleSheet.create({
   metricValue: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.h3, fontWeight: "800" },
   metricValueDanger: { color: colors.danger },
   metrics: { alignItems: "center", backgroundColor: colors.cardMuted, borderRadius: radius.lg, flexDirection: "row", paddingHorizontal: spacing.sm, paddingVertical: spacing.md },
+  metricsCompact: { paddingVertical: spacing.sm },
+  operationSummaryCard: { alignItems: "center", backgroundColor: colors.cardMuted, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flex: 1, flexDirection: "row", gap: spacing.sm, minHeight: 68, minWidth: 0, padding: spacing.sm },
+  operationSummaryCardActive: { backgroundColor: colors.primarySoft, borderColor: colors.primaryLight },
+  operationSummaryCopy: { flex: 1, minWidth: 0 },
+  operationSummaryDetail: { color: colors.textMuted, fontFamily: fonts.medium, fontSize: 9, marginTop: 2 },
+  operationSummaryDetailActive: { color: colors.primaryDark },
+  operationSummaryGrid: { flexDirection: "row", gap: spacing.sm },
+  operationSummaryIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 38, justifyContent: "center", width: 38 },
+  operationSummaryIconActive: { backgroundColor: colors.primaryDark },
+  operationSummaryLabel: { color: colors.textSecondary, fontFamily: fonts.bold, fontSize: 10 },
+  operationSummaryValue: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.h2 },
   pressed: { opacity: 0.78 },
   receivedLabel: { color: colors.textSecondary, flex: 1, fontFamily: fonts.medium, fontSize: typography.caption },
   receivedStrip: { alignItems: "center", backgroundColor: colors.primarySoft, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.sm, padding: spacing.md },
@@ -662,6 +792,11 @@ const styles = StyleSheet.create({
   operationDotActive: { backgroundColor: colors.success },
   operationStatusText: { color: colors.textMuted, fontFamily: fonts.bold, fontSize: 10, fontWeight: "700" },
   operationStatusTextActive: { color: colors.primaryDark },
+  operationStart: { alignItems: "center", backgroundColor: colors.primarySoft, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.md, minHeight: 88, padding: spacing.md, ...shadowSoft },
+  operationStartArrow: { alignItems: "center", backgroundColor: colors.card, borderRadius: radius.round, height: 34, justifyContent: "center", width: 34 },
+  operationStartIcon: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.round, height: 46, justifyContent: "center", width: 46 },
+  operationStartText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption, lineHeight: 17 },
+  operationStartTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.small },
   payoutCard: { alignItems: "center", backgroundColor: colors.primarySoft, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.sm, minHeight: 68, padding: spacing.md },
   payoutCardPending: { backgroundColor: "#FFFBEB", borderColor: "#FDE68A" },
   payoutDot: { backgroundColor: colors.success, borderRadius: radius.round, height: 6, width: 6 },

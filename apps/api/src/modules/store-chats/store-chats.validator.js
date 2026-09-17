@@ -11,6 +11,7 @@ export const createStoreChatMessageSchema = z
   .object({
     ...chatAttachmentFields,
     message: z.string().trim().max(2000, "Mensagem muito longa").optional(),
+    searchCatalog: multipartBoolean.optional().default(false),
     productId: z.coerce.number().int().positive().optional(),
     support: multipartBoolean.optional().default(false),
     type: z

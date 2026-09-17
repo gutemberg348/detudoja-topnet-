@@ -1,4 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useIsFocused } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { PageHeader } from "../components/PageHeader";
@@ -16,6 +17,7 @@ import { colors, fonts, radius, spacing, typography } from "../utils/theme";
 
 export function StoreChatsInboxScreen({ navigation, route }) {
   const { session } = useAuthStore();
+  const isFocused = useIsFocused();
   const scope = route.params?.scope === "seller" ? "seller" : "customer";
   const initialStore = route.params?.store ?? null;
   const initialStoreId = Number(route.params?.storeId ?? initialStore?.id) || null;
@@ -74,7 +76,7 @@ export function StoreChatsInboxScreen({ navigation, route }) {
   }, [load]);
 
   useEffect(() => {
-    if (!session?.accessToken) {
+    if (!session?.accessToken || !isFocused) {
       return undefined;
     }
 
@@ -90,7 +92,7 @@ export function StoreChatsInboxScreen({ navigation, route }) {
       socket?.off(realtimeEvents.storeChatMessageCreated, refresh);
       socket?.off(realtimeEvents.storeChatUpdated, refresh);
     };
-  }, [load, session?.accessToken]);
+  }, [isFocused, load, session?.accessToken]);
 
   useEffect(
     () => subscribeStoreConversationRead(({ conversationId }) => {

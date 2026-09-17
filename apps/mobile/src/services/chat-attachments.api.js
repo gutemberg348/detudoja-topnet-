@@ -1,3 +1,6 @@
+import { File } from "expo-file-system";
+import { Platform } from "react-native";
+
 export function buildChatMessageFormData(payload) {
   const data = typeof payload === "string" ? { message: payload } : (payload ?? {});
   const attachment = data.attachment ?? null;
@@ -17,7 +20,7 @@ export function buildChatMessageFormData(payload) {
   if (attachment.type === "LOCATION") {
     body.append("latitude", String(attachment.latitude));
     body.append("longitude", String(attachment.longitude));
-    body.append("locationLabel", attachment.label ?? "Localizacao atual");
+    body.append("locationLabel", attachment.label ?? "Ponto GPS atual");
     return body;
   }
 
@@ -25,11 +28,19 @@ export function buildChatMessageFormData(payload) {
     body.append("durationMs", String(Math.round(attachment.durationMs)));
   }
 
-  body.append("attachment", {
-    name: attachment.fileName ?? `arquivo-${Date.now()}`,
-    type: attachment.mimeType ?? "application/octet-stream",
-    uri: attachment.uri,
-  });
+  const fileName = attachment.fileName ?? `arquivo-${Date.now()}`;
+
+  if (Platform.OS !== "web") {
+    // Expo SDK 57 envia o arquivo real (Blob/File). O antigo objeto { uri }
+    // falhava de forma intermitente no iOS/Android com "Network request failed".
+    body.append("attachment", new File(attachment.uri), fileName);
+  } else {
+    body.append("attachment", {
+      name: fileName,
+      type: attachment.mimeType ?? "application/octet-stream",
+      uri: attachment.uri,
+    });
+  }
 
   return body;
 }

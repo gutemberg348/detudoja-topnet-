@@ -1,5 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -91,6 +91,7 @@ function countUnreadCustomerMessages(orders) {
 
 export function ProfileScreen({ navigation }) {
   const { logout, session, updateSessionUser } = useAuthStore();
+  const isFocused = useIsFocused();
   const wallet = useWalletStore();
   const [editing, setEditing] = useState(false);
   const [email, setEmail] = useState("");
@@ -229,7 +230,7 @@ export function ProfileScreen({ navigation }) {
   });
 
   useEffect(() => {
-    if (!session?.accessToken) return undefined;
+    if (!session?.accessToken || !isFocused) return undefined;
     const socket = getRealtimeSocket(session.accessToken);
     const refresh = () => loadServices();
 
@@ -240,10 +241,10 @@ export function ProfileScreen({ navigation }) {
       socket?.off(realtimeEvents.serviceChatMessageCreated, refresh);
       socket?.off(realtimeEvents.serviceChatUpdated, refresh);
     };
-  }, [loadServices, session?.accessToken]);
+  }, [isFocused, loadServices, session?.accessToken]);
 
   useEffect(() => {
-    if (!session?.accessToken) return undefined;
+    if (!session?.accessToken || !isFocused) return undefined;
     const socket = getRealtimeSocket(session.accessToken);
     const refresh = () => loadStoreChats();
 
@@ -256,16 +257,16 @@ export function ProfileScreen({ navigation }) {
       socket?.off(realtimeEvents.storeChatMessageCreated, refresh);
       socket?.off(realtimeEvents.storeChatUpdated, refresh);
     };
-  }, [loadStoreChats, session?.accessToken]);
+  }, [isFocused, loadStoreChats, session?.accessToken]);
 
   useEffect(
     () =>
       subscribeStoreConversationRead(({ scope }) => {
-        if (scope === "customer") {
+        if (scope === "customer" && isFocused) {
           loadStoreChats();
         }
       }),
-    [loadStoreChats],
+    [isFocused, loadStoreChats],
   );
 
   function fillForm(user) {

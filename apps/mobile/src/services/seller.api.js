@@ -1,3 +1,5 @@
+import { File } from "expo-file-system";
+import { Platform } from "react-native";
 import { apiRequest } from "./api";
 import { buildChatMessageFormData } from "./chat-attachments.api";
 
@@ -35,6 +37,11 @@ function appendImage(formData, key, image, fallbackName) {
       : normalizedExtension === "webp"
         ? "image/webp"
         : "image/jpeg");
+
+  if (Platform.OS !== "web") {
+    formData.append(key, new File(image.uri), `${fallbackName}.${normalizedExtension}`);
+    return;
+  }
 
   formData.append(key, {
     name: `${fallbackName}.${normalizedExtension}`,

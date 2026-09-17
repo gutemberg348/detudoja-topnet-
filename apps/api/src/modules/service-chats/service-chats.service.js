@@ -231,6 +231,13 @@ function serializeMessage(message, viewerId) {
     id: message.id,
     imageUrl: message.imagem_url,
     isMine: message.autor_usuario_id === viewerId,
+    readAt: (
+      message.origem === "CLIENTE"
+        ? message.lido_vendedor_em
+        : message.origem === "VENDEDOR"
+          ? message.lido_cliente_em
+          : null
+    )?.toISOString() ?? null,
     location,
     text: location ? null : message.mensagem,
   };

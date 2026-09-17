@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppButton } from "../components/AppButton";
 import { ChatAttachment } from "../components/ChatAttachment";
 import { ChatComposer } from "../components/ChatComposer";
+import { ChatMessageMeta } from "../components/ChatMessageMeta";
 import { ChatSystemMessage } from "../components/ChatSystemMessage";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { useRealtimeOrders } from "../hooks/useRealtimeOrders";
@@ -95,6 +96,7 @@ function normalizeOrderMessage(message) {
     id: message.id,
     attachment: message.attachment,
     kind,
+    readAt: message.readAt,
     text: message.text,
     time: message.time ?? message.createdAt,
     title: message.title ?? (kind === "customer" ? "Voce" : "Loja"),
@@ -767,9 +769,7 @@ function MessageBubble({ accessToken, message }) {
             {message.text}
           </Text>
         ) : null}
-        <Text style={[styles.messageTime, isCustomer && styles.customerMessageTime]}>
-          {formatDateTime(message.time)}
-        </Text>
+        <ChatMessageMeta createdAt={message.time} isMine={isCustomer} readAt={message.readAt} />
       </View>
     </View>
   );

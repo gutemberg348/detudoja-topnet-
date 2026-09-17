@@ -26,6 +26,7 @@ export function ScreenContainer({
       automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
       contentContainerStyle={styles.scrollContent}
       keyboardShouldPersistTaps="handled"
+      nestedScrollEnabled
       onContentSizeChange={onContentSizeChange}
       ref={scrollViewRef}
       showsVerticalScrollIndicator={false}

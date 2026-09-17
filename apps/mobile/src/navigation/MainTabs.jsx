@@ -1,8 +1,8 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Platform, StyleSheet, Vibration, View } from "react-native";
+import { AppState, Platform, StyleSheet, Vibration, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { HomeScreen } from "../app/HomeScreen";
 import { NetworkScreen } from "../app/NetworkScreen";
@@ -16,7 +16,7 @@ import { getCustomerOrders } from "../services/orders.api";
 import { acceptCourierRequest, getCourierRequests } from "../services/courier.api";
 import { getSellerProfile } from "../services/seller.api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
-import { acceptServiceConversation, getServiceConversations } from "../services/service-chats.api";
+import { acceptServiceConversation, getServiceConversations, heartbeatSellerServices } from "../services/service-chats.api";
 import {
   getStoreConversations,
   subscribeStoreConversationRead,
@@ -73,9 +73,12 @@ function countSellerStoreNotifications(stores = []) {
 export function MainTabs({ navigation }) {
   const { session } = useAuthStore();
   const insets = useSafeAreaInsets();
+  const isFocused = useIsFocused();
   const alertTimerRef = useRef(null);
   const serviceNotificationRequestRef = useRef(null);
   const serviceRefreshTimerRef = useRef(null);
+  const storeNotificationRequestRef = useRef(null);
+  const storeRefreshTimerRef = useRef(null);
   const [incomingServiceAlert, setIncomingServiceAlert] = useState(null);
   const [incomingAlertLoading, setIncomingAlertLoading] = useState(false);
   const [activeOrderCount, setActiveOrderCount] = useState(0);
@@ -111,6 +114,20 @@ export function MainTabs({ navigation }) {
     sellerServiceNotificationCount > 0
     || sellerStoreChatNotificationCount > 0;
 
+  useEffect(() => {
+    if (!session?.accessToken) return undefined;
+    const heartbeat = () => heartbeatSellerServices(session.accessToken).catch(() => {});
+    heartbeat();
+    const timer = setInterval(heartbeat, 45_000);
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") heartbeat();
+    });
+    return () => {
+      clearInterval(timer);
+      subscription.remove();
+    };
+  }, [session?.accessToken]);
+
   const showIncomingServiceAlert = useCallback((alert) => {
     if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
     setIncomingServiceAlert(alert);
@@ -129,6 +146,7 @@ export function MainTabs({ navigation }) {
   useEffect(() => () => {
     if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
     if (serviceRefreshTimerRef.current) clearTimeout(serviceRefreshTimerRef.current);
+    if (storeRefreshTimerRef.current) clearTimeout(storeRefreshTimerRef.current);
   }, []);
 
   const loadActiveOrders = useCallback(async () => {
@@ -237,31 +255,54 @@ export function MainTabs({ navigation }) {
       return;
     }
 
-    try {
-      const [customerResponse, sellerResponse] = await Promise.all([
-        getStoreConversations(session.accessToken),
-        getStoreConversations(session.accessToken, { scope: "seller" }),
-      ]);
+    if (storeNotificationRequestRef.current) {
+      return storeNotificationRequestRef.current;
+    }
 
-      setCustomerStoreChatNotificationCount(
-        (customerResponse.conversations ?? []).reduce(
-          (total, conversation) =>
-            total + Number(conversation.unreadCount ?? 0),
-          0,
-        ),
-      );
-      setSellerStoreChatNotificationCount(
-        (sellerResponse.conversations ?? []).reduce(
-          (total, conversation) =>
-            total + Number(conversation.unreadCount ?? 0),
-          0,
-        ),
-      );
-    } catch {
-      setSellerStoreChatNotificationCount(0);
-      setCustomerStoreChatNotificationCount(0);
+    const request = (async () => {
+      try {
+        const [customerResponse, sellerResponse] = await Promise.all([
+          getStoreConversations(session.accessToken),
+          getStoreConversations(session.accessToken, { scope: "seller" }),
+        ]);
+
+        setCustomerStoreChatNotificationCount(
+          (customerResponse.conversations ?? []).reduce(
+            (total, conversation) =>
+              total + Number(conversation.unreadCount ?? 0),
+            0,
+          ),
+        );
+        setSellerStoreChatNotificationCount(
+          (sellerResponse.conversations ?? []).reduce(
+            (total, conversation) =>
+              total + Number(conversation.unreadCount ?? 0),
+            0,
+          ),
+        );
+      } catch {
+        setSellerStoreChatNotificationCount(0);
+        setCustomerStoreChatNotificationCount(0);
+      }
+    })();
+    storeNotificationRequestRef.current = request;
+
+    try {
+      return await request;
+    } finally {
+      if (storeNotificationRequestRef.current === request) {
+        storeNotificationRequestRef.current = null;
+      }
     }
   }, [session?.accessToken]);
+
+  const scheduleStoreChatNotificationLoad = useCallback(() => {
+    if (storeRefreshTimerRef.current) clearTimeout(storeRefreshTimerRef.current);
+    storeRefreshTimerRef.current = setTimeout(() => {
+      storeRefreshTimerRef.current = null;
+      loadStoreChatNotifications();
+    }, 250);
+  }, [loadStoreChatNotifications]);
 
   const loadNotifications = useCallback(() => {
     loadActiveOrders();
@@ -369,9 +410,17 @@ export function MainTabs({ navigation }) {
   ]);
 
   useEffect(() => {
-    if (!session?.accessToken) return undefined;
+    if (!session?.accessToken || !isFocused) return undefined;
     const socket = getRealtimeSocket(session.accessToken);
-    const refreshStoreChats = () => loadStoreChatNotifications();
+    const refreshStoreChats = (payload = {}) => {
+      if (payload.reason === "customer-journey") return;
+      if (payload.message) {
+        const isSellerReply = payload.message.author === "store";
+        const isSupportRequest = payload.message.content?.kind === "SUPPORT";
+        if (!isSellerReply && !isSupportRequest) return;
+      }
+      scheduleStoreChatNotificationLoad();
+    };
 
     socket?.on(realtimeEvents.storeChatCreated, refreshStoreChats);
     socket?.on(realtimeEvents.storeChatMessageCreated, refreshStoreChats);
@@ -382,11 +431,13 @@ export function MainTabs({ navigation }) {
       socket?.off(realtimeEvents.storeChatMessageCreated, refreshStoreChats);
       socket?.off(realtimeEvents.storeChatUpdated, refreshStoreChats);
     };
-  }, [loadStoreChatNotifications, session?.accessToken]);
+  }, [isFocused, scheduleStoreChatNotificationLoad, session?.accessToken]);
 
   useEffect(
-    () => subscribeStoreConversationRead(() => loadStoreChatNotifications()),
-    [loadStoreChatNotifications],
+    () => subscribeStoreConversationRead(() => {
+      if (isFocused) scheduleStoreChatNotificationLoad();
+    }),
+    [isFocused, scheduleStoreChatNotificationLoad],
   );
 
   return (

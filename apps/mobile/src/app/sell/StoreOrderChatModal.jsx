@@ -15,7 +15,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppButton } from "../../components/AppButton";
 import { ChatAttachment } from "../../components/ChatAttachment";
 import { ChatComposer } from "../../components/ChatComposer";
+import { ChatMessageMeta } from "../../components/ChatMessageMeta";
+import { ChatScrollToLatestButton } from "../../components/ChatScrollToLatestButton";
 import { ChatSystemMessage } from "../../components/ChatSystemMessage";
+import { useChatTimeline } from "../../hooks/useChatTimeline";
 import { useRealtimeOrders } from "../../hooks/useRealtimeOrders";
 import {
   createStoreOrderProposal,
@@ -56,6 +59,10 @@ export function StoreOrderChatModal({
   const [proposalOpen, setProposalOpen] = useState(false);
   const [proposalValue, setProposalValue] = useState("");
   const [reply, setReply] = useState("");
+  const timeline = useChatTimeline({
+    itemCount: chatMessages.length,
+    scrollRef: chatScrollRef,
+  });
 
   useEffect(() => {
     setLiveOrder(order);
@@ -73,18 +80,6 @@ export function StoreOrderChatModal({
       setReply("");
     }
   }, [open]);
-
-  const scrollToLatest = useCallback(() => {
-    requestAnimationFrame(() => {
-      chatScrollRef.current?.scrollToEnd({ animated: true });
-    });
-  }, []);
-
-  useEffect(() => {
-    if (open && order) {
-      scrollToLatest();
-    }
-  }, [chatMessages.length, liveOrder?.status, open, order, scrollToLatest]);
 
   const loadMessages = useCallback(async ({ silent = false } = {}) => {
     if (!accessToken || !open || !order?.id || !store?.id) return;
@@ -298,26 +293,31 @@ export function StoreOrderChatModal({
             </View>
           ) : null}
 
-          <ScrollView
-            automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
-            contentContainerStyle={styles.orderChatBody}
-            keyboardShouldPersistTaps="handled"
-            onContentSizeChange={scrollToLatest}
-            ref={chatScrollRef}
-            showsVerticalScrollIndicator={false}
-            style={styles.orderChatScroll}
-          >
-            {chatError ? <Text style={styles.modalError}>{chatError}</Text> : null}
-            {messages.map((message) => (
-              <SellerChatBubble accessToken={accessToken} key={message.id} message={message} />
-            ))}
-          </ScrollView>
+          <View style={styles.orderChatTimeline}>
+            <ScrollView
+              automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+              contentContainerStyle={styles.orderChatBody}
+              keyboardShouldPersistTaps="handled"
+              onContentSizeChange={timeline.onContentSizeChange}
+              onScroll={timeline.onScroll}
+              ref={chatScrollRef}
+              scrollEventThrottle={16}
+              showsVerticalScrollIndicator={false}
+              style={styles.orderChatScroll}
+            >
+              {chatError ? <Text style={styles.modalError}>{chatError}</Text> : null}
+              {messages.map((message) => (
+                <SellerChatBubble accessToken={accessToken} key={message.id} message={message} />
+              ))}
+            </ScrollView>
+            <ChatScrollToLatestButton onPress={timeline.scrollToLatest} unreadCount={timeline.unreadBelow} visible={!timeline.isAtBottom} />
+          </View>
 
           <ChatComposer
             draft={reply}
             onAttachmentError={setChatError}
             onChangeDraft={setReply}
-            onFocus={() => setTimeout(scrollToLatest, 120)}
+            onFocus={() => timeline.scrollToLatest(true)}
             onSend={sendReply}
             onSendAttachment={sendReply}
             placeholder="Responder ao cliente"
@@ -369,12 +369,7 @@ function SellerChatBubble({ accessToken, message }) {
         ]}>
           {message.text}
         </Text> : null}
-        <Text style={[
-          styles.sellerChatBubbleTime,
-          fromStore && styles.sellerChatBubbleTimeStore,
-        ]}>
-          {formatOrderDateTime(message.time)}
-        </Text>
+        <ChatMessageMeta createdAt={message.time} isMine={fromStore} readAt={message.readAt} />
       </View>
     </View>
   );

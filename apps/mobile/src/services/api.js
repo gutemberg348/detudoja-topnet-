@@ -1,4 +1,5 @@
 import Constants from "expo-constants";
+import { fetch as expoFetch } from "expo/fetch";
 import { NativeModules, Platform } from "react-native";
 
 function hostnameFromValue(value) {
@@ -114,11 +115,13 @@ export async function apiRequest(
   Object.assign(headers, customHeaders ?? {});
 
   let response;
-  const controller = timeoutMs ? new AbortController() : null;
-  const timeout = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  const effectiveTimeoutMs = timeoutMs ?? (isFormData ? 120_000 : undefined);
+  const controller = effectiveTimeoutMs ? new AbortController() : null;
+  const timeout = controller ? setTimeout(() => controller.abort(), effectiveTimeoutMs) : null;
+  const requestFetch = isFormData && Platform.OS !== "web" ? expoFetch : globalThis.fetch;
 
   try {
-    response = await fetch(`${apiBaseUrl}${path}`, {
+    response = await requestFetch(`${apiBaseUrl}${path}`, {
       body: body ? (isFormData ? body : JSON.stringify(body)) : undefined,
       headers,
       method,
@@ -128,7 +131,13 @@ export async function apiRequest(
     if (error?.name === "AbortError") {
       throw new ApiError("O envio demorou mais que o esperado. Confira sua conexão e tente novamente.", 0, null);
     }
-    throw new ApiError("Não foi possível conectar à API.", 0, null);
+    throw new ApiError(
+      isFormData
+        ? "Não foi possível enviar o arquivo. Confira sua conexão e tente novamente."
+        : "Não foi possível conectar à API.",
+      0,
+      null,
+    );
   } finally {
     if (timeout) clearTimeout(timeout);
   }

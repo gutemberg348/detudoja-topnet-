@@ -11,9 +11,11 @@ import {
   View,
 } from "react-native";
 import { AppButton } from "../components/AppButton";
+import { AccountAddressRequirementModal } from "../components/AccountAddressRequirementModal";
 import { PageHeader } from "../components/PageHeader";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { StatePanel } from "../components/StatePanel";
+import { ApiError } from "../services/api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import {
   cancelCourierRequest,
@@ -45,6 +47,7 @@ export function ServiceProvidersScreen({ navigation, route }) {
   const [openingId, setOpeningId] = useState(null);
   const [activeCourierConversation, setActiveCourierConversation] =
     useState(null);
+  const [addressRequirementOpen, setAddressRequirementOpen] = useState(false);
   const [courierAvailable, setCourierAvailable] = useState(false);
   const [courierRequest, setCourierRequest] = useState(null);
   const [sellers, setSellers] = useState([]);
@@ -240,7 +243,11 @@ export function ServiceProvidersScreen({ navigation, route }) {
       });
       setCourierRequest(response.request);
     } catch (requestError) {
-      setError(requestError.message ?? "Nao foi possivel chamar um motoboy.");
+      if (requestError instanceof ApiError && requestError.status === 428) {
+        setAddressRequirementOpen(true);
+      } else {
+        setError(requestError.message ?? "Nao foi possivel chamar um motoboy.");
+      }
     } finally {
       setOpeningId(null);
     }
@@ -355,7 +362,17 @@ export function ServiceProvidersScreen({ navigation, route }) {
       courierRequest?.status === "PENDENTE" ? (
         <View style={styles.waitingCard}>
           <View style={styles.waitingStatusLine}>
-            <View style={styles.waitingLiveDot} />
+            <Animated.View
+              style={[
+                styles.waitingLiveDot,
+                {
+                  opacity: courierPulse.interpolate({
+                    inputRange: [0, 0.5, 1],
+                    outputRange: [0.45, 1, 0.45],
+                  }),
+                },
+              ]}
+            />
             <Text style={styles.waitingStatusText}>CHAMADA ATIVA</Text>
           </View>
           <View style={styles.waitingRadarWrap}>
@@ -378,6 +395,22 @@ export function ServiceProvidersScreen({ navigation, route }) {
                 },
               ]}
             />
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.waitingOrbit,
+                {
+                  transform: [{
+                    rotate: courierPulse.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: ["0deg", "360deg"],
+                    }),
+                  }],
+                },
+              ]}
+            >
+              <View style={styles.waitingOrbitDot} />
+            </Animated.View>
             <Animated.View
               style={[
                 styles.waitingPulse,
@@ -421,10 +454,12 @@ export function ServiceProvidersScreen({ navigation, route }) {
             Estamos avisando os profissionais livres da sua cidade. Voce entra
             no chat assim que alguem aceitar.
           </Text>
-          <View style={styles.waitingSteps}>
-            <View style={styles.waitingStepDot} />
-            <View style={[styles.waitingStepDot, styles.waitingStepDotMuted]} />
-            <View style={[styles.waitingStepDot, styles.waitingStepDotMuted]} />
+          <View style={styles.waitingTimeline}>
+            <WaitingStage done icon="checkmark" label="Chamada enviada" />
+            <View style={styles.waitingTimelineLine} />
+            <WaitingStage active icon="notifications-outline" label="Avisando motoboys" pulse={courierPulse} />
+            <View style={styles.waitingTimelineLine} />
+            <WaitingStage icon="chatbubble-outline" label="Chat liberado" />
           </View>
           <Pressable
             disabled={openingId === "cancel"}
@@ -526,7 +561,33 @@ export function ServiceProvidersScreen({ navigation, route }) {
           title="Ninguem online agora"
         />
       ) : null}
+      <AccountAddressRequirementModal
+        onClose={() => setAddressRequirementOpen(false)}
+        onCompleted={() => {
+          setAddressRequirementOpen(false);
+          setTimeout(() => callCourier(), 0);
+        }}
+        open={addressRequirementOpen}
+        reason="localizar motoboys disponiveis na sua cidade"
+      />
     </ScreenContainer>
+  );
+}
+
+function WaitingStage({ active = false, done = false, icon, label, pulse }) {
+  const animatedStyle = active && pulse
+    ? {
+        opacity: pulse.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.65, 1, 0.65] }),
+        transform: [{ scale: pulse.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.96, 1.05, 0.96] }) }],
+      }
+    : null;
+  return (
+    <View style={styles.waitingStage}>
+      <Animated.View style={[styles.waitingStageIcon, (active || done) && styles.waitingStageIconActive, animatedStyle]}>
+        <Ionicons color={active || done ? colors.card : colors.textMuted} name={icon} size={14} />
+      </Animated.View>
+      <Text style={[styles.waitingStageText, (active || done) && styles.waitingStageTextActive]}>{label}</Text>
+    </View>
   );
 }
 
@@ -866,6 +927,8 @@ const styles = StyleSheet.create({
     height: 7,
     width: 7,
   },
+  waitingOrbit: { alignItems: "center", height: 98, position: "absolute", width: 98 },
+  waitingOrbitDot: { backgroundColor: colors.success, borderColor: colors.card, borderRadius: radius.round, borderWidth: 2, height: 12, width: 12 },
   waitingRadar: {
     alignItems: "center",
     backgroundColor: colors.primaryDark,
@@ -904,14 +967,13 @@ const styles = StyleSheet.create({
     fontFamily: fonts.extraBold,
     fontSize: 9,
   },
-  waitingStepDot: {
-    backgroundColor: colors.primaryDark,
-    borderRadius: radius.round,
-    height: 6,
-    width: 18,
-  },
-  waitingStepDotMuted: { backgroundColor: colors.primaryLight, width: 6 },
-  waitingSteps: { flexDirection: "row", gap: 5 },
+  waitingStage: { alignItems: "center", flex: 1, gap: 5 },
+  waitingStageIcon: { alignItems: "center", backgroundColor: colors.cardMuted, borderColor: colors.border, borderRadius: radius.round, borderWidth: 1, height: 30, justifyContent: "center", width: 30 },
+  waitingStageIconActive: { backgroundColor: colors.primaryDark, borderColor: colors.primaryDark },
+  waitingStageText: { color: colors.textMuted, fontFamily: fonts.medium, fontSize: 8, textAlign: "center" },
+  waitingStageTextActive: { color: colors.primaryDark, fontFamily: fonts.bold },
+  waitingTimeline: { alignItems: "flex-start", alignSelf: "stretch", flexDirection: "row", marginTop: spacing.sm },
+  waitingTimelineLine: { backgroundColor: colors.primaryLight, height: 2, marginHorizontal: -8, marginTop: 14, width: 34 },
   waitingText: {
     color: colors.textSecondary,
     fontFamily: fonts.regular,
