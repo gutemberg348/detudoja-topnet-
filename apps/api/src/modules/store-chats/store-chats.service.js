@@ -142,6 +142,61 @@ function searchStoreProducts(products, query) {
     .map(({ product }) => product);
 }
 
+const catalogSearchNoiseTerms = new Set([
+  "algum",
+  "alguma",
+  "catalogo",
+  "de",
+  "do",
+  "dos",
+  "produto",
+  "produtos",
+  "quero",
+  "tem",
+  "todos",
+  "ver",
+  "voces",
+]);
+
+function suggestStoreProducts(products, query, matches = []) {
+  const matchedIds = new Set(matches.map((product) => product.id));
+  const terms = normalizeCatalogSearch(query)
+    .split(/\s+/)
+    .filter((term) => term.length >= 2 && !catalogSearchNoiseTerms.has(term));
+  const available = products.filter((product) => (
+    !matchedIds.has(product.id)
+    && (!product.estoque_controlado || Number(product.estoque_quantidade ?? 0) > 0)
+  ));
+
+  if (!terms.length) return available.slice(0, 4);
+
+  const ranked = available
+    .map((product, index) => {
+      const name = normalizeCatalogSearch(product.nome);
+      const searchable = normalizeCatalogSearch([
+        product.nome,
+        product.marca,
+        product.resumo_curto,
+        product.descricao,
+      ].filter(Boolean).join(" "));
+      const words = searchable.split(/\s+/).filter(Boolean);
+      const score = terms.reduce((total, term) => {
+        if (name.includes(term)) return total + 8;
+        if (searchable.includes(term)) return total + 5;
+        if (words.some((word) => word.startsWith(term) || term.startsWith(word))) {
+          return total + 3;
+        }
+        return total;
+      }, product.destaque ? 1 : 0);
+      return { index, product, score };
+    })
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .map(({ product }) => product);
+
+  return (ranked.length ? ranked : available).slice(0, 4);
+}
+
 function serializeConversation(
   conversation,
   viewerId,
@@ -220,6 +275,7 @@ async function buildCommercialMessage(access, data, scope) {
       );
       if (!store) throw new AppError("Loja nao encontrada", 404);
       const matches = searchStoreProducts(store.produtos, data.message);
+      const suggestions = suggestStoreProducts(store.produtos, data.message, matches);
       return {
         content: {
           kind: "SEARCH",
@@ -227,6 +283,7 @@ async function buildCommercialMessage(access, data, scope) {
           products: matches.slice(0, 6).map(serializeChatProduct),
           query: data.message,
           store: serializeChatStore(store),
+          suggestions: suggestions.map(serializeChatProduct),
         },
         isSupport: false,
         message: data.message,

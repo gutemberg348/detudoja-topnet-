@@ -26,7 +26,7 @@ import {
 
 export function CheckoutPaymentScreen({ navigation, route }) {
   const { session } = useAuthStore();
-  const { clearCart } = useCartStore();
+  const { removeItems } = useCartStore();
   const { wallets } = useWalletStore();
   const [useBalance, setUseBalance] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -43,6 +43,12 @@ export function CheckoutPaymentScreen({ navigation, route }) {
   const isProposalPayment = route.params?.mode === "order-proposal";
   const store = route.params?.store ?? order?.store ?? null;
   const totals = route.params?.totals ?? { totalCents: 0 };
+  const cartItemKeys = route.params?.cartItemKeys ?? [];
+  const checkoutGroups = Array.isArray(route.params?.checkoutGroups)
+    ? route.params.checkoutGroups
+    : [];
+  const checkoutIndex = Math.max(0, Number(route.params?.checkoutIndex ?? 0));
+  const hasNextStore = !isProposalPayment && checkoutIndex + 1 < checkoutGroups.length;
   const availableBalanceCents = useMemo(
     () =>
       wallets
@@ -53,6 +59,25 @@ export function CheckoutPaymentScreen({ navigation, route }) {
   const canPayFullyWithBalance = availableBalanceCents >= totals.totalCents;
   const balanceUsedCents = useBalance && canPayFullyWithBalance ? totals.totalCents : 0;
   const pixComplementCents = Math.max(totals.totalCents - balanceUsedCents, 0);
+
+  function continueToNextStore() {
+    if (!hasNextStore) return;
+    navigation.reset({
+      index: 2,
+      routes: [
+        { name: "Main" },
+        { name: "Cart" },
+        {
+          name: "Checkout",
+          params: {
+            ...checkoutGroups[checkoutIndex + 1],
+            checkoutGroups,
+            checkoutIndex: checkoutIndex + 1,
+          },
+        },
+      ],
+    });
+  }
 
   async function confirmOrder({ skipCpfGate = false } = {}) {
     if (
@@ -94,13 +119,15 @@ export function CheckoutPaymentScreen({ navigation, route }) {
               quantity: item.quantity,
             })),
             payment: paymentData,
-          storeId: store.id,
+            storeId: store.id,
           }, checkoutIdempotencyKeyRef.current ??= createOrderIdempotencyKey("checkout"));
 
-      if (!isProposalPayment) clearCart();
+      if (!isProposalPayment) removeItems(cartItemKeys);
 
       if (response.gatewayPayment) {
         navigation.replace("GatewayPixPayment", {
+          checkoutGroups,
+          checkoutIndex,
           gatewayPayment: response.gatewayPayment,
           order: response.order,
           store,
@@ -137,13 +164,33 @@ export function CheckoutPaymentScreen({ navigation, route }) {
   return (
     <ScreenContainer contentContainerStyle={styles.content} edges={["left", "right"]}>
       <View style={styles.header}>
-        <Text style={styles.title}>Pagamento</Text>
+        <Text style={styles.title}>
+          {hasNextStore
+            ? `Pagamento ${checkoutIndex + 1} de ${checkoutGroups.length}`
+            : "Pagamento"}
+        </Text>
         <Text style={styles.subtitle}>
           {isProposalPayment
             ? "A proposta foi aceita. Escolha como pagar e volte ao chat para acompanhar."
-            : "Pague pelas carteiras ou gere um Pix seguro pelo Asaas."}
+            : hasNextStore
+              ? "Finalize esta loja agora. Depois, seguimos para a entrega e o pagamento da proxima."
+              : "Pague pelas carteiras ou gere um Pix seguro pelo Asaas."}
         </Text>
       </View>
+
+      {hasNextStore ? (
+        <View style={styles.storeProgress}>
+          <View style={styles.storeProgressIcon}>
+            <Ionicons color={colors.primaryDark} name="storefront-outline" size={20} />
+          </View>
+          <View style={styles.storeProgressCopy}>
+            <Text style={styles.storeProgressTitle}>{store?.name ?? "Loja atual"}</Text>
+            <Text style={styles.storeProgressText}>
+              Pedido, entrega e pagamento separados para proteger estoque e repasse de cada loja.
+            </Text>
+          </View>
+        </View>
+      ) : null}
 
       <LinearGradient colors={[colors.primaryDark, "#0F766E"]} style={styles.totalCard}>
         <Text style={styles.totalLabel}>Total do pedido</Text>
@@ -228,7 +275,11 @@ export function CheckoutPaymentScreen({ navigation, route }) {
         onDismiss={() => setPaymentFeedback(null)}
         onFinished={(status) => {
           if (status === "success" && completedPayment) {
-            navigation.navigate("OnlineOrderSuccess", completedPayment);
+            if (hasNextStore) {
+              continueToNextStore();
+            } else {
+              navigation.navigate("OnlineOrderSuccess", completedPayment);
+            }
           }
           setPaymentFeedback(null);
           setCompletedPayment(null);
@@ -353,6 +404,40 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: typography.body,
     lineHeight: 22,
+  },
+  storeProgress: {
+    alignItems: "center",
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primaryLight,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    padding: spacing.md,
+  },
+  storeProgressCopy: {
+    flex: 1,
+    gap: 3,
+  },
+  storeProgressIcon: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderRadius: radius.round,
+    height: 42,
+    justifyContent: "center",
+    width: 42,
+  },
+  storeProgressText: {
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    fontSize: typography.caption,
+    lineHeight: 18,
+  },
+  storeProgressTitle: {
+    color: colors.textPrimary,
+    fontFamily: fonts.extraBold,
+    fontSize: typography.small,
+    fontWeight: "800",
   },
   summary: {
     backgroundColor: colors.card,

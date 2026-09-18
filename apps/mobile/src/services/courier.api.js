@@ -39,8 +39,9 @@ export function removeStoreCourier(token, storeId, memberId) {
   });
 }
 
-export function getStoreCourierDispatch(token, storeId) {
-  return apiRequest(`/api/app/courier/stores/${storeId}/dispatch`, { token });
+export function getStoreCourierDispatch(token, storeId, serviceTypeId) {
+  const query = serviceTypeId ? `?serviceTypeId=${encodeURIComponent(serviceTypeId)}` : "";
+  return apiRequest(`/api/app/courier/stores/${storeId}/dispatch${query}`, { token });
 }
 
 export function createStoreCourierRequest(token, storeId, data) {

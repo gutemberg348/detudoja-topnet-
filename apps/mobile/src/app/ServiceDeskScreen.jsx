@@ -21,20 +21,13 @@ import {
 } from "../services/service-chats.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { getCurrentUserAddresses, updateCurrentUser } from "../services/users.api";
+import { serviceIconName } from "../utils/service-icons";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
 import { CourierRegistrationModal } from "./service/CourierRegistrationModal";
 import { RegisterServiceModal } from "./service/RegisterServiceModal";
 
-const serviceIconMap = {
-  bicycle: "bicycle-outline",
-  car: "car-outline",
-  construct: "construct-outline",
-  delivery: "cube-outline",
-  person: "person-outline",
-};
-
 function serviceIcon(iconName) {
-  return serviceIconMap[String(iconName ?? "").toLowerCase()] ?? "briefcase-outline";
+  return serviceIconName(iconName);
 }
 
 function conversationStatus(conversation) {
@@ -78,6 +71,14 @@ export function ServiceDeskScreen({ navigation }) {
   const registeredServices = useMemo(
     () => services.filter((service) => service.enabled),
     [services],
+  );
+  const courierRegisteredServices = useMemo(
+    () => registeredServices.filter((service) => service.requiresCourierProfile),
+    [registeredServices],
+  );
+  const otherRegisteredServices = useMemo(
+    () => registeredServices.filter((service) => !service.requiresCourierProfile),
+    [registeredServices],
   );
   const courierConversations = useMemo(
     () => conversations.filter((conversation) => (
@@ -284,7 +285,7 @@ export function ServiceDeskScreen({ navigation }) {
       setCourierModalOpen(false);
       await load({ silent: true });
     } catch (requestError) {
-      setCourierError(requestError.message ?? "Nao foi possivel salvar o cadastro de motoboy.");
+      setCourierError(requestError.message ?? "Nao foi possivel salvar o cadastro de transporte.");
     } finally {
       setCourierSaving(false);
     }
@@ -335,9 +336,11 @@ export function ServiceDeskScreen({ navigation }) {
     <ScreenContainer contentContainerStyle={styles.content}>
       <PageHeader
         action={<StatusPill activeCount={activeServices.length} courierStatus={courierDashboard?.operationalStatus} />}
-        eyebrow="Prestador de servicos"
-        subtitle="Escolha o que atende agora e acompanhe os chamados recebidos pelo chat."
-        title={`Servicos de ${profile?.publicName ?? "voce"}`}
+        eyebrow={courierProfile ? "Area do entregador" : "Prestador de servicos"}
+        subtitle={courierProfile
+          ? "Corrida atual, novas chamadas e disponibilidade em um unico lugar."
+          : "Escolha o que atende agora e acompanhe os chamados recebidos pelo chat."}
+        title={courierProfile ? "Central de corridas" : `Servicos de ${profile?.publicName ?? "voce"}`}
       />
 
       {loading ? <StatePanel icon="briefcase-outline" loading text="Carregando sua operacao..." /> : null}
@@ -357,20 +360,18 @@ export function ServiceDeskScreen({ navigation }) {
             </View>
           </View>
 
-          {catalogServices.length ? <>
-            <SectionTitle icon="grid-outline" subtitle="Escolha uma atividade e conclua somente o cadastro necessario" title="Servicos disponiveis" />
-            <View style={styles.catalogList}>{catalogServices.map((service) => (
-              <View key={service.id} style={styles.catalogCard}>
-                <View style={styles.catalogTop}><View style={styles.catalogIcon}><Ionicons color={colors.primaryDark} name={serviceIcon(service.iconName)} size={23} /></View><View style={styles.serviceCopy}><Text style={styles.catalogName}>{service.name}</Text><Text style={styles.catalogDescription}>{service.description || "Atendimento por chamado no aplicativo."}</Text></View></View>
-                <View style={styles.requirementList}>{service.registrationRequirements?.requiresVehicle ? <Text style={styles.requirementPill}>{service.registrationRequirements.vehicleKinds?.join(" / ") || "Veiculo"}</Text> : null}{service.registrationRequirements?.requiresDriverLicense ? <Text style={styles.requirementPill}>CNH</Text> : null}{service.registrationRequirements?.requiresPlate ? <Text style={styles.requirementPill}>Placa</Text> : null}{!service.registrationRequirements?.requiresVehicle && !service.registrationRequirements?.requiresDriverLicense && !service.registrationRequirements?.requiresPlate ? <Text style={styles.requirementPill}>Cadastro rapido</Text> : null}</View>
-                <Pressable disabled={Boolean(savingServiceId)} onPress={() => startService(service)} style={({ pressed }) => [styles.performButton, pressed && styles.pressed]}>{savingServiceId === service.id ? <ActivityIndicator color={colors.card} /> : <><Text style={styles.performButtonText}>Quero realizar este servico</Text><Ionicons color={colors.card} name="arrow-forward" size={18} /></>}</Pressable>
-              </View>
-            ))}</View>
-          </> : null}
-
-          <Pressable onPress={() => { setRegisterServiceError(""); setRegisterServiceOpen(true); }} style={({ pressed }) => [styles.registerService, pressed && styles.pressed]}>
-            <View style={styles.registerServiceIcon}><Ionicons color={colors.primaryDark} name="add-circle-outline" size={22} /></View><View style={styles.serviceCopy}><Text style={styles.registerServiceTitle}>Meu servico nao esta na lista</Text><Text style={styles.registerServiceText}>Descreva sua atividade para entrar na categoria correta.</Text></View><Ionicons color={colors.primaryDark} name="arrow-forward" size={20} />
-          </Pressable>
+          {!courierProfile ? (
+            <>
+              <ServiceCatalog
+                loadingServiceId={savingServiceId}
+                onStart={startService}
+                services={catalogServices}
+                subtitle="Escolha uma atividade e conclua somente o cadastro necessario"
+                title="Servicos disponiveis"
+              />
+              <RegisterServicePrompt onPress={() => { setRegisterServiceError(""); setRegisterServiceOpen(true); }} />
+            </>
+          ) : null}
 
           {courierProfile ? (
             <>
@@ -418,7 +419,7 @@ export function ServiceDeskScreen({ navigation }) {
                   <SectionTitle
                     icon="chatbubbles-outline"
                     subtitle="Corridas ativas e historico continuam aqui mesmo quando voce ficar offline"
-                    title="Conversas do motoboy"
+                    title="Conversas de corridas"
                     value={courierConversations.length}
                   />
                   <View style={styles.callsList}>
@@ -456,35 +457,47 @@ export function ServiceDeskScreen({ navigation }) {
             </>
           ) : null}
 
-          <SectionTitle icon="flash-outline" subtitle="Ative apenas o que voce consegue atender agora" title="Minha disponibilidade" />
-          {registeredServices.length ? (
-            <View style={styles.serviceList}>
-              {registeredServices.map((service) => (
-                <View key={service.id} style={[styles.serviceCard, service.available && styles.serviceCardActive]}>
-                  <View style={styles.serviceIcon}><Ionicons color={colors.primaryDark} name={serviceIcon(service.iconName)} size={21} /></View>
-                  <View style={styles.serviceCopy}>
-                    <View style={styles.serviceNameLine}>
-                      <Text style={styles.serviceName}>{service.name}</Text>
-                      {service.requiresCourierProfile ? (
-                        <View style={styles.deliveryPill}>
-                          <Ionicons color={colors.primaryDark} name="storefront-outline" size={12} />
-                          <Text style={styles.deliveryPillText}>Chamadas de lojas</Text>
-                        </View>
-                      ) : null}
-                    </View>
-                    <Text style={styles.serviceMeta}>
-                      {service.available
-                        ? "Online e disponivel para novas chamadas"
-                        : service.requiresCourierProfile && !courierProfile
-                          ? "Cadastre sua moto para ativar"
-                          : "Offline para novos chamados"}
-                    </Text>
-                  </View>
-                  {savingServiceId === service.id ? <ActivityIndicator color={colors.primaryDark} /> : <Switch disabled={Boolean(savingServiceId)} onValueChange={() => toggleService(service)} thumbColor={colors.card} trackColor={{ false: colors.borderStrong, true: colors.primary }} value={service.available} />}
-                </View>
-              ))}
-            </View>
+          <SectionTitle
+            icon="flash-outline"
+            subtitle={courierProfile ? "Fique online para receber corridas mesmo com o app em segundo plano" : "Ative apenas o que voce consegue atender agora"}
+            title={courierProfile ? "Disponibilidade para corridas" : "Minha disponibilidade"}
+          />
+          {(courierProfile ? courierRegisteredServices : registeredServices).length ? (
+            <ServiceAvailabilityList
+              courierProfile={courierProfile}
+              onToggle={toggleService}
+              savingServiceId={savingServiceId}
+              services={courierProfile ? courierRegisteredServices : registeredServices}
+            />
           ) : <StatePanel icon="briefcase-outline" text="Escolha uma das opcoes acima para realizar seu primeiro servico." title="Nenhum servico cadastrado" />}
+
+          {courierProfile ? (
+            <>
+              {otherRegisteredServices.length ? (
+                <>
+                  <SectionTitle
+                    icon="briefcase-outline"
+                    subtitle="Atividades extras separadas da sua central de corridas"
+                    title="Outros servicos cadastrados"
+                  />
+                  <ServiceAvailabilityList
+                    courierProfile={courierProfile}
+                    onToggle={toggleService}
+                    savingServiceId={savingServiceId}
+                    services={otherRegisteredServices}
+                  />
+                </>
+              ) : null}
+              <ServiceCatalog
+                loadingServiceId={savingServiceId}
+                onStart={startService}
+                services={catalogServices}
+                subtitle="Cadastre somente se tambem quiser atender outra atividade"
+                title="Outros servicos"
+              />
+              <RegisterServicePrompt onPress={() => { setRegisterServiceError(""); setRegisterServiceOpen(true); }} />
+            </>
+          ) : null}
 
           <SectionTitle icon="chatbubbles-outline" subtitle="Conversas reais enviadas por clientes" title="Chamados" value={openCalls.length} />
           {openCalls.length ? (
@@ -534,6 +547,118 @@ export function ServiceDeskScreen({ navigation }) {
 function StatusPill({ activeCount, courierStatus }) {
   const isBusy = courierStatus === "BUSY";
   return <View style={[styles.statusPill, activeCount && styles.statusPillActive]}><View style={[styles.statusDot, activeCount && styles.statusDotActive]} /><Text style={[styles.statusText, activeCount && styles.statusTextActive]}>{isBusy ? "Em corrida" : activeCount ? `${activeCount} ativo${activeCount === 1 ? "" : "s"}` : "Offline"}</Text></View>;
+}
+
+function ServiceAvailabilityList({ courierProfile, onToggle, savingServiceId, services }) {
+  return (
+    <View style={styles.serviceList}>
+      {services.map((service) => (
+        <View key={service.id} style={[styles.serviceCard, service.available && styles.serviceCardActive]}>
+          <View style={styles.serviceIcon}>
+            <Ionicons color={colors.primaryDark} name={serviceIcon(service.iconName)} size={21} />
+          </View>
+          <View style={styles.serviceCopy}>
+            <View style={styles.serviceNameLine}>
+              <Text style={styles.serviceName}>{service.name}</Text>
+              {service.requiresCourierProfile ? (
+                <View style={styles.deliveryPill}>
+                  <Ionicons color={colors.primaryDark} name="bicycle-outline" size={12} />
+                  <Text style={styles.deliveryPillText}>Central de corridas</Text>
+                </View>
+              ) : null}
+            </View>
+            <Text style={styles.serviceMeta}>
+              {service.available
+                ? "Online e disponivel para novas chamadas"
+                : service.requiresCourierProfile && !courierProfile
+                  ? "Cadastre seu veiculo para ativar"
+                  : "Offline para novos chamados"}
+            </Text>
+          </View>
+          {savingServiceId === service.id ? (
+            <ActivityIndicator color={colors.primaryDark} />
+          ) : (
+            <Switch
+              disabled={Boolean(savingServiceId)}
+              onValueChange={() => onToggle(service)}
+              thumbColor={colors.card}
+              trackColor={{ false: colors.borderStrong, true: colors.primary }}
+              value={service.available}
+            />
+          )}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function ServiceCatalog({ loadingServiceId, onStart, services, subtitle, title }) {
+  if (!services.length) return null;
+  return (
+    <>
+      <SectionTitle icon="grid-outline" subtitle={subtitle} title={title} />
+      <View style={styles.catalogList}>
+        {services.map((service) => (
+          <View key={service.id} style={styles.catalogCard}>
+            <View style={styles.catalogTop}>
+              <View style={styles.catalogIcon}>
+                <Ionicons color={colors.primaryDark} name={serviceIcon(service.iconName)} size={23} />
+              </View>
+              <View style={styles.serviceCopy}>
+                <Text style={styles.catalogName}>{service.name}</Text>
+                <Text style={styles.catalogDescription}>
+                  {service.description || "Atendimento por chamado no aplicativo."}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.requirementList}>
+              {service.registrationRequirements?.requiresVehicle ? (
+                <Text style={styles.requirementPill}>
+                  {service.registrationRequirements.vehicleKinds?.join(" / ") || "Veiculo"}
+                </Text>
+              ) : null}
+              {service.registrationRequirements?.requiresDriverLicense ? <Text style={styles.requirementPill}>CNH</Text> : null}
+              {service.registrationRequirements?.requiresPlate ? <Text style={styles.requirementPill}>Placa</Text> : null}
+              {!service.registrationRequirements?.requiresVehicle
+                && !service.registrationRequirements?.requiresDriverLicense
+                && !service.registrationRequirements?.requiresPlate ? (
+                  <Text style={styles.requirementPill}>Cadastro rapido</Text>
+                ) : null}
+            </View>
+            <Pressable
+              disabled={Boolean(loadingServiceId)}
+              onPress={() => onStart(service)}
+              style={({ pressed }) => [styles.performButton, pressed && styles.pressed]}
+            >
+              {loadingServiceId === service.id ? (
+                <ActivityIndicator color={colors.card} />
+              ) : (
+                <>
+                  <Text style={styles.performButtonText}>Quero realizar este servico</Text>
+                  <Ionicons color={colors.card} name="arrow-forward" size={18} />
+                </>
+              )}
+            </Pressable>
+          </View>
+        ))}
+      </View>
+    </>
+  );
+}
+
+function RegisterServicePrompt({ onPress }) {
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.registerService, pressed && styles.pressed]}>
+      <View style={styles.registerServiceIcon}>
+        <Ionicons color={colors.primaryDark} name="add-circle-outline" size={22} />
+      </View>
+      <View style={styles.serviceCopy}>
+        <Text style={styles.registerServiceTitle}>Realizar outro servico</Text>
+        <Text style={styles.registerServiceText}>Procure outra atividade sem misturar com sua central atual.</Text>
+      </View>
+      <Ionicons color={colors.primaryDark} name="arrow-forward" size={20} />
+    </Pressable>
+  );
 }
 
 function SectionTitle({ icon, subtitle, title, value = null }) {
@@ -668,7 +793,7 @@ function CourierDispatchScope({ acceptsPlatformCalls, canUseTeamOnly, isBusy, is
         <View style={styles.dispatchScopeIcon}><Ionicons color={colors.primaryDark} name="radio-outline" size={19} /></View>
         <View style={styles.copy}>
           <Text style={styles.dispatchScopeTitle}>Central do entregador</Text>
-          <Text style={styles.dispatchScopeText}>{isBusy ? "Em corrida; novas chamadas estao pausadas" : isOnline ? "Online para novas corridas" : "Ative Motoboy para receber corridas"}</Text>
+          <Text style={styles.dispatchScopeText}>{isBusy ? "Em corrida; novas chamadas estao pausadas" : isOnline ? "Online para novas corridas" : "Ative um servico de corrida para receber chamadas"}</Text>
         </View>
         <View style={[styles.dispatchStatus, isOnline && styles.dispatchStatusOnline]}><View style={[styles.dispatchDot, isOnline && styles.dispatchDotOnline]} /><Text style={[styles.dispatchStatusText, isOnline && styles.dispatchStatusTextOnline]}>{isBusy ? "Ocupado" : isOnline ? "Online" : "Offline"}</Text></View>
       </View>

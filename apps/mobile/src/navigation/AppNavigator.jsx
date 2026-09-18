@@ -1,6 +1,5 @@
 import { createNavigationContainerRef, NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { SafeAreaProvider } from "react-native-safe-area-context";
 import { CartScreen } from "../app/CartScreen";
 import { CheckoutPaymentScreen } from "../app/CheckoutPaymentScreen";
 import { CheckoutScreen } from "../app/CheckoutScreen";
@@ -287,16 +286,14 @@ export function AppNavigator({ onRouteChange }) {
   };
 
   return (
-    <SafeAreaProvider>
-      <NavigationContainer
-        linking={linking}
-        onReady={syncCurrentRoute}
-        onStateChange={syncCurrentRoute}
-        ref={navigationRef}
-        theme={navigationTheme}
-      >
-        <Routes />
-      </NavigationContainer>
-    </SafeAreaProvider>
+    <NavigationContainer
+      linking={linking}
+      onReady={syncCurrentRoute}
+      onStateChange={syncCurrentRoute}
+      ref={navigationRef}
+      theme={navigationTheme}
+    >
+      <Routes />
+    </NavigationContainer>
   );
 }

@@ -33,6 +33,9 @@ export async function sendExpoPushToUsers({ body, data = {}, title, userIds }) {
       const response = await fetch(expoPushUrl, {
         body: JSON.stringify(deviceChunk.map((device) => ({
           body,
+          ...(device.plataforma === "android"
+            ? { channelId: "courier-calls", priority: "high" }
+            : {}),
           data,
           sound: "default",
           title,

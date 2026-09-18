@@ -104,6 +104,18 @@ test("admin configures the registration required by each service", () => {
     },
     segmentId: 1,
   });
+  const mototaxi = createAdminServiceTypeSchema.safeParse({
+    iconName: "navigate",
+    name: "Mototaxi",
+    operationalType: "ENTREGA_LOCAL",
+    registrationRequirements: {
+      requiresDriverLicense: true,
+      requiresPlate: true,
+      requiresVehicle: true,
+      vehicleKinds: ["MOTO"],
+    },
+    segmentId: 1,
+  });
   const invalidVehicle = createAdminServiceTypeSchema.safeParse({
     name: "Entrega espacial",
     registrationRequirements: {
@@ -114,6 +126,9 @@ test("admin configures the registration required by each service", () => {
   });
 
   assert.equal(motoboy.success, true);
+  assert.equal(mototaxi.success, true);
+  assert.equal(mototaxi.data.operationalType, "ENTREGA_LOCAL");
+  assert.equal(mototaxi.data.iconName, "navigate");
   assert.equal(invalidVehicle.success, false);
 });
 

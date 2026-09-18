@@ -10,8 +10,10 @@ function serializeOrderConversation(order) {
   return {
     date: order.updatedAt ?? order.createdAt,
     id: `order-${order.id}`,
+    imageUrl: order.store?.logoUrl ?? null,
     kind: "order",
     order,
+    subtitle: `Pedido ${order.code ?? order.id}`,
     title: order.store?.name ?? "Loja",
     unreadCount: Number(order.unreadCustomerMessages ?? order.unreadMessagesCount ?? 0),
   };
@@ -22,7 +24,9 @@ function serializeStoreConversation(conversation) {
     conversation,
     date: conversation.updatedAt ?? conversation.createdAt,
     id: `store-${conversation.id}`,
+    imageUrl: conversation.store?.logoUrl ?? conversation.otherPerson?.photoUrl ?? null,
     kind: "store",
+    subtitle: conversation.lastMessage?.text ?? "Conversa com a loja",
     title: conversation.store?.name ?? "Loja",
     unreadCount: Number(conversation.unreadCount ?? 0),
   };
@@ -33,8 +37,30 @@ function serializePersonalConversation(conversation) {
     conversation,
     date: conversation.updatedAt ?? conversation.createdAt,
     id: `person-${conversation.id}`,
+    imageUrl: conversation.person?.photoUrl ?? null,
     kind: "person",
+    subtitle: conversation.lastMessage?.text ?? `@${conversation.person?.publicId ?? "contato"}`,
     title: conversation.displayName,
+    unreadCount: Number(conversation.unreadCount ?? 0),
+  };
+}
+
+function serializeServiceConversation(conversation) {
+  const requestedStore = conversation.request?.store;
+  return {
+    conversation,
+    date: conversation.updatedAt ?? conversation.createdAt,
+    id: `service-${conversation.id}`,
+    imageUrl: requestedStore?.logoUrl ?? conversation.otherPerson?.photoUrl ?? null,
+    kind: "service",
+    subtitle: conversation.lastMessage?.text
+      ?? conversation.request?.description
+      ?? conversation.serviceType?.name
+      ?? "Conversa de servico",
+    title: requestedStore?.name
+      ?? conversation.otherPerson?.name
+      ?? conversation.serviceType?.name
+      ?? "Servico",
     unreadCount: Number(conversation.unreadCount ?? 0),
   };
 }
@@ -140,16 +166,17 @@ export function useHomeConversations(accessToken) {
     };
   }, [accessToken, isFocused, load]);
 
-  const conversations = useMemo(
+  const searchableConversations = useMemo(
     () => [
       ...orders.map(serializeOrderConversation),
       ...personalChats.map(serializePersonalConversation),
       ...storeConversations.map(serializeStoreConversation),
+      ...serviceConversations.map(serializeServiceConversation),
     ]
-      .sort((first, second) => new Date(second.date ?? 0) - new Date(first.date ?? 0))
-      .slice(0, 3),
-    [orders, personalChats, storeConversations],
+      .sort((first, second) => new Date(second.date ?? 0) - new Date(first.date ?? 0)),
+    [orders, personalChats, serviceConversations, storeConversations],
   );
+  const conversations = searchableConversations.slice(0, 3);
 
   const personalUnreadCount = personalChats.reduce(
     (total, conversation) => total + Number(conversation.unreadCount ?? 0),
@@ -167,5 +194,12 @@ export function useHomeConversations(accessToken) {
     ))
     .sort((first, second) => new Date(second.updatedAt ?? 0) - new Date(first.updatedAt ?? 0));
 
-  return { conversations, courierConversations, courierOnline, isLoading, personalUnreadCount };
+  return {
+    conversations,
+    courierConversations,
+    courierOnline,
+    isLoading,
+    personalUnreadCount,
+    searchableConversations,
+  };
 }

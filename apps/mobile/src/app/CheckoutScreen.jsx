@@ -69,10 +69,20 @@ function addressFromSaved(address) {
 }
 
 export function CheckoutScreen({ navigation, route }) {
-  const { clearCart } = useCartStore();
+  const { removeItems } = useCartStore();
   const { session } = useAuthStore();
-  const cart = normalizeCart(route.params);
-  const [deliveryMode, setDeliveryMode] = useState("delivery");
+  const checkoutGroups = Array.isArray(route.params?.checkoutGroups)
+    ? route.params.checkoutGroups
+    : [route.params];
+  const checkoutIndex = Math.max(0, Number(route.params?.checkoutIndex ?? 0));
+  const checkoutGroup = checkoutGroups[checkoutIndex] ?? route.params;
+  const cart = normalizeCart(checkoutGroup);
+  const cartItemKeys = checkoutGroup?.cartItemKeys ?? cart.items.map((item) => item.cartKey).filter(Boolean);
+  const hasNextStore = checkoutIndex + 1 < checkoutGroups.length;
+  const deliveryAvailable = cart.store?.delivery?.available !== false
+    && cart.items.every((item) => item.product?.acceptDelivery !== false);
+  const pickupAvailable = cart.items.every((item) => item.product?.acceptPickup !== false);
+  const [deliveryMode, setDeliveryMode] = useState(deliveryAvailable ? "delivery" : "pickup");
   const [cpfModalOpen, setCpfModalOpen] = useState(false);
   const [addressForm, setAddressForm] = useState(initialAddressForm);
   const [addresses, setAddresses] = useState([]);
@@ -109,9 +119,8 @@ export function CheckoutScreen({ navigation, route }) {
       addressForm.estado.trim().length === 2,
   );
   const canContinue =
-    deliveryMode === "pickup" ||
-    isUsingSavedAddress ||
-    isNewAddressValid;
+    (deliveryMode === "pickup" && pickupAvailable) ||
+    (deliveryMode === "delivery" && deliveryAvailable && (isUsingSavedAddress || isNewAddressValid));
 
   useEffect(() => {
     let active = true;
@@ -249,6 +258,9 @@ export function CheckoutScreen({ navigation, route }) {
 
     if (!negotiatesByChat) {
       navigation.navigate("CheckoutPayment", {
+        cartItemKeys,
+        checkoutGroups,
+        checkoutIndex,
         delivery,
         deliveryMode,
         items: cart.items,
@@ -279,8 +291,16 @@ export function CheckoutScreen({ navigation, route }) {
         storeId: cart.store.id,
       }, requestIdempotencyKeyRef.current ??= createOrderIdempotencyKey("request"));
 
-      clearCart();
-      navigation.replace("CustomerOrderDetails", { order: response.order });
+      removeItems(cartItemKeys);
+      if (hasNextStore) {
+        navigation.replace("Checkout", {
+          ...checkoutGroups[checkoutIndex + 1],
+          checkoutGroups,
+          checkoutIndex: checkoutIndex + 1,
+        });
+      } else {
+        navigation.replace("CustomerOrderDetails", { order: response.order });
+      }
     } catch (requestError) {
       setSubmitError(requestError.message ?? "Nao foi possivel enviar o pedido para a loja.");
     } finally {
@@ -296,25 +316,52 @@ export function CheckoutScreen({ navigation, route }) {
             ? "Revise os itens e envie para a loja confirmar tudo pelo chat."
             : "Confirme a entrega antes de escolher a forma de pagamento."
         }
-        title={negotiatesByChat ? "Enviar pedido" : "Entrega e retirada"}
+        title={checkoutGroups.length > 1
+          ? `Loja ${checkoutIndex + 1} de ${checkoutGroups.length}`
+          : negotiatesByChat ? "Enviar pedido" : "Entrega e retirada"}
       />
+
+      {checkoutGroups.length > 1 ? (
+        <View style={styles.checkoutProgress}>
+          <View style={styles.checkoutProgressIcon}>
+            <Ionicons color={colors.primaryDark} name="layers-outline" size={20} />
+          </View>
+          <View style={styles.checkoutProgressCopy}>
+            <Text style={styles.checkoutProgressTitle}>{cart.store?.name}</Text>
+            <Text style={styles.checkoutProgressText}>
+              Cada loja gera um pedido e uma entrega separados. Os itens nao selecionados permanecem no carrinho.
+            </Text>
+          </View>
+        </View>
+      ) : null}
 
       <View style={styles.panel}>
         <Text style={styles.sectionTitle}>Como voce quer receber?</Text>
         <View style={styles.segmented}>
           <SegmentOption
             active={deliveryMode === "delivery"}
+            disabled={!deliveryAvailable}
             icon="bicycle-outline"
-            label="Entrega"
+            label={deliveryAvailable ? "Entrega" : "Sem entrega"}
             onPress={() => setDeliveryMode("delivery")}
           />
           <SegmentOption
             active={deliveryMode === "pickup"}
+            disabled={!pickupAvailable}
             icon="storefront-outline"
-            label="Retirada"
+            label={pickupAvailable ? "Retirada" : "Sem retirada"}
             onPress={() => setDeliveryMode("pickup")}
           />
         </View>
+
+        {!deliveryAvailable && !pickupAvailable ? (
+          <View style={styles.fulfillmentUnavailable}>
+            <Ionicons color={colors.danger} name="alert-circle-outline" size={20} />
+            <Text style={styles.fulfillmentUnavailableText}>
+              Estes produtos nao possuem uma forma de recebimento em comum. Volte ao carrinho e finalize-os separadamente.
+            </Text>
+          </View>
+        ) : null}
 
         {deliveryMode === "delivery" ? (
           <View style={styles.fields}>
@@ -502,7 +549,9 @@ export function CheckoutScreen({ navigation, route }) {
         icon={negotiatesByChat ? "chatbubble-ellipses-outline" : "card-outline"}
         loading={isSubmitting}
         onPress={() => continueOrder()}
-        title={negotiatesByChat ? "Enviar para a loja" : "Ir para pagamento"}
+        title={negotiatesByChat
+          ? hasNextStore ? "Enviar e continuar" : "Enviar para a loja"
+          : hasNextStore ? "Pagar esta loja" : "Ir para pagamento"}
       />
 
       <CpfRequirementModal
@@ -534,14 +583,29 @@ function CheckoutInput({ icon, label, style, ...props }) {
   );
 }
 
-function SegmentOption({ active, icon, label, onPress }) {
+function SegmentOption({ active, disabled = false, icon, label, onPress }) {
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled, selected: active }}
+      disabled={disabled}
       onPress={onPress}
-      style={[styles.segmentOption, active && styles.segmentOptionActive]}
+      style={[
+        styles.segmentOption,
+        active && styles.segmentOptionActive,
+        disabled && styles.segmentOptionDisabled,
+      ]}
     >
-      <Ionicons color={active ? colors.card : colors.primaryDark} name={icon} size={20} />
-      <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+      <Ionicons
+        color={disabled ? colors.textMuted : active ? colors.card : colors.primaryDark}
+        name={icon}
+        size={20}
+      />
+      <Text style={[
+        styles.segmentText,
+        active && styles.segmentTextActive,
+        disabled && styles.segmentTextDisabled,
+      ]}>
         {label}
       </Text>
     </Pressable>
@@ -558,6 +622,40 @@ function SummaryRow({ label, strong = false, value }) {
 }
 
 const styles = StyleSheet.create({
+  checkoutProgress: {
+    alignItems: "center",
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primaryLight,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    padding: spacing.md,
+  },
+  checkoutProgressCopy: {
+    flex: 1,
+    gap: 3,
+  },
+  checkoutProgressIcon: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderRadius: radius.round,
+    height: 42,
+    justifyContent: "center",
+    width: 42,
+  },
+  checkoutProgressText: {
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    fontSize: typography.caption,
+    lineHeight: 18,
+  },
+  checkoutProgressTitle: {
+    color: colors.textPrimary,
+    fontFamily: fonts.extraBold,
+    fontSize: typography.small,
+    fontWeight: "800",
+  },
   chatNotice: {
     alignItems: "center",
     backgroundColor: colors.primarySoft,
@@ -622,6 +720,23 @@ const styles = StyleSheet.create({
   },
   fields: {
     gap: spacing.lg,
+  },
+  fulfillmentUnavailable: {
+    alignItems: "flex-start",
+    backgroundColor: colors.dangerSoft,
+    borderColor: colors.danger,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    padding: spacing.md,
+  },
+  fulfillmentUnavailableText: {
+    color: colors.danger,
+    flex: 1,
+    fontFamily: fonts.medium,
+    fontSize: typography.caption,
+    lineHeight: 18,
   },
   input: {
     color: colors.textPrimary,
@@ -800,6 +915,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primaryDark,
     borderColor: colors.primaryDark,
   },
+  segmentOptionDisabled: {
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    opacity: 0.72,
+  },
   segmentText: {
     color: colors.primaryDark,
     fontFamily: fonts.extraBold,
@@ -808,6 +928,9 @@ const styles = StyleSheet.create({
   },
   segmentTextActive: {
     color: colors.card,
+  },
+  segmentTextDisabled: {
+    color: colors.textMuted,
   },
   summary: {
     backgroundColor: colors.card,

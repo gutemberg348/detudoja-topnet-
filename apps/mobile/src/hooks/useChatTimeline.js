@@ -6,13 +6,16 @@ export function useChatTimeline({ itemCount, scrollRef }) {
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [unreadBelow, setUnreadBelow] = useState(0);
   const atBottomRef = useRef(true);
+  const contentHeightRef = useRef(0);
   const initializedRef = useRef(false);
+  const layoutHeightRef = useRef(0);
   const previousCountRef = useRef(itemCount ?? 0);
 
   const scrollToLatest = useCallback((animated = true) => {
     atBottomRef.current = true;
     setIsAtBottom(true);
     setUnreadBelow(0);
+    if (contentHeightRef.current <= layoutHeightRef.current + 8) return;
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated }), 20);
   }, [scrollRef]);
 
@@ -27,12 +30,17 @@ export function useChatTimeline({ itemCount, scrollRef }) {
     if (nextAtBottom) setUnreadBelow(0);
   }, []);
 
-  const onContentSizeChange = useCallback(() => {
+  const onContentSizeChange = useCallback((_width, height) => {
+    contentHeightRef.current = height;
     if (!initializedRef.current || atBottomRef.current) {
       initializedRef.current = true;
       scrollToLatest(false);
     }
   }, [scrollToLatest]);
+
+  const onLayout = useCallback((event) => {
+    layoutHeightRef.current = event.nativeEvent.layout.height;
+  }, []);
 
   useEffect(() => {
     const currentCount = itemCount ?? 0;
@@ -52,6 +60,7 @@ export function useChatTimeline({ itemCount, scrollRef }) {
   return {
     isAtBottom,
     onContentSizeChange,
+    onLayout,
     onScroll,
     scrollToLatest,
     unreadBelow,

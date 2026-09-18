@@ -12,6 +12,7 @@ import {
 } from "../services/courier.api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import { getServiceConversation } from "../services/service-chats.api";
+import { serviceIconName } from "../utils/service-icons";
 import { searchAddresses } from "../services/cep.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
@@ -34,20 +35,29 @@ export function StoreCourierRequestScreen({ navigation, route }) {
   const [addressSearched, setAddressSearched] = useState(false);
   const [addressSuggestions, setAddressSuggestions] = useState([]);
   const [destinationSelected, setDestinationSelected] = useState(false);
-  const [dispatch, setDispatch] = useState({ currentRequest: null, platformAvailable: false, team: [] });
+  const [dispatch, setDispatch] = useState({ currentRequest: null, platformAvailable: false, serviceType: null, serviceTypes: [], team: [] });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [origin, setOrigin] = useState(() => storeAddress(store));
   const [saving, setSaving] = useState(false);
+  const [serviceTypeId, setServiceTypeId] = useState(null);
   const canRequest = useMemo(() => origin.trim().length >= 5 && destination.trim().length >= 5, [destination, origin]);
+  const serviceName = dispatch.currentRequest?.serviceType?.name ?? dispatch.serviceType?.name ?? "Corrida";
+  const serviceIcon = serviceIconName(dispatch.serviceType?.iconName, "navigate-outline");
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!session?.accessToken || !store?.id) return;
     if (!silent) setLoading(true);
-    try { setDispatch(await getStoreCourierDispatch(session.accessToken, store.id)); }
+    try {
+      const response = await getStoreCourierDispatch(session.accessToken, store.id, serviceTypeId);
+      setDispatch(response);
+      if (response.serviceType?.id && Number(response.serviceType.id) !== Number(serviceTypeId)) {
+        setServiceTypeId(response.serviceType.id);
+      }
+    }
     catch (requestError) { if (!silent) setError(requestError.message ?? "Nao foi possivel preparar a entrega."); }
     finally { if (!silent) setLoading(false); }
-  }, [session?.accessToken, store?.id]);
+  }, [serviceTypeId, session?.accessToken, store?.id]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
@@ -117,7 +127,7 @@ export function StoreCourierRequestScreen({ navigation, route }) {
   }, [load, navigation, session?.accessToken, store?.id]);
 
   async function callCourier(teamMemberId) {
-    if (!canRequest || saving) return;
+    if (!canRequest || !dispatch.serviceType?.id || saving) return;
     setSaving(true); setError("");
     try {
       const response = await createStoreCourierRequest(session.accessToken, store.id, {
@@ -125,10 +135,11 @@ export function StoreCourierRequestScreen({ navigation, route }) {
         destination,
         origin,
         ...(route.params?.orderId ? { orderId: route.params.orderId } : {}),
+        serviceTypeId: dispatch.serviceType.id,
         ...(teamMemberId ? { teamMemberId } : {}),
       });
       setDispatch((current) => ({ ...current, currentRequest: response.request }));
-    } catch (requestError) { setError(requestError.message ?? "Nao foi possivel chamar o motoboy."); }
+    } catch (requestError) { setError(requestError.message ?? `Nao foi possivel chamar ${serviceName.toLowerCase()}.`); }
     finally { setSaving(false); }
   }
 
@@ -142,8 +153,20 @@ export function StoreCourierRequestScreen({ navigation, route }) {
 
   return (
     <ScreenContainer contentContainerStyle={styles.content}>
-      <PageHeader eyebrow="Entrega da loja" subtitle="Informe a rota. O primeiro entregador que aceitar assume a corrida e abre a conversa." title="Chamar entregador" />
+      <PageHeader eyebrow="Corridas da loja" subtitle="Escolha o tipo, informe a rota e chame a equipe ou todos os profissionais online." title={`Chamar ${serviceName.toLowerCase()}`} />
       <View style={styles.storeCard}><View style={styles.icon}><Ionicons color={colors.primaryDark} name="storefront-outline" size={21} /></View><View style={styles.copy}><Text style={styles.label}>RETIRADA</Text><Text style={styles.storeName}>{store?.name}</Text></View><Pressable onPress={() => navigation.navigate("StoreCourierTeam", { store })} style={styles.teamLink}><Ionicons color={colors.primaryDark} name="people-outline" size={16} /><Text style={styles.teamLinkText}>Equipe</Text></Pressable></View>
+
+      {dispatch.serviceTypes.length > 1 && !dispatch.currentRequest ? (
+        <View style={styles.section}>
+          <SectionTitle subtitle="Cada tipo usa as regras configuradas no painel administrativo" title="Tipo de chamada" />
+          <View style={styles.serviceTypes}>
+            {dispatch.serviceTypes.map((type) => {
+              const active = Number(type.id) === Number(dispatch.serviceType?.id);
+              return <Pressable key={type.id} onPress={() => setServiceTypeId(type.id)} style={[styles.serviceTypeCard, active && styles.serviceTypeCardActive]}><View style={[styles.serviceTypeIcon, active && styles.serviceTypeIconActive]}><Ionicons color={active ? colors.card : colors.primaryDark} name={serviceIconName(type.iconName, "navigate-outline")} size={20} /></View><View style={styles.copy}><Text style={[styles.serviceTypeName, active && styles.serviceTypeNameActive]}>{type.name}</Text><Text numberOfLines={2} style={[styles.serviceTypeDescription, active && styles.serviceTypeDescriptionActive]}>{type.description || "Chamada em tempo real"}</Text></View>{active ? <Ionicons color={colors.card} name="checkmark-circle" size={19} /> : null}</Pressable>;
+            })}
+          </View>
+        </View>
+      ) : null}
 
       <View style={styles.formCard}>
         <AppInput icon="location-outline" label="Retirada" onChangeText={setOrigin} value={origin} />
@@ -174,7 +197,7 @@ export function StoreCourierRequestScreen({ navigation, route }) {
       {loading ? <StatePanel loading text="Preparando chamada..." /> : null}
       {!loading && dispatch.currentRequest ? (
         <View style={styles.waitingCard}>
-          <View style={styles.waitingTop}><View style={styles.radar}><ActivityIndicator color={colors.card} /></View><View style={styles.copy}><Text style={styles.waitingTitle}>Aguardando aceite</Text><Text style={styles.waitingText}>{dispatch.currentRequest.type === "EQUIPE" ? `Chamada enviada para ${dispatch.currentRequest.targetedCourier?.name}.` : "A chamada foi enviada aos motoboys disponiveis."}</Text></View></View>
+          <View style={styles.waitingTop}><View style={styles.radar}><ActivityIndicator color={colors.card} /></View><View style={styles.copy}><Text style={styles.waitingTitle}>Aguardando aceite</Text><Text style={styles.waitingText}>{dispatch.currentRequest.type === "EQUIPE" ? `Chamada de ${serviceName} enviada para ${dispatch.currentRequest.targetedCourier?.name}.` : `A chamada de ${serviceName} foi enviada aos profissionais disponiveis.`}</Text></View></View>
           <Text numberOfLines={2} style={styles.route}>{origin} -&gt; {destination}</Text>
           <Pressable disabled={saving} onPress={cancel} style={styles.cancelButton}><Text style={styles.cancelText}>Cancelar chamada</Text></Pressable>
         </View>
@@ -182,8 +205,8 @@ export function StoreCourierRequestScreen({ navigation, route }) {
 
       {!loading && !dispatch.currentRequest ? (
         <>
-          {dispatch.team.length ? <View style={styles.section}><SectionTitle subtitle="Escolha um entregador credenciado pela sua loja" title="Equipe credenciada" />{dispatch.team.map((member) => <Pressable disabled={!member.available || saving || !canRequest} key={member.id} onPress={() => callCourier(member.id)} style={[styles.memberCard, !member.available && styles.disabled]}><View style={styles.memberAvatar}><Ionicons color={colors.primaryDark} name="bicycle-outline" size={20} /></View><View style={styles.copy}><Text style={styles.memberName}>{member.name}</Text><Text style={styles.memberMeta}>{member.available ? `${member.vehicle} - disponivel` : member.isBusy ? "Em outra corrida" : "Offline agora"}</Text></View><Ionicons color={member.available ? colors.primaryDark : colors.textMuted} name="arrow-forward" size={19} /></Pressable>)}</View> : null}
-          <View style={styles.section}><SectionTitle subtitle="A plataforma avisa quem esta disponivel na sua cidade" title="Chamada geral" /><View style={styles.platformCard}><View style={styles.platformIcon}><Ionicons color={colors.card} name="radio-outline" size={25} /></View><View style={styles.copy}><Text style={styles.platformTitle}>Chamar entregador</Text><Text style={styles.platformText}>{dispatch.platformAvailable ? "Servico disponivel agora." : "Servico indisponivel agora."}</Text></View><Pressable disabled={!dispatch.platformAvailable || !canRequest || saving} onPress={() => callCourier()} style={[styles.callButton, (!dispatch.platformAvailable || !canRequest) && styles.disabled]}>{saving ? <ActivityIndicator color={colors.card} /> : <Ionicons color={colors.card} name="arrow-forward" size={20} />}</Pressable></View></View>
+          {dispatch.team.length ? <View style={styles.section}><SectionTitle subtitle={`Escolha quem esta online para ${serviceName.toLowerCase()}`} title="Equipe credenciada" />{dispatch.team.map((member) => <Pressable disabled={!member.available || saving || !canRequest} key={member.id} onPress={() => callCourier(member.id)} style={[styles.memberCard, !member.available && styles.disabled]}><View style={styles.memberAvatar}><Ionicons color={colors.primaryDark} name={serviceIcon} size={20} /></View><View style={styles.copy}><Text style={styles.memberName}>{member.name}</Text><Text style={styles.memberMeta}>{member.available ? `${member.vehicle} - disponivel` : member.isBusy ? "Em outra corrida" : "Offline agora"}</Text></View><Ionicons color={member.available ? colors.primaryDark : colors.textMuted} name="arrow-forward" size={19} /></Pressable>)}</View> : null}
+          <View style={styles.section}><SectionTitle subtitle="A plataforma avisa todos que estao disponiveis na sua cidade" title="Chamada geral" /><View style={styles.platformCard}><View style={styles.platformIcon}><Ionicons color={colors.card} name={serviceIcon} size={25} /></View><View style={styles.copy}><Text style={styles.platformTitle}>Chamar {serviceName.toLowerCase()}</Text><Text style={styles.platformText}>{dispatch.platformAvailable ? "Servico disponivel agora." : "Servico indisponivel agora."}</Text></View><Pressable disabled={!dispatch.platformAvailable || !canRequest || saving} onPress={() => callCourier()} style={[styles.callButton, (!dispatch.platformAvailable || !canRequest) && styles.disabled]}>{saving ? <ActivityIndicator color={colors.card} /> : <Ionicons color={colors.card} name="arrow-forward" size={20} />}</Pressable></View></View>
         </>
       ) : null}
     </ScreenContainer>
@@ -210,6 +233,15 @@ const styles = StyleSheet.create({
   platformIcon: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.round, height: 48, justifyContent: "center", width: 48 }, platformText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption }, platformTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.label },
   radar: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.round, height: 46, justifyContent: "center", width: 46 }, route: { color: colors.textPrimary, fontFamily: fonts.medium, fontSize: typography.caption },
   section: { gap: spacing.sm }, sectionHeading: { gap: 3 }, sectionSubtitle: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption }, sectionTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.h3 },
+  serviceTypeCard: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.md, minHeight: 76, padding: spacing.md },
+  serviceTypeCardActive: { backgroundColor: colors.primaryDark, borderColor: colors.primaryDark },
+  serviceTypeDescription: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 10, marginTop: 2 },
+  serviceTypeDescriptionActive: { color: "#CDEFE2" },
+  serviceTypeIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, height: 42, justifyContent: "center", width: 42 },
+  serviceTypeIconActive: { backgroundColor: "rgba(255,255,255,0.14)" },
+  serviceTypeName: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.small },
+  serviceTypeNameActive: { color: colors.card },
+  serviceTypes: { gap: spacing.sm },
   storeCard: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.md, padding: spacing.md }, storeName: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.label },
   suggestion: { alignItems: "center", flexDirection: "row", gap: spacing.sm, minHeight: 54, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   suggestionIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 34, justifyContent: "center", width: 34 },

@@ -31,6 +31,14 @@ import {
 
 const publicSellerStatuses = ["ATIVO"];
 const legacyServiceTypeSlugs = ["entregador"];
+
+function isOperationalServiceAvailable(service, operationalType = null) {
+  const type = operationalType ?? service?.tipo_servico?.tipo_operacao;
+  return type === "ENTREGA_LOCAL"
+    ? Boolean(service?.disponivel_agora && service?.status === "ATIVO" && !service?.excluido_em)
+    : isServiceAvailable(service);
+}
+
 const serviceFamilies = [
   {
     key: "limpeza-externa",
@@ -318,7 +326,7 @@ function serializeConversation(conversation, viewerId, { includeMessages = false
       slug: conversation.segmento_venda.slug,
     },
     seller: serializeSeller(conversation.vendedor, {
-      isOnline: isServiceAvailable(conversation.servico_vendedor),
+      isOnline: isOperationalServiceAvailable(conversation.servico_vendedor),
     }),
     proposals: (conversation.propostas ?? []).map(serializeProposal),
     request: {
@@ -561,7 +569,7 @@ export async function listSellerServices(userId) {
     hasSellerProfile: Boolean(seller),
     services: types.map((type) => ({
       ...serializeServiceType(type),
-      available: isServiceAvailable(byType.get(type.id)),
+      available: isOperationalServiceAvailable(byType.get(type.id), type.tipo_operacao),
       enabled: Boolean(byType.get(type.id)),
       registrationData: byType.get(type.id)?.dados_cadastro ?? null,
       sellerServiceId: byType.get(type.id)?.id ?? null,
@@ -1212,6 +1220,10 @@ export async function declineServiceProposal(userId, conversationId, proposalId)
       origem: "SISTEMA",
     },
   });
+  await serviceChatsRepository.updateConversation({
+    data: { atualizado_em: new Date() },
+    where: { id: conversation.id },
+  });
   const updatedConversation = await findAccessibleConversation(userId, conversation.id);
   notifyConversation(updatedConversation, "proposal-declined");
   return { conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
@@ -1278,7 +1290,7 @@ export async function cancelServiceConversation(userId, conversationId) {
   notifyConversation(updatedConversation, "service-cancelled");
   notifyCourierAvailability(
     updatedConversation,
-    isServiceAvailable(updatedConversation.servico_vendedor)
+    isOperationalServiceAvailable(updatedConversation.servico_vendedor)
       && !(await isCourierSellerBusy(serviceChatsRepository, updatedConversation.vendedor_id)),
   );
   return { conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
@@ -1396,7 +1408,7 @@ export async function confirmServiceCompletion(userId, conversationId) {
   notifyConversation(updatedConversation, "service-completed");
   notifyCourierAvailability(
     updatedConversation,
-    isServiceAvailable(updatedConversation.servico_vendedor)
+    isOperationalServiceAvailable(updatedConversation.servico_vendedor)
       && !(await isCourierSellerBusy(serviceChatsRepository, updatedConversation.vendedor_id)),
   );
   return { conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
@@ -1453,7 +1465,11 @@ export async function createServiceConversationMessage(userId, conversationId, d
   });
   try {
     const message = await serviceChatsRepository.createMessage({ data: { anexo_json: attachment, autor_usuario_id: userId, conversa_servico_id: conversation.id, lido_cliente_em: isSeller ? null : new Date(), lido_vendedor_em: isSeller ? new Date() : null, mensagem: text || null, origem: isSeller ? "VENDEDOR" : "CLIENTE" } });
-    const savedConversation = await serviceChatsRepository.updateConversation({ include: conversationInclude, data: {}, where: { id: conversation.id } });
+    const savedConversation = await serviceChatsRepository.updateConversation({
+      include: conversationInclude,
+      data: { atualizado_em: new Date() },
+      where: { id: conversation.id },
+    });
     const serializedConversation = serializeConversation(savedConversation, userId, { includeMessages: true });
     const serializedMessage = serializeMessage(message, userId);
     emitServiceChatMessageCreated({ conversation: serializedConversation, message: serializedMessage });
@@ -1500,7 +1516,7 @@ export async function createServiceConversationLocation(userId, conversationId, 
   });
   const savedConversation = await serviceChatsRepository.updateConversation({
     include: conversationInclude,
-    data: {},
+    data: { atualizado_em: new Date() },
     where: { id: conversation.id },
   });
   const serializedConversation = serializeConversation(savedConversation, userId, { includeMessages: true });

@@ -1,5 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { SearchBar } from "../components/SearchBar";
@@ -22,6 +22,31 @@ export function HomeScreen({ navigation }) {
     showInitial: true,
   });
   const recent = useHomeConversations(session?.accessToken);
+  const normalizedQuery = normalizeSearchText(query);
+  const chatSuggestions = useMemo(() => {
+    const matches = (recent.searchableConversations ?? []).filter((conversation) => {
+      if (!normalizedQuery) return true;
+      return normalizeSearchText([
+        conversation.title,
+        conversation.subtitle,
+        conversation.conversation?.serviceType?.name,
+        conversation.conversation?.store?.name,
+      ].filter(Boolean).join(" ")).includes(normalizedQuery);
+    });
+
+    return matches.slice(0, 4).map((conversation) => ({
+      conversation,
+      description: conversation.subtitle || "Conversa recente",
+      iconUrl: conversation.imageUrl,
+      id: conversation.id,
+      label: conversation.title,
+      type: "conversation",
+    }));
+  }, [normalizedQuery, recent.searchableConversations]);
+  const combinedSuggestions = useMemo(() => {
+    const marketplaceSuggestions = suggestions.slice(0, 12);
+    return [...chatSuggestions, ...marketplaceSuggestions].slice(0, 16);
+  }, [chatSuggestions, suggestions]);
 
   function openSearch(searchValue = query) {
     const value = searchValue.trim();
@@ -36,6 +61,11 @@ export function HomeScreen({ navigation }) {
   }
 
   function selectSuggestion(suggestion) {
+    if (suggestion.type === "conversation") {
+      openConversation(suggestion.conversation);
+      return true;
+    }
+
     if (suggestion.type === "category") {
       navigation.navigate("Buscar", { category: suggestion.id, query: "" });
       return true;
@@ -103,10 +133,13 @@ export function HomeScreen({ navigation }) {
         contentContainerStyle={styles.root}
         edges={["top", "left", "right", "bottom"]}
         padded={false}
+        scrollEnabled={!searchFocused}
         style={styles.screen}
       >
         <View style={styles.content}>
           <SearchBar
+            expandedSuggestions
+            initialSuggestionsTitle="Conversas recentes e sugestoes"
             loading={suggestionsLoading}
             onChangeText={setQuery}
             onFocusChange={setSearchFocused}
@@ -114,7 +147,7 @@ export function HomeScreen({ navigation }) {
             onSubmit={openSearch}
             placeholder="O que voce quer hoje?"
             showVoice
-            suggestions={suggestions}
+            suggestions={combinedSuggestions}
             value={query}
           />
 

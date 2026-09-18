@@ -8,6 +8,8 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { AppState, Keyboard, Pressable, StyleSheet, Text, View } from "react-native";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import { GlobalIncomingServiceAlert } from "./src/components/GlobalIncomingServiceAlert";
 import { AppNavigator, navigationRef } from "./src/navigation/AppNavigator";
 import { heartbeatSellerServices } from "./src/services/service-chats.api";
 import {
@@ -24,11 +26,13 @@ import { colors, fonts, radius, shadow, spacing } from "./src/utils/theme";
 
 export function App() {
   return (
-    <AuthStoreProvider>
-      <CartStoreProvider>
-        <AppContent />
-      </CartStoreProvider>
-    </AuthStoreProvider>
+    <SafeAreaProvider>
+      <AuthStoreProvider>
+        <CartStoreProvider>
+          <AppContent />
+        </CartStoreProvider>
+      </AuthStoreProvider>
+    </SafeAreaProvider>
   );
 }
 
@@ -99,6 +103,7 @@ function AppContent() {
       <StatusBar style="dark" />
       <AppNavigator onRouteChange={setActiveRouteName} />
       <GlobalCartButton activeRouteName={activeRouteName} />
+      <GlobalIncomingServiceAlert navigationRef={navigationRef} />
     </View>
   );
 }

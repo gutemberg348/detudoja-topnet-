@@ -85,7 +85,7 @@ export function StoreCourierTeamScreen({ navigation, route }) {
       });
       setPhone("");
     } catch (requestError) {
-      setError(requestError.message ?? "Nao foi possivel adicionar o motoboy.");
+      setError(requestError.message ?? "Nao foi possivel adicionar o profissional.");
     } finally {
       setAdding(false);
     }
@@ -101,7 +101,7 @@ export function StoreCourierTeamScreen({ navigation, route }) {
 
     Alert.alert(
       "Remover da equipe?",
-      `${member.courier.displayName} nao aparecera mais como motoboy desta loja.`,
+      `${member.courier.displayName} nao aparecera mais na equipe de corridas desta loja.`,
       [
         { style: "cancel", text: "Cancelar" },
         { onPress: () => removeMember(member), style: "destructive", text: "Remover" },
@@ -117,7 +117,7 @@ export function StoreCourierTeamScreen({ navigation, route }) {
       await removeStoreCourier(session.accessToken, store.id, member.id);
       setMembers((current) => current.filter((item) => item.id !== member.id));
     } catch (requestError) {
-      setError(requestError.message ?? "Nao foi possivel remover o motoboy.");
+      setError(requestError.message ?? "Nao foi possivel remover o profissional.");
     } finally {
       setRemovingId(null);
     }
@@ -127,9 +127,9 @@ export function StoreCourierTeamScreen({ navigation, route }) {
     <ScreenContainer contentContainerStyle={styles.content}>
       <PageHeader
         action={<TeamCount online={onlineCount} total={members.length} />}
-        eyebrow="Entrega da loja"
+        eyebrow="Corridas da loja"
         subtitle="Organize os profissionais fixos que sua operacao chama com mais frequencia."
-        title="Equipe de motoboys"
+        title="Equipe de corridas"
       />
 
       <View style={styles.storeStrip}>
@@ -148,14 +148,14 @@ export function StoreCourierTeamScreen({ navigation, route }) {
         <View style={styles.addHeader}>
           <View style={styles.addIcon}><Ionicons color={colors.primaryDark} name="person-add-outline" size={20} /></View>
           <View style={styles.copy}>
-            <Text style={styles.addTitle}>Adicionar motoboy</Text>
-            <Text style={styles.addText}>Use o mesmo telefone que ele cadastrou no perfil de entrega.</Text>
+            <Text style={styles.addTitle}>Adicionar profissional</Text>
+            <Text style={styles.addText}>Use o telefone cadastrado no perfil de transporte dele.</Text>
           </View>
         </View>
         <AppInput
           icon="call-outline"
           keyboardType="phone-pad"
-          label="Telefone do motoboy"
+          label="Telefone do profissional"
           maxLength={16}
           onChangeText={(value) => setPhone(formatPhone(value))}
           placeholder="(83) 99999-9999"
@@ -178,7 +178,7 @@ export function StoreCourierTeamScreen({ navigation, route }) {
           <View style={styles.sectionHeader}>
             <View style={styles.sectionIcon}><Ionicons color={colors.primaryDark} name="people-outline" size={18} /></View>
             <View style={styles.copy}>
-              <Text style={styles.sectionTitle}>Motoboys cadastrados</Text>
+              <Text style={styles.sectionTitle}>Profissionais cadastrados</Text>
               <Text style={styles.sectionText}>Online aparece primeiro ao chamar uma corrida.</Text>
             </View>
           </View>
@@ -195,7 +195,7 @@ export function StoreCourierTeamScreen({ navigation, route }) {
               ))}
             </View>
           ) : (
-            <StatePanel icon="bicycle-outline" text="Adicione pelo telefone depois que o profissional concluir o cadastro de motoboy no app." title="Equipe ainda vazia" />
+            <StatePanel icon="navigate-outline" text="Adicione pelo telefone depois que o profissional concluir o cadastro de transporte no app." title="Equipe ainda vazia" />
           )}
         </View>
       ) : null}

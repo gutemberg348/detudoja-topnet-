@@ -28,6 +28,7 @@ import { getCurrentUserAddresses, updateCurrentUser } from "../services/users.ap
 import { useAuthStore } from "../stores/useAuthStore";
 import { resolveMediaUrl } from "../utils/media";
 import { matchesSearchText, normalizeSearchText } from "../utils/search";
+import { serviceIconName } from "../utils/service-icons";
 import {
   colors,
   fonts,
@@ -831,15 +832,7 @@ function isServiceStoreCategory(category) {
 }
 
 function serviceIcon(iconName) {
-  const icons = {
-    bicycle: "bicycle-outline",
-    car: "car-outline",
-    construct: "construct-outline",
-    delivery: "cube-outline",
-    person: "person-outline",
-  };
-
-  return icons[String(iconName ?? "").toLowerCase()] ?? "briefcase-outline";
+  return serviceIconName(iconName);
 }
 
 function serviceVisual(serviceType) {

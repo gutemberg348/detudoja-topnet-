@@ -1,5 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { useEffect, useRef } from "react";
+import { ActivityIndicator, Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   colors,
@@ -12,6 +13,17 @@ import {
 
 export function IncomingServiceAlert({ alert, loading, onAccept, onClose, onPress }) {
   const insets = useSafeAreaInsets();
+  const pulse = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!alert) return undefined;
+    const animation = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { duration: 650, toValue: 1, useNativeDriver: true }),
+      Animated.timing(pulse, { duration: 650, toValue: 0, useNativeDriver: true }),
+    ]));
+    animation.start();
+    return () => animation.stop();
+  }, [alert, pulse]);
 
   if (!alert) return null;
 
@@ -23,17 +35,25 @@ export function IncomingServiceAlert({ alert, loading, onAccept, onClose, onPres
       style={[styles.layer, { paddingTop: Math.max(insets.top, spacing.sm) }]}
     >
       <Pressable
-        accessibilityLabel={isCourier ? "Abrir chamada de motoboy" : "Abrir chamado de servico"}
+        accessibilityLabel={isCourier ? "Abrir chamada de corrida" : "Abrir chamado de servico"}
         onPress={onPress}
         style={({ pressed }) => [styles.card, pressed && styles.pressed]}
       >
-        <View style={[styles.icon, isCourier && styles.iconCourier]}>
+        <Animated.View
+          style={[
+            styles.icon,
+            isCourier && styles.iconCourier,
+            {
+              transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.09] }) }],
+            },
+          ]}
+        >
           <Ionicons
             color={colors.card}
             name={isCourier ? "bicycle" : "chatbubble-ellipses"}
             size={21}
           />
-        </View>
+        </Animated.View>
         <View style={styles.copy}>
           <View style={styles.eyebrowLine}>
             <View style={styles.liveDot} />
@@ -62,7 +82,7 @@ export function IncomingServiceAlert({ alert, loading, onAccept, onClose, onPres
             )}
           </Pressable>
           <Pressable
-            accessibilityLabel="Ver chamado depois"
+            accessibilityLabel="Recusar chamado"
             disabled={loading}
             onPress={(event) => {
               event.stopPropagation?.();
@@ -70,7 +90,7 @@ export function IncomingServiceAlert({ alert, loading, onAccept, onClose, onPres
             }}
             style={styles.later}
           >
-            <Text style={styles.laterText}>Agora nao</Text>
+            <Text style={styles.laterText}>Recusar</Text>
           </Pressable>
         </View>
         <Pressable

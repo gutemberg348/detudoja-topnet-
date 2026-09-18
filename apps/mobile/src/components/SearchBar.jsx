@@ -1,12 +1,15 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { resolveMediaUrl } from "../utils/media";
+import { serviceIconName } from "../utils/service-icons";
 import { colors, fonts, radius, shadow, spacing, typography } from "../utils/theme";
 
 export function SearchBar({
   compact = false,
   containerStyle,
+  expandedSuggestions = false,
+  initialSuggestionsTitle = "Sugestoes perto de voce",
   loading = false,
   onChangeText,
   onFocusChange,
@@ -19,7 +22,16 @@ export function SearchBar({
 }) {
   const [focused, setFocused] = useState(false);
   const blurTimeoutRef = useRef(null);
+  const { height: windowHeight } = useWindowDimensions();
   const visibleSuggestions = focused && (loading || suggestions.length > 0);
+  const rowHeight = expandedSuggestions ? 78 : 68;
+  const maximumListHeight = expandedSuggestions
+    ? Math.min(390, Math.max(280, windowHeight * 0.46))
+    : 244;
+  const suggestionListHeight = Math.min(
+    maximumListHeight,
+    Math.max(rowHeight, suggestions.length * rowHeight),
+  );
 
   useEffect(() => () => clearBlurTimeout(), []);
 
@@ -98,12 +110,11 @@ export function SearchBar({
 
       {visibleSuggestions ? (
         <View
-          onStartShouldSetResponder={() => true}
           style={[styles.suggestions, compact && styles.suggestionsCompact]}
         >
           <View style={styles.suggestionsHeader}>
             <Text style={styles.suggestionsTitle}>
-              {value.trim() ? "Resultados rapidos" : "Sugestoes perto de voce"}
+              {value.trim() ? "Resultados rapidos" : initialSuggestionsTitle}
             </Text>
             {loading ? <ActivityIndicator color={colors.primaryDark} size="small" /> : null}
           </View>
@@ -114,14 +125,9 @@ export function SearchBar({
             nestedScrollEnabled
             overScrollMode="always"
             persistentScrollbar
-            scrollEnabled={suggestions.length > 3}
+            scrollEnabled={suggestions.length * rowHeight > maximumListHeight}
             showsVerticalScrollIndicator
-            style={[
-              styles.suggestionsScroll,
-              Platform.OS === "android" && {
-                height: Math.min(244, Math.max(68, suggestions.length * 68)),
-              },
-            ]}
+            style={[styles.suggestionsScroll, { height: suggestionListHeight, maxHeight: maximumListHeight }]}
           >
             {suggestions.map((suggestion, index) => {
               const label = suggestion.label ?? suggestion.name ?? String(suggestion);
@@ -146,7 +152,7 @@ export function SearchBar({
                 >
                   <SuggestionArtwork suggestion={suggestion} visual={visual} />
                   <View style={styles.suggestionCopy}>
-                    <Text numberOfLines={1} style={styles.suggestionText}>
+                    <Text numberOfLines={2} style={styles.suggestionText}>
                       {label}
                     </Text>
                     <View style={styles.suggestionMetaRow}>
@@ -182,7 +188,7 @@ function SuggestionArtwork({ suggestion, visual }) {
       {iconUrl && !imageFailed ? (
         <Image
           onError={() => setImageFailed(true)}
-          resizeMode={suggestion.type === "product" ? "cover" : "contain"}
+          resizeMode={["conversation", "product"].includes(suggestion.type) ? "cover" : "contain"}
           source={{ uri: iconUrl }}
           style={styles.suggestionImage}
         />
@@ -198,17 +204,7 @@ function SuggestionArtwork({ suggestion, visual }) {
 }
 
 function suggestionIcon(type, iconName) {
-  const serviceIcons = {
-    bicycle: "bicycle-outline",
-    car: "car-outline",
-    construct: "construct-outline",
-    delivery: "cube-outline",
-    person: "person-outline",
-  };
-
-  if (type === "service" && serviceIcons[String(iconName ?? "").toLowerCase()]) {
-    return serviceIcons[String(iconName).toLowerCase()];
-  }
+  if (type === "service") return serviceIconName(iconName);
   if (type === "category") {
     return "grid-outline";
   }
@@ -221,8 +217,8 @@ function suggestionIcon(type, iconName) {
     return "bag-handle-outline";
   }
 
-  if (type === "service") {
-    return "briefcase-outline";
+  if (type === "conversation") {
+    return "chatbubble-ellipses-outline";
   }
 
   return "search";
@@ -243,6 +239,10 @@ function suggestionTypeLabel(type) {
 
   if (type === "service") {
     return "Servico";
+  }
+
+  if (type === "conversation") {
+    return "Conversa";
   }
 
   return "Resultado";
@@ -286,6 +286,11 @@ function suggestionVisual(type) {
       background: "#EAF2FF",
       badgeBackground: "#DBEAFE",
       color: "#2563EB",
+    },
+    conversation: {
+      background: colors.primarySoft,
+      badgeBackground: "#D1FAE5",
+      color: colors.primaryDark,
     },
   };
 
@@ -333,7 +338,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flexDirection: "row",
     gap: spacing.md,
-    minHeight: 68,
+    minHeight: 76,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
   },
@@ -346,9 +351,9 @@ const styles = StyleSheet.create({
   suggestionIcon: {
     alignItems: "center",
     borderRadius: 999,
-    height: 40,
+    height: 44,
     justifyContent: "center",
-    width: 40,
+    width: 44,
   },
   suggestionImage: { height: "100%", width: "100%" },
   suggestionKind: { borderRadius: radius.round, paddingHorizontal: 7, paddingVertical: 3 },
@@ -374,7 +379,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     fontSize: typography.body,
     fontWeight: "700",
-    lineHeight: 19,
+    lineHeight: 20,
   },
   suggestions: {
     backgroundColor: colors.card,

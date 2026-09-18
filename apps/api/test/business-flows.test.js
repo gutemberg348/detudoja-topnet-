@@ -525,6 +525,13 @@ test("store journey, persistent search and customer product cards share one chat
   });
   assert.equal(searchNotification.nao_lidas_loja, 0);
 
+  const genericSearch = await createStoreConversationMessage(state.buyer.id, opened.conversation.id, {
+    message: "Produtos",
+    searchCatalog: true,
+  });
+  assert.equal(genericSearch.message.content.productCount, 0);
+  assert.equal(genericSearch.message.content.suggestions[0].id, state.product.id);
+
   const selectedProduct = await createStoreConversationMessage(
     state.buyer.id,
     opened.conversation.id,

@@ -91,9 +91,7 @@ const teamMemberInclude = {
 function serializeTeamMember(member, busySellerIds = new Set()) {
   const courier = member.motoboy;
   const services = courier.vendedor.servicos ?? [];
-  const preferredService = services.find((service) => service.tipo_servico.slug === "motoboy" && isServiceAvailable(service))
-    ?? services.find((service) => isServiceAvailable(service))
-    ?? services.find((service) => service.tipo_servico.slug === "motoboy")
+  const preferredService = services.find((service) => isServiceAvailable(service))
     ?? services[0]
     ?? null;
   const isOnline = courier.status === "ATIVO" && isServiceAvailable(preferredService);
@@ -155,7 +153,7 @@ export async function updateCourierDispatchScope(userId, { acceptsPlatformCalls 
       vendedor: { excluido_em: null, status: "ATIVO", status_kyc: "APROVADO", usuario_id: userId },
     },
   });
-  if (!profile) throw new AppError("Conclua o KYC e cadastre seu perfil de motoboy antes de definir a disponibilidade", 428);
+  if (!profile) throw new AppError("Conclua o KYC e cadastre seu perfil de transporte antes de definir a disponibilidade", 428);
   if (!acceptsPlatformCalls && !profile.lojas.length) {
     throw new AppError("Vincule-se a uma loja antes de receber somente chamadas credenciadas", 409);
   }
@@ -182,21 +180,21 @@ export async function saveCourierProfile(userId, data) {
   });
 
   if (!seller) {
-    throw new AppError("Crie seu cadastro comercial antes do perfil de motoboy", 428);
+    throw new AppError("Crie seu cadastro comercial antes do perfil de transporte", 428);
   }
 
   if (seller.status !== "ATIVO" || seller.status_kyc !== "APROVADO") {
-    throw new AppError("Conclua a verificacao comercial antes de cadastrar ou operar como motoboy", 428);
+    throw new AppError("Conclua a verificacao comercial antes de cadastrar ou operar em corridas", 428);
   }
 
   const cpf = normalizeCpf(seller.cpf || seller.usuario.cpf || "");
   if (!isValidCpf(cpf)) {
-    throw new AppError("Confirme um CPF valido na sua conta antes de cadastrar o motoboy", 428);
+    throw new AppError("Confirme um CPF valido na sua conta antes de cadastrar o perfil de transporte", 428);
   }
 
   const baseAddress = await courierRepository.getUserBaseAddress(userId);
   if (!sameCity(baseAddress, { city: data.baseCity, state: data.baseState })) {
-    throw new AppError("O motoboy atende somente a cidade-base da sua conta", 409);
+    throw new AppError("O profissional atende somente a cidade-base da sua conta", 409);
   }
 
   let profile;
@@ -267,7 +265,7 @@ export async function addStoreCourier(userId, storeId, data) {
   const teamSize = await courierRepository.countTeamMembers({
     where: { ativo: true, loja_id: store.id },
   });
-  if (teamSize >= 30) throw new AppError("Esta loja atingiu o limite de 30 motoboys", 409);
+  if (teamSize >= 30) throw new AppError("Esta loja atingiu o limite de 30 profissionais na equipe", 409);
 
   const courier = await courierRepository.findCourier({
     include: { vendedor: { select: { usuario_id: true } } },
@@ -283,16 +281,16 @@ export async function addStoreCourier(userId, storeId, data) {
     },
   });
   if (!courier) {
-    throw new AppError("Nenhum motoboy cadastrado foi encontrado com este telefone", 404);
+    throw new AppError("Nenhum profissional de corrida foi encontrado com este telefone", 404);
   }
   if (!store.endereco) {
     throw new AppError("Cadastre o CEP e endereco comercial da loja antes de montar a equipe", 428);
   }
   if (!matchesStoreCity(courier, store.endereco)) {
-    throw new AppError("Este motoboy possui base em outra cidade e nao pode entrar nesta equipe", 409);
+    throw new AppError("Este profissional possui base em outra cidade e nao pode entrar nesta equipe", 409);
   }
   if (courier.vendedor.usuario_id === userId) {
-    throw new AppError("Use outro motoboy: voce nao pode chamar o proprio perfil", 409);
+    throw new AppError("Use outro profissional: voce nao pode chamar o proprio perfil", 409);
   }
 
   const member = await courierRepository.upsertTeamMember({
@@ -309,12 +307,12 @@ export async function addStoreCourier(userId, storeId, data) {
 
 export async function removeStoreCourier(userId, storeId, memberId) {
   const store = await findAccessibleStore(userId, storeId, { manageTeam: true });
-  const id = parsePositiveId(memberId, "Motoboy da equipe invalido");
+  const id = parsePositiveId(memberId, "Profissional da equipe invalido");
   const member = await courierRepository.findTeamMember({
     include: { motoboy: { include: { vendedor: { select: { usuario_id: true } } } } },
     where: { id, loja_id: store.id },
   });
-  if (!member) throw new AppError("Motoboy nao encontrado nesta equipe", 404);
+  if (!member) throw new AppError("Profissional nao encontrado nesta equipe", 404);
 
   await courierRepository.deleteTeamMember({ where: { id: member.id } });
   emitCourierTeamUpdated({ courierUserId: member.motoboy.vendedor.usuario_id, storeId: store.id });

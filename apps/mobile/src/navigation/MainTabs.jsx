@@ -2,21 +2,20 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AppState, Platform, StyleSheet, Vibration, View } from "react-native";
+import { AppState, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { HomeScreen } from "../app/HomeScreen";
 import { NetworkScreen } from "../app/NetworkScreen";
 import { ProfileScreen } from "../app/ProfileScreen";
 import { SellScreen } from "../app/SellScreen";
 import { StoresScreen } from "../app/StoresScreen";
-import { IncomingServiceAlert } from "../components/IncomingServiceAlert";
 import { countNewStoreOrders } from "../app/sell/seller.utils";
 import { useRealtimeOrders } from "../hooks/useRealtimeOrders";
 import { getCustomerOrders } from "../services/orders.api";
-import { acceptCourierRequest, getCourierRequests } from "../services/courier.api";
+import { getCourierRequests } from "../services/courier.api";
 import { getSellerProfile } from "../services/seller.api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
-import { acceptServiceConversation, getServiceConversations, heartbeatSellerServices } from "../services/service-chats.api";
+import { getServiceConversations, heartbeatSellerServices } from "../services/service-chats.api";
 import {
   getStoreConversations,
   subscribeStoreConversationRead,
@@ -31,7 +30,7 @@ const tabIcons = {
   Inicio: ["home", "home-outline"],
   Perfil: ["person", "person-outline"],
   Rede: ["git-network", "git-network-outline"],
-  Vender: ["storefront", "storefront-outline"],
+  Vender: ["briefcase", "briefcase-outline"],
 };
 
 const activeOrderStatuses = new Set([
@@ -70,17 +69,14 @@ function countSellerStoreNotifications(stores = []) {
   );
 }
 
-export function MainTabs({ navigation }) {
+export function MainTabs() {
   const { session } = useAuthStore();
   const insets = useSafeAreaInsets();
   const isFocused = useIsFocused();
-  const alertTimerRef = useRef(null);
   const serviceNotificationRequestRef = useRef(null);
   const serviceRefreshTimerRef = useRef(null);
   const storeNotificationRequestRef = useRef(null);
   const storeRefreshTimerRef = useRef(null);
-  const [incomingServiceAlert, setIncomingServiceAlert] = useState(null);
-  const [incomingAlertLoading, setIncomingAlertLoading] = useState(false);
   const [activeOrderCount, setActiveOrderCount] = useState(0);
   const [unreadCustomerMessageCount, setUnreadCustomerMessageCount] = useState(0);
   const [sellerNewOrderCount, setSellerNewOrderCount] = useState(0);
@@ -128,23 +124,7 @@ export function MainTabs({ navigation }) {
     };
   }, [session?.accessToken]);
 
-  const showIncomingServiceAlert = useCallback((alert) => {
-    if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
-    setIncomingServiceAlert(alert);
-    alertTimerRef.current = setTimeout(() => {
-      setIncomingServiceAlert(null);
-      alertTimerRef.current = null;
-    }, 12000);
-  }, []);
-
-  const closeIncomingServiceAlert = useCallback(() => {
-    if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
-    alertTimerRef.current = null;
-    setIncomingServiceAlert(null);
-  }, []);
-
   useEffect(() => () => {
-    if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
     if (serviceRefreshTimerRef.current) clearTimeout(serviceRefreshTimerRef.current);
     if (storeRefreshTimerRef.current) clearTimeout(storeRefreshTimerRef.current);
   }, []);
@@ -248,6 +228,19 @@ export function MainTabs({ navigation }) {
     }, 250);
   }, [loadServiceNotifications]);
 
+  useEffect(() => {
+    if (!session?.accessToken) return undefined;
+    loadServiceNotifications();
+    const timer = setInterval(loadServiceNotifications, 30_000);
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") loadServiceNotifications();
+    });
+    return () => {
+      clearInterval(timer);
+      subscription.remove();
+    };
+  }, [loadServiceNotifications, session?.accessToken]);
+
   const loadStoreChatNotifications = useCallback(async () => {
     if (!session?.accessToken) {
       setSellerStoreChatNotificationCount(0);
@@ -335,33 +328,8 @@ export function MainTabs({ navigation }) {
     if (!session?.accessToken) return undefined;
     const socket = getRealtimeSocket(session.accessToken);
     const refreshServices = () => scheduleServiceNotificationLoad();
-    const notifyCourierRequest = ({ request } = {}) => {
-      if (Platform.OS !== "web") Vibration.vibrate([0, 180, 100, 240]);
-      if (request?.status === "PENDENTE") {
-        showIncomingServiceAlert({
-          id: request.id,
-          kind: "courier",
-          subtitle: request.type === "EQUIPE"
-            ? "Chamada direta de uma loja da sua equipe. Aceite para abrir o chat."
-            : "Uma entrega da sua cidade esta aguardando o primeiro aceite.",
-          title: request.store?.name ?? "Cliente solicitando entrega",
-        });
-      }
-      scheduleServiceNotificationLoad();
-    };
-    const notifyServiceChat = ({ conversation } = {}) => {
-      const isSellerTarget = Number(conversation?.seller?.userId) === Number(session.user?.id);
-      if (isSellerTarget && conversation?.status === "ABERTA") {
-        if (Platform.OS !== "web") Vibration.vibrate([0, 140, 80, 180]);
-        showIncomingServiceAlert({
-          id: conversation.id,
-          kind: "service",
-          subtitle: "Confira os detalhes e aceite para liberar a negociacao no chat.",
-          title: conversation.serviceType?.name ?? conversation.segment?.name ?? "Novo servico",
-        });
-      }
-      scheduleServiceNotificationLoad();
-    };
+    const notifyCourierRequest = () => scheduleServiceNotificationLoad();
+    const notifyServiceChat = () => scheduleServiceNotificationLoad();
 
     socket?.on(realtimeEvents.serviceChatCreated, notifyServiceChat);
     socket?.on(realtimeEvents.serviceChatMessageCreated, refreshServices);
@@ -376,38 +344,7 @@ export function MainTabs({ navigation }) {
       socket?.off(realtimeEvents.courierRequestCreated, notifyCourierRequest);
       socket?.off(realtimeEvents.courierRequestUpdated, refreshServices);
     };
-  }, [scheduleServiceNotificationLoad, session?.accessToken, session?.user?.id, showIncomingServiceAlert]);
-
-  const acceptIncomingAlert = useCallback(async () => {
-    if (!incomingServiceAlert || !session?.accessToken || incomingAlertLoading) return;
-    setIncomingAlertLoading(true);
-
-    try {
-      const response = incomingServiceAlert.kind === "courier"
-        ? await acceptCourierRequest(session.accessToken, incomingServiceAlert.id)
-        : await acceptServiceConversation(session.accessToken, incomingServiceAlert.id);
-      closeIncomingServiceAlert();
-      if (response?.conversation) {
-        navigation.navigate("ServiceConversation", { conversation: response.conversation });
-      } else {
-        navigation.navigate("ServiceDesk");
-      }
-      scheduleServiceNotificationLoad();
-    } catch {
-      closeIncomingServiceAlert();
-      navigation.navigate("ServiceDesk");
-      scheduleServiceNotificationLoad();
-    } finally {
-      setIncomingAlertLoading(false);
-    }
-  }, [
-    closeIncomingServiceAlert,
-    incomingAlertLoading,
-    incomingServiceAlert,
-    navigation,
-    scheduleServiceNotificationLoad,
-    session?.accessToken,
-  ]);
+  }, [scheduleServiceNotificationLoad, session?.accessToken]);
 
   useEffect(() => {
     if (!session?.accessToken || !isFocused) return undefined;
@@ -518,20 +455,10 @@ export function MainTabs({ navigation }) {
     >
       <Tab.Screen component={HomeScreen} name="Inicio" />
       <Tab.Screen component={StoresScreen} name="Buscar" />
-      <Tab.Screen component={SellScreen} name="Vender" />
+      <Tab.Screen component={SellScreen} name="Vender" options={{ tabBarLabel: "Trabalho" }} />
       <Tab.Screen component={NetworkScreen} name="Rede" />
       <Tab.Screen component={ProfileScreen} name="Perfil" />
       </Tab.Navigator>
-      <IncomingServiceAlert
-        alert={incomingServiceAlert}
-        loading={incomingAlertLoading}
-        onAccept={acceptIncomingAlert}
-        onClose={closeIncomingServiceAlert}
-        onPress={() => {
-          closeIncomingServiceAlert();
-          navigation.navigate("ServiceDesk");
-        }}
-      />
     </View>
   );
 }

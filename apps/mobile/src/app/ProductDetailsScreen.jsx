@@ -29,7 +29,7 @@ import {
 
 export function ProductDetailsScreen({ navigation, route }) {
   const { session } = useAuthStore();
-  const { addItem, itemCount, setCart } = useCartStore();
+  const { addItem, itemCount } = useCartStore();
   const product = route.params?.product;
   const store = route.params?.store;
   const conversationId = route.params?.conversationId;
@@ -75,7 +75,6 @@ export function ProductDetailsScreen({ navigation, route }) {
 
   function buyNow() {
     track("START_CHECKOUT");
-    setCart(cartParams);
     navigation.navigate("Checkout", cartParams);
   }
 

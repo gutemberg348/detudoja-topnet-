@@ -544,6 +544,35 @@ test("customer ride keeps route private until an address is shared in chat", asy
   await cancelServiceConversation(state.customer.id, accepted.conversation.id);
 });
 
+test("worker cancela corrida aceita sem interacao ou proposta apos o prazo", async () => {
+  const created = await createCustomerCourierRequest(state.customer.id, {
+    description: "Corrida abandonada para teste de expiracao",
+    serviceTypeId: state.deliveryType.id,
+  });
+  const accepted = await acceptCourierRequest(
+    state.secondCourier.seller.usuario_id,
+    created.request.id,
+  );
+  const past = new Date(Date.now() - (2 * 60 * 60 * 1_000));
+
+  await prisma.conversaServico.update({
+    data: { atualizado_em: past },
+    where: { id: accepted.conversation.id },
+  });
+
+  const result = await expireUnattendedServices({ now: new Date() });
+  const [conversation, request] = await Promise.all([
+    prisma.conversaServico.findUniqueOrThrow({ where: { id: accepted.conversation.id } }),
+    prisma.solicitacaoMotoboy.findUniqueOrThrow({ where: { id: created.request.id } }),
+  ]);
+
+  assert.ok(result.cancelledIdle >= 1);
+  assert.equal(conversation.status, "CANCELADA");
+  assert.equal(request.status, "CANCELADA");
+  assert.ok(conversation.encerrado_em);
+  assert.ok(request.cancelado_em);
+});
+
 test("direct store call is visible and acceptable only by the selected team courier", async () => {
   const created = await createCourierRequest(state.owner.id, state.store.id, {
     description: "Entrega da equipe",

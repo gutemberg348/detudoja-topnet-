@@ -5,6 +5,27 @@ const refundablePaymentStatuses = ["PAGO", "LIQUIDADO"];
 export function createServiceTimeoutRepository(database = prisma) {
   return {
     createMessage(args) { return database.conversaServicoMensagem.create(args); },
+    findIdleServiceConversations(cutoff) {
+      return database.conversaServico.findMany({
+        select: {
+          cliente_usuario_id: true,
+          id: true,
+          solicitacao_motoboy: { select: { id: true } },
+          status: true,
+          vendedor: { select: { usuario_id: true } },
+        },
+        take: 50,
+        where: {
+          atualizado_em: { lte: cutoff },
+          propostas: {
+            none: {
+              status: { in: ["PENDENTE", "ACEITA", "PAGA", "CONCLUIDA"] },
+            },
+          },
+          status: { in: ["ABERTA", "ACORDADA"] },
+        },
+      });
+    },
     findConversationsAwaitingConfirmation(cutoff) {
       return database.conversaServico.findMany({
         select: {
@@ -50,6 +71,7 @@ export function createServiceTimeoutRepository(database = prisma) {
       });
     },
     transaction(work) { return database.$transaction(work); },
+    updateCourierRequests(args) { return database.solicitacaoMotoboy.updateMany(args); },
     updateConversations(args) { return database.conversaServico.updateMany(args); },
   };
 }

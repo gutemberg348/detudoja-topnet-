@@ -9,6 +9,34 @@ export function GatewayPixPaymentScreen({ navigation, route }) {
   const gatewayPayment = route.params?.gatewayPayment;
   const order = route.params?.order;
   const store = route.params?.store;
+  const checkoutGroups = Array.isArray(route.params?.checkoutGroups)
+    ? route.params.checkoutGroups
+    : [];
+  const checkoutIndex = Math.max(0, Number(route.params?.checkoutIndex ?? 0));
+  const hasNextStore = checkoutIndex + 1 < checkoutGroups.length;
+
+  function continueFlow() {
+    if (hasNextStore) {
+      navigation.reset({
+        index: 2,
+        routes: [
+          { name: "Main" },
+          { name: "Cart" },
+          {
+            name: "Checkout",
+            params: {
+              ...checkoutGroups[checkoutIndex + 1],
+              checkoutGroups,
+              checkoutIndex: checkoutIndex + 1,
+            },
+          },
+        ],
+      });
+      return;
+    }
+
+    navigation.replace("CustomerOrderDetails", { order });
+  }
 
   return (
     <ScreenContainer contentContainerStyle={styles.content} edges={["left", "right"]}>
@@ -55,19 +83,32 @@ export function GatewayPixPaymentScreen({ navigation, route }) {
       ) : null}
 
       <View style={styles.notice}>
-        <Ionicons color={colors.primaryDark} name="shield-checkmark-outline" size={20} />
+        <Ionicons
+          color={colors.primaryDark}
+          name={hasNextStore ? "layers-outline" : "shield-checkmark-outline"}
+          size={20}
+        />
         <Text style={styles.noticeText}>
-          Confira o valor antes de pagar. A confirmacao chega em tempo real no pedido.
+          {hasNextStore
+            ? "Este Pix pertence somente a esta loja. Voce pode seguir para a proxima sem perder este pedido."
+            : "Confira o valor antes de pagar. A confirmacao chega em tempo real no pedido."}
         </Text>
       </View>
 
       <AppButton
-        icon="receipt-outline"
-        onPress={() => navigation.replace("CustomerOrderDetails", { order })}
-        title="Acompanhar pedido"
+        icon={hasNextStore ? "arrow-forward" : "receipt-outline"}
+        onPress={continueFlow}
+        title={hasNextStore ? "Continuar para a proxima loja" : "Acompanhar pedido"}
       />
-      <Pressable onPress={() => navigation.navigate("Main")} style={styles.laterButton}>
-        <Text style={styles.laterText}>Pagar depois</Text>
+      <Pressable
+        onPress={() => hasNextStore
+          ? navigation.navigate("CustomerOrderDetails", { order })
+          : navigation.navigate("Main")}
+        style={styles.laterButton}
+      >
+        <Text style={styles.laterText}>
+          {hasNextStore ? "Acompanhar este pedido" : "Pagar depois"}
+        </Text>
       </Pressable>
     </ScreenContainer>
   );

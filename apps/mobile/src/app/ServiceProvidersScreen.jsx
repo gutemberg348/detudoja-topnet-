@@ -30,6 +30,7 @@ import {
 } from "../services/service-chats.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { resolveMediaUrl } from "../utils/media";
+import { serviceIconName } from "../utils/service-icons";
 import {
   colors,
   fonts,
@@ -53,6 +54,9 @@ export function ServiceProvidersScreen({ navigation, route }) {
   const [sellers, setSellers] = useState([]);
   const courierPulse = useRef(new Animated.Value(0)).current;
   const isCourier = segment?.operationalType === "ENTREGA_LOCAL";
+  const serviceName = segment?.name ?? "Servico";
+  const serviceNameLower = serviceName.toLocaleLowerCase("pt-BR");
+  const serviceIcon = serviceIconName(segment?.iconName, "navigate-outline");
 
   const load = useCallback(
     async ({ silent = false } = {}) => {
@@ -238,7 +242,7 @@ export function ServiceProvidersScreen({ navigation, route }) {
     setError("");
     try {
       const response = await createCustomerCourierRequest(session.accessToken, {
-        description: "Quero combinar uma entrega.",
+        description: `Quero solicitar ${serviceNameLower}.`,
         serviceTypeId: segment.id,
       });
       setCourierRequest(response.request);
@@ -246,7 +250,7 @@ export function ServiceProvidersScreen({ navigation, route }) {
       if (requestError instanceof ApiError && requestError.status === 428) {
         setAddressRequirementOpen(true);
       } else {
-        setError(requestError.message ?? "Nao foi possivel chamar um motoboy.");
+        setError(requestError.message ?? `Nao foi possivel chamar ${serviceNameLower}.`);
       }
     } finally {
       setOpeningId(null);
@@ -271,14 +275,14 @@ export function ServiceProvidersScreen({ navigation, route }) {
   return (
     <ScreenContainer contentContainerStyle={styles.content}>
       <PageHeader
-        eyebrow={isCourier ? "Entrega em tempo real" : "Negociacao por chat"}
+        eyebrow={isCourier ? "Chamada em tempo real" : "Negociacao por chat"}
         subtitle={
           isCourier
-            ? "Solicite uma entrega. Um motoboy livre aceita e entra no chat com voce."
+            ? `Abra uma chamada de ${serviceNameLower}. Um profissional livre aceita e entra no chat com voce.`
             : "Escolha quem esta atendendo agora. Combine detalhes, fotos e valor na conversa."
         }
         title={
-          isCourier ? "Chamar motoboy" : `${segment?.name ?? "Servico"} online`
+          isCourier ? `Chamar ${serviceNameLower}` : `${serviceName} online`
         }
       />
 
@@ -294,8 +298,7 @@ export function ServiceProvidersScreen({ navigation, route }) {
           <View style={styles.copy}>
             <Text style={styles.noticeTitle}>Chamada protegida</Text>
             <Text style={styles.noticeText}>
-              A identidade do motoboy aparece somente depois que ele aceitar sua
-              corrida.
+              A identidade do profissional aparece somente depois que ele aceitar sua chamada.
             </Text>
           </View>
         </View>
@@ -446,10 +449,10 @@ export function ServiceProvidersScreen({ navigation, route }) {
                 },
               ]}
             >
-              <Ionicons color={colors.card} name="bicycle-outline" size={27} />
+              <Ionicons color={colors.card} name={serviceIcon} size={27} />
             </Animated.View>
           </View>
-          <Text style={styles.waitingTitle}>Procurando motoboy</Text>
+          <Text style={styles.waitingTitle}>Procurando {serviceNameLower}</Text>
           <Text style={styles.waitingText}>
             Estamos avisando os profissionais livres da sua cidade. Voce entra
             no chat assim que alguem aceitar.
@@ -457,7 +460,7 @@ export function ServiceProvidersScreen({ navigation, route }) {
           <View style={styles.waitingTimeline}>
             <WaitingStage done icon="checkmark" label="Chamada enviada" />
             <View style={styles.waitingTimelineLine} />
-            <WaitingStage active icon="notifications-outline" label="Avisando motoboys" pulse={courierPulse} />
+            <WaitingStage active icon="notifications-outline" label="Avisando profissionais" pulse={courierPulse} />
             <View style={styles.waitingTimelineLine} />
             <WaitingStage icon="chatbubble-outline" label="Chat liberado" />
           </View>
@@ -498,7 +501,7 @@ export function ServiceProvidersScreen({ navigation, route }) {
             >
               <Ionicons
                 color={courierAvailable ? colors.card : colors.textMuted}
-                name="bicycle-outline"
+                name={serviceIcon}
                 size={26}
               />
             </View>
@@ -510,8 +513,8 @@ export function ServiceProvidersScreen({ navigation, route }) {
               </Text>
               <Text style={styles.availabilityTitle}>
                 {courierAvailable
-                  ? "Entrega sob demanda"
-                  : "Nenhum motoboy livre agora"}
+                  ? `${serviceName} sob demanda`
+                  : `Nenhum profissional de ${serviceNameLower} livre agora`}
               </Text>
               <Text style={styles.availabilityText}>
                 {courierAvailable
@@ -522,11 +525,11 @@ export function ServiceProvidersScreen({ navigation, route }) {
           </View>
           <AppButton
             disabled={!courierAvailable}
-            icon="bicycle-outline"
+            icon={serviceIcon}
             loading={openingId === "courier"}
             onPress={callCourier}
             style={styles.courierCallAction}
-            title="Chamar motoboy"
+            title={`Chamar ${serviceNameLower}`}
           />
         </View>
       ) : null}
@@ -568,7 +571,7 @@ export function ServiceProvidersScreen({ navigation, route }) {
           setTimeout(() => callCourier(), 0);
         }}
         open={addressRequirementOpen}
-        reason="localizar motoboys disponiveis na sua cidade"
+        reason={`localizar profissionais de ${serviceNameLower} disponiveis na sua cidade`}
       />
     </ScreenContainer>
   );
@@ -658,7 +661,7 @@ function ProviderCard({ isCourier, loading, onPress, seller }) {
 
       <View style={styles.cardAction}>
         <Text style={styles.cardActionText}>
-          {isCourier ? "Chamar motoboy" : "Abrir conversa"}
+          {isCourier ? "Chamar corrida" : "Abrir conversa"}
         </Text>
         {loading ? (
           <ActivityIndicator color={colors.primaryDark} size="small" />

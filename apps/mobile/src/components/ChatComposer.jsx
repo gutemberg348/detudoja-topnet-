@@ -92,6 +92,18 @@ export function ChatComposer({
     return () => animation.stop();
   }, [pulse, recordingVisible]);
 
+  useEffect(() => () => {
+    try {
+      const status = recorder.getStatus();
+      if (status.isRecording || status.canRecord) {
+        void recorder.stop().catch(() => null);
+      }
+    } catch {
+      // O objeto nativo pode ter sido liberado durante a troca de tela.
+    }
+    void setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => null);
+  }, [recorder]);
+
   function reportError(error, fallback) {
     onAttachmentError?.(error?.message ?? fallback);
   }
@@ -175,6 +187,15 @@ export function ChatComposer({
     setRecordingVisible(false);
   }
 
+  async function stopRecorderSession() {
+    try {
+      const status = recorder.getStatus();
+      if (status.isRecording || status.canRecord) await recorder.stop();
+    } catch {
+      // A sessao nativa pode ja ter sido liberada pelo Android/iOS.
+    }
+  }
+
   async function finishRecording(shouldCancel = cancelRecordingRef.current) {
     if (!recordingStartedRef.current || finishingRecordingRef.current) return;
 
@@ -214,6 +235,7 @@ export function ChatComposer({
     } catch (error) {
       reportError(error, "Nao foi possivel concluir a gravacao.");
     } finally {
+      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => null);
       resetRecording();
     }
   }
@@ -233,9 +255,13 @@ export function ChatComposer({
       const permission = await requestRecordingPermissionsAsync();
       if (!permission.granted) throw new Error("Permita o uso do microfone para enviar audio.");
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-      await recorder.prepareToRecordAsync();
+      const recorderStatus = recorder.getStatus();
+      if (!recorderStatus.canRecord || recorderStatus.mediaServicesDidReset) {
+        await recorder.prepareToRecordAsync();
+      }
 
       if (!holdActiveRef.current || releaseBeforeStartRef.current) {
+        await stopRecorderSession();
         await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
         resetRecording();
         return;
@@ -244,6 +270,7 @@ export function ChatComposer({
       recorder.record();
       recordingStartedRef.current = true;
     } catch (error) {
+      await stopRecorderSession();
       await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => null);
       resetRecording();
       reportError(error, "Nao foi possivel iniciar a gravacao.");

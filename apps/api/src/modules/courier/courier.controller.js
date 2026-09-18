@@ -65,7 +65,7 @@ export async function removeStoreCourierController(req, res, next) {
 }
 
 export async function getStoreCourierDispatchController(req, res, next) {
-  try { res.json(await getStoreCourierDispatch(req.auth.user.id, req.params.storeId)); } catch (error) { next(error); }
+  try { res.json(await getStoreCourierDispatch(req.auth.user.id, req.params.storeId, req.query.serviceTypeId)); } catch (error) { next(error); }
 }
 
 export async function createCourierRequestController(req, res, next) {

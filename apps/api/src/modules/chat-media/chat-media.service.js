@@ -36,8 +36,13 @@ function safeStoragePath(storageKey) {
   return absolutePath;
 }
 
-export function serializeChatAttachment(message, scope, metadata = null) {
+export function storedChatAttachment(metadata) {
   const attachment = metadata?.attachment ?? metadata;
+  return attachment && typeof attachment === "object" ? attachment : null;
+}
+
+export function serializeChatAttachment(message, scope, metadata = null) {
+  const attachment = storedChatAttachment(metadata);
   if (!attachment?.type) return null;
   const type = normalizedKind(attachment.type);
   if (!type) return null;
@@ -127,7 +132,7 @@ export async function savePrivateChatAttachment(file, data, { conversationId, sc
 }
 
 export async function deletePrivateChatAttachment(metadata) {
-  const absolutePath = safeStoragePath(metadata?.attachment?.storageKey);
+  const absolutePath = safeStoragePath(storedChatAttachment(metadata)?.storageKey);
   if (absolutePath) await rm(absolutePath, { force: true });
 }
 
@@ -177,7 +182,8 @@ export async function getPrivateChatMedia(userId, rawScope, rawMessageId) {
 
   if (!message) throw new AppError("Arquivo nao encontrado", 404);
   if (!allowed) throw new AppError("Voce nao pode acessar este arquivo", 403);
-  const absolutePath = safeStoragePath(metadata?.storageKey);
+  const attachment = storedChatAttachment(metadata);
+  const absolutePath = safeStoragePath(attachment?.storageKey);
   if (!absolutePath) throw new AppError("Arquivo nao encontrado", 404);
-  return { absolutePath, fileName: metadata.fileName, mimeType: metadata.mimeType };
+  return { absolutePath, fileName: attachment.fileName, mimeType: attachment.mimeType };
 }

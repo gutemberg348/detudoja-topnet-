@@ -135,6 +135,12 @@ export const env = {
       1_440,
     ),
   },
+  courier: {
+    requestTimeoutMinutes: Math.min(
+      Math.max(5, Number(process.env.COURIER_REQUEST_TIMEOUT_MINUTES ?? 40)),
+      120,
+    ),
+  },
   serviceAvailability: {
     heartbeatTimeoutSeconds: Math.min(
       Math.max(60, Number(process.env.SERVICE_AVAILABILITY_TIMEOUT_SECONDS ?? 120)),
@@ -145,6 +151,10 @@ export const env = {
     confirmationTimeoutMinutes: Math.min(
       Math.max(60, Number(process.env.SERVICE_CONFIRMATION_TIMEOUT_MINUTES ?? 2_880)),
       20_160,
+    ),
+    idleTimeoutMinutes: Math.min(
+      Math.max(15, Number(process.env.SERVICE_IDLE_TIMEOUT_MINUTES ?? 40)),
+      1_440,
     ),
     unattendedTimeoutMinutes: Math.min(
       Math.max(60, Number(process.env.SERVICE_UNATTENDED_TIMEOUT_MINUTES ?? 1_440)),

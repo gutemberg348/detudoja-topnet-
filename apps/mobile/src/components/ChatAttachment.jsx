@@ -27,44 +27,128 @@ function extensionFor(attachment) {
   if (mimeType.includes("png")) return "png";
   if (mimeType.includes("webp")) return "webp";
   if (mimeType.includes("avif")) return "avif";
+  if (mimeType.includes("quicktime")) return "mov";
+  if (mimeType.includes("video")) return "mp4";
+  if (mimeType.includes("mpeg")) return "mp3";
+  if (mimeType.includes("wav")) return "wav";
+  if (mimeType.includes("audio")) return "m4a";
   return "jpg";
+}
+
+function mediaCacheKey(attachment, accessToken) {
+  const value = [attachment.id, attachment.url, attachment.fileName, attachment.mimeType, accessToken]
+    .filter(Boolean)
+    .join(":") || "media";
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash) + value.charCodeAt(index);
+    hash |= 0;
+  }
+  return `chat-media-${Math.abs(hash)}.${extensionFor(attachment)}`;
+}
+
+function useCachedMedia(attachment, accessToken) {
+  const remoteSource = protectedSource(attachment, accessToken);
+  const [attempt, setAttempt] = useState(0);
+  const [state, setState] = useState({ error: "", loading: true, source: null });
+  const cacheKey = mediaCacheKey(attachment, accessToken);
+
+  useEffect(() => {
+    let active = true;
+    const remoteUri = remoteSource.uri;
+
+    if (!remoteUri) {
+      setState({ error: "Arquivo indisponivel.", loading: false, source: null });
+      return () => { active = false; };
+    }
+
+    if (Platform.OS === "web" || /^(file:|data:|blob:)/i.test(remoteUri)) {
+      setState({ error: "", loading: false, source: remoteSource });
+      return () => { active = false; };
+    }
+
+    setState((current) => ({ ...current, error: "", loading: true }));
+    void (async () => {
+      try {
+        const destination = new File(Paths.cache, cacheKey);
+        if (attempt > 0 && destination.exists) destination.delete();
+        const downloaded = destination.exists && Number(destination.size ?? 0) > 0
+          ? destination
+          : await File.downloadFileAsync(remoteUri, destination, {
+            headers: remoteSource.headers,
+            idempotent: true,
+          });
+        if (active) setState({ error: "", loading: false, source: { uri: downloaded.uri } });
+      } catch (error) {
+        if (active) {
+          setState({
+            error: error?.message ?? "Nao foi possivel carregar este arquivo.",
+            loading: false,
+            source: null,
+          });
+        }
+      }
+    })();
+
+    return () => { active = false; };
+  }, [accessToken, attempt, cacheKey, remoteSource.uri]);
+
+  return {
+    ...state,
+    retry: () => setAttempt((current) => current + 1),
+  };
+}
+
+function MediaState({ compact = false, error, loading, onRetry }) {
+  if (loading) {
+    return (
+      <View style={[styles.mediaState, compact && styles.mediaStateCompact]}>
+        <ActivityIndicator color={colors.primaryDark} size="small" />
+        <Text style={styles.mediaStateText}>Carregando midia...</Text>
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <Pressable accessibilityLabel="Tentar carregar midia novamente" onPress={onRetry} style={[styles.mediaState, compact && styles.mediaStateCompact]}>
+        <Ionicons color={colors.danger} name="refresh-circle-outline" size={22} />
+        <Text numberOfLines={2} style={styles.mediaErrorText}>Falha ao abrir. Toque para tentar novamente.</Text>
+      </Pressable>
+    );
+  }
+
+  return null;
 }
 
 function ImageAttachment({ accessToken, attachment }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const source = protectedSource(attachment, accessToken);
+  const media = useCachedMedia(attachment, accessToken);
 
   async function saveImage() {
-    if (saving) return;
+    if (saving || !media.source?.uri) return;
     setSaving(true);
-    let downloaded;
     try {
       const permission = await MediaLibrary.requestPermissionsAsync(true, ["photo"]);
       if (!permission.granted) throw new Error("Permita salvar fotos para baixar esta imagem.");
-      const destination = new File(Paths.cache, `chat-${Date.now()}.${extensionFor(attachment)}`);
-      downloaded = await File.downloadFileAsync(source.uri, destination, {
-        headers: source.headers,
-        idempotent: true,
-      });
-      await MediaLibrary.Asset.create(downloaded.uri);
+      await MediaLibrary.Asset.create(media.source.uri);
       Alert.alert("Foto salva", "A imagem foi adicionada a sua galeria.");
     } catch (error) {
       Alert.alert("Nao foi possivel baixar", error?.message ?? "Tente novamente em alguns instantes.");
     } finally {
-      try {
-        if (downloaded?.exists) downloaded.delete();
-      } catch {
-        // A copia da galeria ja foi criada; a limpeza do cache pode esperar o sistema.
-      }
       setSaving(false);
     }
+  }
+
+  if (!media.source) {
+    return <MediaState error={media.error} loading={media.loading} onRetry={media.retry} />;
   }
 
   return (
     <>
       <Pressable accessibilityLabel="Abrir foto em tela cheia" onPress={() => setOpen(true)} style={styles.imageButton}>
-        <Image resizeMode="cover" source={source} style={styles.image} />
+        <Image resizeMode="cover" source={media.source} style={styles.image} />
         <View style={styles.imageExpand}><Ionicons color={colors.card} name="expand-outline" size={16} /></View>
       </Pressable>
       <Modal animationType="fade" onRequestClose={() => setOpen(false)} statusBarTranslucent transparent visible={open}>
@@ -78,7 +162,7 @@ function ImageAttachment({ accessToken, attachment }) {
               {saving ? <ActivityIndicator color={colors.card} size="small" /> : <Ionicons color={colors.card} name="download-outline" size={23} />}
             </Pressable>
           </View>
-          <Image resizeMode="contain" source={source} style={styles.viewerImage} />
+          <Image resizeMode="contain" source={media.source} style={styles.viewerImage} />
           <Text style={styles.viewerHint}>Toque no icone de download para salvar na galeria</Text>
         </SafeAreaView>
       </Modal>
@@ -87,13 +171,19 @@ function ImageAttachment({ accessToken, attachment }) {
 }
 
 function AudioAttachment({ accessToken, attachment, isMine }) {
-  const player = useAudioPlayer(protectedSource(attachment, accessToken), { updateInterval: 100 });
+  const media = useCachedMedia(attachment, accessToken);
+  const player = useAudioPlayer(media.source, { updateInterval: 100 });
   const status = useAudioPlayerStatus(player);
   const waveWidthRef = useRef(1);
   const duration = status.duration || ((attachment.durationMs ?? 0) / 1000);
   const progress = duration ? Math.min(1, Math.max(0, status.currentTime / duration)) : 0;
 
   function toggle() {
+    if (media.loading) return;
+    if (media.error || !media.source) {
+      media.retry();
+      return;
+    }
     if (status.playing) player.pause();
     else {
       if (duration && status.currentTime >= duration - 0.2) player.seekTo(0);
@@ -110,10 +200,10 @@ function AudioAttachment({ accessToken, attachment, isMine }) {
   return (
     <View style={styles.audio}>
       <Pressable accessibilityLabel={status.playing ? "Pausar audio" : "Reproduzir audio"} onPress={toggle} style={[styles.audioButton, isMine && styles.audioButtonMine]}>
-        {status.isBuffering ? <ActivityIndicator color={isMine ? colors.primaryDark : colors.card} size="small" /> : <Ionicons color={isMine ? colors.primaryDark : colors.card} name={status.playing ? "pause" : "play"} size={19} />}
+        {media.loading || status.isBuffering ? <ActivityIndicator color={isMine ? colors.primaryDark : colors.card} size="small" /> : <Ionicons color={isMine ? colors.primaryDark : colors.card} name={status.playing ? "pause" : media.error ? "refresh" : "play"} size={19} />}
       </Pressable>
       <View style={styles.audioCopy}>
-        <Text style={[styles.audioLabel, isMine && styles.textMine]}>Mensagem de voz</Text>
+        <Text style={[styles.audioLabel, isMine && styles.textMine]}>{media.error ? "Toque para carregar novamente" : "Mensagem de voz"}</Text>
         <Pressable accessibilityLabel="Avancar ou voltar no audio" onLayout={(event) => { waveWidthRef.current = event.nativeEvent.layout.width || 1; }} onPress={seek} style={styles.wave}>
           {waveform.map((height, index) => (
             <View
@@ -138,7 +228,13 @@ function AudioAttachment({ accessToken, attachment, isMine }) {
 }
 
 function VideoAttachment({ accessToken, attachment }) {
-  const player = useVideoPlayer(protectedSource(attachment, accessToken));
+  const media = useCachedMedia(attachment, accessToken);
+  const player = useVideoPlayer(media.source);
+
+  if (!media.source) {
+    return <MediaState error={media.error} loading={media.loading} onRetry={media.retry} />;
+  }
+
   return <VideoView allowsFullscreen contentFit="cover" nativeControls player={player} style={styles.video} />;
 }
 
@@ -216,6 +312,10 @@ const styles = StyleSheet.create({
   image: { borderRadius: radius.md, height: 210, width: 252 },
   imageButton: { borderRadius: radius.md, overflow: "hidden", position: "relative" },
   imageExpand: { alignItems: "center", backgroundColor: "rgba(0,0,0,0.48)", borderRadius: radius.round, height: 30, justifyContent: "center", position: "absolute", right: 8, top: 8, width: 30 },
+  mediaErrorText: { color: colors.danger, flex: 1, fontFamily: fonts.semiBold, fontSize: 10, lineHeight: 14 },
+  mediaState: { alignItems: "center", backgroundColor: colors.cardMuted, borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: spacing.sm, height: 116, justifyContent: "center", padding: spacing.md, width: 252 },
+  mediaStateCompact: { height: 54 },
+  mediaStateText: { color: colors.textSecondary, fontFamily: fonts.medium, fontSize: 10 },
   location: { backgroundColor: colors.primarySoft, borderRadius: radius.lg, gap: spacing.sm, minWidth: 252, overflow: "hidden", padding: spacing.sm },
   locationCopy: { gap: 2 },
   locationMine: { backgroundColor: "rgba(255,255,255,0.12)" },

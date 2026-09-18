@@ -49,8 +49,7 @@ export function StoreConversationScreen({ navigation, route }) {
   const { session } = useAuthStore();
   const {
     addItem,
-    itemCount,
-    store: cartStore,
+    itemCountForStore,
   } = useCartStore();
   const insets = useSafeAreaInsets();
   const initialConversation = route.params?.conversation ?? null;
@@ -334,12 +333,11 @@ export function StoreConversationScreen({ navigation, route }) {
     ? conversation.customer?.photoUrl
     : conversation?.store?.logoUrl ?? initialStore?.logoUrl;
   const storeView = storeCatalog ?? initialStore ?? conversation?.store;
-  const hasCurrentStoreCart = String(cartStore?.id ?? "") === String(storeView?.id ?? "");
-  const currentStoreItemCount = hasCurrentStoreCart ? itemCount : 0;
+  const currentStoreItemCount = itemCountForStore(storeView?.id);
   const normalizedDraft = normalizeSearchText(draft);
   const catalogProductSuggestions = !conversation?.isStore
     && catalogSearchFocused
-    && (normalizedDraft.length === 0 || normalizedDraft.length >= 2)
+    && normalizedDraft.length >= 2
     ? (storeView?.products ?? [])
         .filter((product) => (
           !normalizedDraft
@@ -420,6 +418,7 @@ export function StoreConversationScreen({ navigation, route }) {
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           keyboardShouldPersistTaps="handled"
           onContentSizeChange={timeline.onContentSizeChange}
+          onLayout={timeline.onLayout}
           onScroll={timeline.onScroll}
           ref={scrollRef}
           scrollEventThrottle={16}
@@ -445,8 +444,10 @@ export function StoreConversationScreen({ navigation, route }) {
                 loading={openingContent === String(message.id)}
                 message={message}
                 onAddProduct={!conversation?.isStore ? addSharedProduct : null}
+                onOpenCatalog={!conversation?.isStore ? () => setCatalogOpen(true) : null}
                 onOpenContent={openCommercialContent}
                 onOpenSearchProduct={!conversation?.isStore ? openProduct : null}
+                searchSuggestions={!conversation?.isStore ? storeView?.products : null}
               />
             ))
           ) : (
@@ -525,7 +526,6 @@ export function StoreConversationScreen({ navigation, route }) {
         onBlur={() => setTimeout(() => setCatalogSearchFocused(false), 180)}
         onFocus={() => {
           setCatalogSearchFocused(true);
-          timeline.scrollToLatest(true);
         }}
         onSend={send}
         onSendAttachment={send}
@@ -794,8 +794,10 @@ function MessageBubble({
   loading,
   message,
   onAddProduct,
+  onOpenCatalog,
   onOpenContent,
   onOpenSearchProduct,
+  searchSuggestions,
 }) {
   if (message.author === "system" && message.content?.kind === "PRODUCT") {
     return (
@@ -874,8 +876,10 @@ function MessageBubble({
       {searchProducts ? (
         <ChatSearchResults
           onAdd={onAddProduct}
+          onOpenCatalog={onOpenCatalog}
           onOpen={onOpenSearchProduct}
           products={searchProducts}
+          suggestions={message.content.suggestions ?? searchSuggestions ?? []}
           total={message.content.productCount ?? searchProducts.length}
         />
       ) : null}
@@ -883,7 +887,10 @@ function MessageBubble({
   );
 }
 
-function ChatSearchResults({ onAdd, onOpen, products, total }) {
+function ChatSearchResults({ onAdd, onOpen, onOpenCatalog, products, suggestions, total }) {
+  const isSuggestion = total === 0;
+  const visibleProducts = isSuggestion ? suggestions : products;
+
   return (
     <View style={styles.chatSearchResults}>
       <View style={styles.chatSearchHeading}>
@@ -891,12 +898,19 @@ function ChatSearchResults({ onAdd, onOpen, products, total }) {
         <Text style={styles.chatSearchTitle}>
           {total > 0
             ? `${total} produto${total === 1 ? "" : "s"} encontrado${total === 1 ? "" : "s"}`
-            : "Nenhum produto encontrado"}
+            : visibleProducts.length
+              ? "Sugestoes para voce"
+              : "Nenhum produto encontrado"}
         </Text>
       </View>
-      {products.length ? (
+      {isSuggestion ? (
+        <Text style={styles.searchResponseText}>
+          Nao encontramos exatamente isso, mas estes produtos podem ajudar.
+        </Text>
+      ) : null}
+      {visibleProducts.length ? (
         <View style={styles.chatSearchGrid}>
-          {products.slice(0, 4).map((product) => {
+          {visibleProducts.slice(0, 4).map((product) => {
             const imageUrl = resolveMediaUrl(product.imageUrl);
             const soldOut = product.stockControlled && Number(product.stockQuantity ?? 0) <= 0;
             return (
@@ -928,8 +942,18 @@ function ChatSearchResults({ onAdd, onOpen, products, total }) {
           })}
         </View>
       ) : (
-        <Text style={styles.searchResponseText}>Tente outro nome ou veja o catalogo completo.</Text>
+        <Text style={styles.searchResponseText}>Tente outro nome ou abra todos os produtos.</Text>
       )}
+      {isSuggestion && onOpenCatalog ? (
+        <Pressable
+          onPress={onOpenCatalog}
+          style={({ pressed }) => [styles.chatSearchCatalogButton, pressed && styles.pressed]}
+        >
+          <Ionicons color={colors.primaryDark} name="grid-outline" size={17} />
+          <Text style={styles.chatSearchCatalogButtonText}>Ver todos os produtos</Text>
+          <Ionicons color={colors.primaryDark} name="arrow-forward" size={16} />
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -1377,6 +1401,21 @@ const styles = StyleSheet.create({
     bottom: spacing.xs,
     position: "absolute",
     right: spacing.xs,
+  },
+  chatSearchCatalogButton: {
+    alignItems: "center",
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.md,
+    flexDirection: "row",
+    gap: spacing.xs,
+    minHeight: 42,
+    paddingHorizontal: spacing.sm,
+  },
+  chatSearchCatalogButtonText: {
+    color: colors.primaryDark,
+    flex: 1,
+    fontFamily: fonts.bold,
+    fontSize: typography.caption,
   },
   chatSearchGrid: {
     flexDirection: "row",

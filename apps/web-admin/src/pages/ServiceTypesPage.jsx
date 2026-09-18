@@ -1,4 +1,9 @@
-import { Edit3, MessageCircle, Plus, Search, Truck, Trash2, X } from "lucide-react";
+import {
+  Bike, BriefcaseBusiness, BusFront, Car, CircleUserRound, Edit3,
+  GraduationCap, Hammer, HeartPulse, House, MapPin, MessageCircle,
+  Monitor, Package, PawPrint, Plane, Plus, Scissors, Search, Ship,
+  Sparkles, Store, Trash2, Truck, Utensils, Wrench, X, Zap,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { PageLoading } from "../components/PageState";
 import { StatusBadge } from "../components/StatusBadge";
@@ -31,6 +36,85 @@ const modeCopy = {
   NEGOCIACAO_CHAT: "Negociacao por chat",
   PRECO_FIXO: "Preco fixo",
 };
+
+const workflowOptions = [
+  {
+    description: "O cliente ve quem esta online, escolhe um profissional e abre o chat. Ideal para frete, manutencao e servicos comuns.",
+    icon: CircleUserRound,
+    label: "Cliente escolhe o profissional",
+    value: "GERAL",
+  },
+  {
+    description: "O cliente abre uma corrida, os profissionais online recebem o alerta e o primeiro aceite entra no chat. A loja tambem pode chamar a equipe ou a plataforma.",
+    icon: Zap,
+    label: "Chamada em tempo real",
+    value: "ENTREGA_LOCAL",
+  },
+];
+
+const serviceIcons = [
+  ["bicycle", "Moto ou bicicleta", Bike],
+  ["car", "Carro", Car],
+  ["bus", "Passageiros", BusFront],
+  ["truck", "Caminhao ou frete", Truck],
+  ["cube", "Pacote ou entrega", Package],
+  ["navigate", "Corrida ou rota", MapPin],
+  ["construct", "Manutencao", Wrench],
+  ["hammer", "Obra", Hammer],
+  ["sparkles", "Limpeza", Sparkles],
+  ["cut", "Beleza", Scissors],
+  ["school", "Aulas", GraduationCap],
+  ["home", "Casa", House],
+  ["restaurant", "Alimentacao", Utensils],
+  ["medical", "Saude", HeartPulse],
+  ["paw", "Animais", PawPrint],
+  ["desktop", "Tecnologia", Monitor],
+  ["storefront", "Comercio", Store],
+  ["boat", "Nautico", Ship],
+  ["airplane", "Viagem", Plane],
+  ["person", "Atendimento pessoal", CircleUserRound],
+  ["briefcase", "Servico profissional", BriefcaseBusiness],
+  ["flash", "Rapido ou urgente", Zap],
+];
+
+const servicePresets = [
+  {
+    description: "Entregas urbanas com chamada em tempo real.",
+    iconName: "bicycle",
+    label: "Motoboy",
+    name: "Motoboy",
+    operationalType: "ENTREGA_LOCAL",
+    registrationRequirements: { requiresDriverLicense: true, requiresPlate: true, requiresVehicle: true, vehicleKinds: ["MOTO"] },
+  },
+  {
+    description: "Corridas de passageiros por moto com aceite em tempo real.",
+    iconName: "navigate",
+    label: "Mototaxi",
+    name: "Mototaxi",
+    operationalType: "ENTREGA_LOCAL",
+    registrationRequirements: { requiresDriverLicense: true, requiresPlate: true, requiresVehicle: true, vehicleKinds: ["MOTO"] },
+  },
+  {
+    description: "Fretes e mudancas com escolha do profissional e negociacao pelo chat.",
+    iconName: "truck",
+    label: "Frete",
+    name: "Frete",
+    operationalType: "GERAL",
+    registrationRequirements: { requiresDriverLicense: true, requiresPlate: true, requiresVehicle: true, vehicleKinds: ["CARRO", "UTILITARIO", "CAMINHAO"] },
+  },
+  {
+    description: "Atendimento comum com escolha do prestador.",
+    iconName: "briefcase",
+    label: "Servico comum",
+    name: "",
+    operationalType: "GERAL",
+    registrationRequirements: { requiresDriverLicense: false, requiresPlate: false, requiresVehicle: false, vehicleKinds: [] },
+  },
+];
+
+function serviceIconComponent(iconName) {
+  return serviceIcons.find(([value]) => value === iconName)?.[2] ?? BriefcaseBusiness;
+}
 
 export function ServiceTypesPage({ accessToken }) {
   const [editing, setEditing] = useState(null);
@@ -86,6 +170,17 @@ export function ServiceTypesPage({ accessToken }) {
     setModalOpen(true);
   }
 
+  function applyPreset(preset) {
+    setForm((current) => ({
+      ...current,
+      description: preset.description,
+      iconName: preset.iconName,
+      name: preset.name || current.name,
+      operationalType: preset.operationalType,
+      registrationRequirements: { ...preset.registrationRequirements },
+    }));
+  }
+
   async function saveServiceType(event) {
     event.preventDefault();
     setSaving(true);
@@ -139,13 +234,13 @@ export function ServiceTypesPage({ accessToken }) {
         <section className="category-list" aria-label="Servicos cadastrados">
           {serviceTypes.map((serviceType) => (
             <article className="category-row" key={serviceType.id}>
-              <span className="category-row__icon"><Truck size={21} /></span>
+              <span className="category-row__icon">{(() => { const Icon = serviceIconComponent(serviceType.iconName); return <Icon size={21} />; })()}</span>
               <div className="category-row__body">
                 <div><h2>{serviceType.name}</h2><StatusBadge status={serviceType.status} /></div>
                 <p>{serviceType.description || "Sem descricao"}</p>
                 <small>
                   {serviceType.segment?.name ?? "Sem segmento"} - {modeCopy[serviceType.mode]} - {serviceType.providersCount} prestador(es)
-                  {serviceType.operationalType === "ENTREGA_LOCAL" ? " - Exige cadastro de motoboy e aceita chamadas de lojas" : ""}
+                  {serviceType.operationalType === "ENTREGA_LOCAL" ? " - Chamada em tempo real com aceite" : " - Cliente escolhe o profissional"}
                 </small>
                 {serviceType.registrationRequirements?.requiresVehicle || serviceType.registrationRequirements?.requiresDriverLicense || serviceType.registrationRequirements?.requiresPlate ? (
                   <small className="service-requirements-summary">
@@ -173,11 +268,32 @@ export function ServiceTypesPage({ accessToken }) {
               <button className="icon-button" onClick={closeForm} title="Fechar" type="button"><X size={19} /></button>
             </div>
             <form className="category-form" onSubmit={saveServiceType}>
+              <fieldset className="service-requirements service-presets">
+                <legend>Comecar por um modelo</legend>
+                <p>O modelo preenche a operacao e os documentos. Depois voce pode alterar qualquer opcao.</p>
+                <div className="service-preset-grid">
+                  {servicePresets.map((preset) => {
+                    const Icon = serviceIconComponent(preset.iconName);
+                    return <button className="service-preset" key={preset.label} onClick={() => applyPreset(preset)} type="button"><Icon size={19} /><span>{preset.label}</span></button>;
+                  })}
+                </div>
+              </fieldset>
               <label>Nome<input autoFocus maxLength={120} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder="Ex.: Frete" required value={form.name} /></label>
               <label>Descricao<textarea maxLength={1000} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} placeholder="Explique como o cliente solicita esse servico" rows={3} value={form.description} /></label>
               <label>Segmento financeiro<select onChange={(event) => setForm((current) => ({ ...current, segmentId: event.target.value }))} required value={form.segmentId}><option value="">Selecione o segmento dos ganhos</option>{segments.map((segment) => <option key={segment.id} value={segment.id}>{segment.name}</option>)}</select></label>
               <label>Modo de atendimento<select onChange={(event) => setForm((current) => ({ ...current, mode: event.target.value }))} value={form.mode}><option value="NEGOCIACAO_CHAT">Negociacao por chat</option><option value="PRECO_FIXO">Preco fixo</option></select></label>
-              <label>Uso operacional<select onChange={(event) => setForm((current) => ({ ...current, operationalType: event.target.value }))} value={form.operationalType}><option value="GERAL">Servico geral para clientes</option><option value="ENTREGA_LOCAL">Entrega local com cadastro de motoboy</option></select></label>
+              <fieldset className="service-requirements service-workflow">
+                <legend>Como o cliente solicita</legend>
+                <p>Esta escolha controla as telas do aplicativo, os alertas e a forma de aceite. Nao depende do nome do servico.</p>
+                <div className="service-workflow-grid">
+                  {workflowOptions.map((option) => {
+                    const Icon = option.icon;
+                    const active = form.operationalType === option.value;
+                    return <label className={`service-workflow-card${active ? " service-workflow-card--active" : ""}`} key={option.value}><input checked={active} name="operationalType" onChange={() => setForm((current) => ({ ...current, operationalType: option.value }))} type="radio" value={option.value} /><span className="service-workflow-card__icon"><Icon size={20} /></span><span><strong>{option.label}</strong><small>{option.description}</small></span></label>;
+                  })}
+                </div>
+                {form.operationalType === "ENTREGA_LOCAL" ? <div className="service-flow-summary"><Zap size={16} /><span><strong>Fluxo completo de corrida:</strong> cliente chama, profissional recebe alerta e aceita; lojas podem chamar a equipe ou abrir para a plataforma.</span></div> : null}
+              </fieldset>
               <fieldset className="service-requirements">
                 <legend>Cadastro exigido do prestador</legend>
                 <p>Defina o que o app deve pedir antes de mostrar o interruptor deste servico.</p>
@@ -186,7 +302,13 @@ export function ServiceTypesPage({ accessToken }) {
                 <label className="service-requirements__toggle"><input checked={form.registrationRequirements.requiresPlate} onChange={(event) => setForm((current) => ({ ...current, registrationRequirements: { ...current.registrationRequirements, requiresPlate: event.target.checked } }))} type="checkbox" /><span><strong>Exigir placa</strong><small>Valida o padrao brasileiro ou Mercosul.</small></span></label>
                 {form.registrationRequirements.requiresVehicle ? <div className="service-vehicle-kinds"><span>Veiculos aceitos</span>{[["MOTO", "Moto"], ["CARRO", "Carro"], ["UTILITARIO", "Utilitario/van"], ["CAMINHAO", "Caminhao"], ["BICICLETA", "Bicicleta"]].map(([value, label]) => <label key={value}><input checked={form.registrationRequirements.vehicleKinds.includes(value)} onChange={(event) => setForm((current) => ({ ...current, registrationRequirements: { ...current.registrationRequirements, vehicleKinds: event.target.checked ? [...current.registrationRequirements.vehicleKinds, value] : current.registrationRequirements.vehicleKinds.filter((item) => item !== value) } }))} type="checkbox" />{label}</label>)}</div> : null}
               </fieldset>
-              <label>Icone<input maxLength={80} onChange={(event) => setForm((current) => ({ ...current, iconName: event.target.value }))} placeholder="Ex.: bicycle" value={form.iconName} /></label>
+              <fieldset className="service-requirements service-icon-picker">
+                <legend>Icone do servico</legend>
+                <p>Escolha visualmente. O mesmo icone sera usado no painel e no aplicativo.</p>
+                <div className="service-icon-grid">
+                  {serviceIcons.map(([value, label, Icon]) => <button aria-label={label} className={`service-icon-option${form.iconName === value ? " service-icon-option--active" : ""}`} key={value} onClick={() => setForm((current) => ({ ...current, iconName: value }))} title={label} type="button"><Icon size={20} /><span>{label}</span></button>)}
+                </div>
+              </fieldset>
               <label>Ordem<input min={0} onChange={(event) => setForm((current) => ({ ...current, sortOrder: Number(event.target.value) }))} type="number" value={form.sortOrder} /></label>
               <label>Status<select onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))} value={form.status}><option value="ATIVO">Ativo</option><option value="PAUSADO">Pausado</option><option value="INATIVO">Inativo</option></select></label>
               {error ? <p className="form-error" role="alert">{error}</p> : null}

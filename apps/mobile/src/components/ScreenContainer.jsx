@@ -17,6 +17,7 @@ export function ScreenContainer({
   onContentSizeChange,
   padded = true,
   scroll = true,
+  scrollEnabled = true,
   scrollViewRef,
   style,
 }) {
@@ -29,6 +30,7 @@ export function ScreenContainer({
       nestedScrollEnabled
       onContentSizeChange={onContentSizeChange}
       ref={scrollViewRef}
+      scrollEnabled={scrollEnabled}
       showsVerticalScrollIndicator={false}
       style={styles.scroll}
     >

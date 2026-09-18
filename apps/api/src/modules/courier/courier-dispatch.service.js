@@ -4,14 +4,11 @@ import {
   emitServiceAvailabilityUpdated,
   emitServiceChatCreated,
 } from "../../realtime/socket.server.js";
+import { env } from "../../config/env.js";
 import { AppError } from "../../utils/errors.js";
 import { commercialTier2UserWhere } from "../../utils/commercial-access.js";
 import { sameCity } from "../../utils/location.js";
 import { getServiceConversation } from "../service-chats/service-chats.service.js";
-import {
-  availableServiceWhere,
-  isServiceAvailable,
-} from "../service-chats/service-availability.js";
 import {
   activeCourierConversationStatuses,
   getBusyCourierSellerIds,
@@ -20,7 +17,16 @@ import {
 import { courierRepository, createCourierRepository } from "./courier.repository.js";
 import { sendExpoPushToUsers } from "../notifications/notifications.service.js";
 
-const courierRequestLifetimeMs = 24 * 60 * 60 * 1000;
+const courierRequestLifetimeMs = env.courier.requestTimeoutMinutes * 60 * 1000;
+
+function isCourierServiceEnabled(service) {
+  return Boolean(
+    service
+    && service.disponivel_agora
+    && !service.excluido_em
+    && service.status === "ATIVO",
+  );
+}
 
 const requestInclude = {
   conversa_servico: { select: { id: true, status: true } },
@@ -117,11 +123,34 @@ async function deliveryType(serviceTypeId = null) {
       tipo_operacao: "ENTREGA_LOCAL",
     },
   });
-  const type = types.find((item) => item.slug === "motoboy") ?? types[0];
+  const type = types[0];
   if (!type?.segmento_venda || type.segmento_venda.status !== "ATIVO") {
-    throw new AppError("O servico de motoboy ainda nao esta configurado", 409);
+    throw new AppError("O servico de corrida ainda nao esta configurado", 409);
   }
   return type;
+}
+
+async function deliveryTypes() {
+  return courierRepository.findServiceTypes({
+    include: { segmento_venda: true },
+    orderBy: [{ ordem: "asc" }, { id: "asc" }],
+    where: {
+      excluido_em: null,
+      segmento_venda: { is: { status: "ATIVO" } },
+      status: "ATIVO",
+      tipo_operacao: "ENTREGA_LOCAL",
+    },
+  });
+}
+
+function serializeDispatchType(type) {
+  return {
+    description: type.descricao,
+    iconName: type.icone,
+    id: type.id,
+    name: type.nome,
+    registrationRequirements: type.requisitos_cadastro ?? null,
+  };
 }
 
 function platformDispatchEligibility(requestingStoreId = null) {
@@ -151,7 +180,7 @@ async function onlineCandidates(address, typeId, { requestingStoreId = null } = 
   const services = await courierRepository.findSellerServices({
     include: { vendedor: { include: { motoboy: true, usuario: { select: { id: true } } } } },
     where: {
-      ...availableServiceWhere(),
+      disponivel_agora: true,
       excluido_em: null,
       status: "ATIVO",
       tipo_servico_id: typeId,
@@ -217,24 +246,41 @@ async function activeCustomerRequests(userId, serviceTypeId = null, repository =
 }
 
 async function expireCourierRequests(where = {}) {
+  const now = new Date();
+  const lifetimeCutoff = new Date(now.getTime() - courierRequestLifetimeMs);
   await courierRepository.updateCourierRequests({
     data: { status: "EXPIRADA" },
-    where: { ...where, expira_em: { lte: new Date() }, status: "PENDENTE" },
+    where: {
+      ...where,
+      OR: [
+        { expira_em: { lte: now } },
+        { criado_em: { lte: lifetimeCutoff } },
+      ],
+      status: "PENDENTE",
+    },
   });
 }
 
-export async function getStoreCourierDispatch(userId, storeId) {
+export async function getStoreCourierDispatch(userId, storeId, serviceTypeId = null) {
   const store = await accessibleStore(userId, storeId);
   await expireCourierRequests({ loja_id: store.id });
-  const type = await deliveryType();
-  const [members, candidates, current] = await Promise.all([
+  const [availableTypes, current] = await Promise.all([
+    deliveryTypes(),
+    activeRequestForStore(store.id),
+  ]);
+  const requestedTypeId = serviceTypeId ? parseId(serviceTypeId, "Servico invalido") : null;
+  const currentTypeId = current?.tipo_servico_id ?? null;
+  const type = availableTypes.find((item) => item.id === (currentTypeId ?? requestedTypeId))
+    ?? availableTypes.find((item) => item.id === requestedTypeId)
+    ?? availableTypes[0];
+  if (!type) throw new AppError("Nenhum servico de corrida esta configurado", 409);
+  const [members, candidates] = await Promise.all([
     courierRepository.findTeamMembers({
       include: { motoboy: { include: { vendedor: { include: { servicos: true, usuario: { select: { foto_url: true, id: true, nome: true } } } } } } },
       orderBy: { criado_em: "asc" },
       where: { ativo: true, loja_id: store.id },
     }),
     onlineCandidates(store.endereco, type.id, { requestingStoreId: store.id }),
-    activeRequestForStore(store.id),
   ]);
   const busySellerIds = await getBusyCourierSellerIds(
     courierRepository,
@@ -243,13 +289,15 @@ export async function getStoreCourierDispatch(userId, storeId) {
   return {
     currentRequest: current ? serializeRequest(current) : null,
     platformAvailable: candidates.some((candidate) => candidate.vendedor.usuario_id !== userId),
+    serviceType: serializeDispatchType(type),
+    serviceTypes: availableTypes.map(serializeDispatchType),
     team: members.map((member) => {
       const service = member.motoboy.vendedor.servicos.find((item) => item.tipo_servico_id === type.id && item.status === "ATIVO");
       const sellerIsEligible = member.motoboy.vendedor.status === "ATIVO"
         && member.motoboy.vendedor.status_kyc === "APROVADO";
       const isOnline = sellerIsEligible
         && member.motoboy.status === "ATIVO"
-        && isServiceAvailable(service);
+        && isCourierServiceEnabled(service);
       const isBusy = busySellerIds.has(member.motoboy.vendedor_id);
       return {
         available: isOnline && !isBusy,
@@ -274,7 +322,7 @@ export async function createCourierRequest(userId, storeId, data) {
   const existing = await activeRequestForStore(store.id);
   if (existing) return { request: serializeRequest(existing) };
 
-  const type = await deliveryType();
+  const type = await deliveryType(data.serviceTypeId);
   let target = null;
   let targetUsers = [];
   if (data.teamMemberId) {
@@ -282,23 +330,25 @@ export async function createCourierRequest(userId, storeId, data) {
       include: { motoboy: { include: { vendedor: { include: { servicos: true } } } } },
       where: { ativo: true, id: data.teamMemberId, loja_id: store.id },
     });
-    const service = member?.motoboy?.vendedor?.servicos?.find((item) => item.tipo_servico_id === type.id && item.status === "ATIVO" && isServiceAvailable(item));
+    const service = member?.motoboy?.vendedor?.servicos?.find((item) => (
+      item.tipo_servico_id === type.id && isCourierServiceEnabled(item)
+    ));
     if (
       !member
       || member.motoboy.status !== "ATIVO"
       || member.motoboy.vendedor.status !== "ATIVO"
       || member.motoboy.vendedor.status_kyc !== "APROVADO"
       || !service
-    ) throw new AppError("Este motoboy da equipe esta offline ou precisa concluir o KYC", 409);
+    ) throw new AppError("Este profissional da equipe esta offline ou precisa concluir o KYC", 409);
     if (await isCourierSellerBusy(courierRepository, member.motoboy.vendedor_id)) {
-      throw new AppError("Este motoboy esta atendendo outra corrida", 409);
+      throw new AppError("Este profissional esta atendendo outra corrida", 409);
     }
     target = member.motoboy;
     targetUsers = [member.motoboy.vendedor.usuario_id];
   } else {
     const candidates = await onlineCandidates(store.endereco, type.id, { requestingStoreId: store.id });
     targetUsers = candidates.map((item) => item.vendedor.usuario_id).filter((id) => id !== userId);
-    if (!targetUsers.length) throw new AppError("Nenhum motoboy esta disponivel agora", 409);
+    if (!targetUsers.length) throw new AppError(`Nenhum profissional de ${type.nome} esta disponivel agora`, 409);
   }
 
   let orderId = null;
@@ -334,9 +384,9 @@ export async function createCourierRequest(userId, storeId, data) {
   if (result.created) {
     emitCourierRequestCreated({ request, targetUserIds: targetUsers });
     void sendExpoPushToUsers({
-      body: "Uma entrega esta aguardando o primeiro aceite.",
+      body: `Uma chamada de ${type.nome} esta aguardando o primeiro aceite.`,
       data: { requestId: request.id, screen: "ServiceDesk", type: "courier_request" },
-      title: "Nova corrida disponivel",
+      title: `${type.nome}: nova chamada`,
       userIds: targetUsers,
     });
   }
@@ -360,7 +410,7 @@ export async function createCustomerCourierRequest(userId, data) {
   const targetUserIds = candidates
     .map((service) => service.vendedor.usuario_id)
     .filter((candidateUserId) => candidateUserId !== userId);
-  if (!targetUserIds.length) throw new AppError("Nenhum motoboy esta disponivel agora", 409);
+  if (!targetUserIds.length) throw new AppError(`Nenhum profissional de ${type.nome} esta disponivel agora`, 409);
 
   const result = await courierRepository.transaction(async (database) => {
     const repository = createCourierRepository(database);
@@ -386,9 +436,9 @@ export async function createCustomerCourierRequest(userId, data) {
   if (result.created) {
     emitCourierRequestCreated({ request, targetUserIds });
     void sendExpoPushToUsers({
-      body: "Uma entrega da sua cidade esta aguardando o primeiro aceite.",
+      body: `Uma chamada de ${type.nome} na sua cidade esta aguardando o primeiro aceite.`,
       data: { requestId: request.id, screen: "ServiceDesk", type: "courier_request" },
-      title: "Nova corrida disponivel",
+      title: `${type.nome}: nova chamada`,
       userIds: targetUserIds,
     });
   }
@@ -411,7 +461,10 @@ export async function listCourierRequests(userId) {
     },
   });
   if (!courier) return { dashboard: null, requests: [] };
-  const onlineTypeIds = courier.vendedor.servicos.filter((item) => isServiceAvailable(item) && item.status === "ATIVO").map((item) => item.tipo_servico_id).filter(Boolean);
+  const onlineTypeIds = courier.vendedor.servicos
+    .filter(isCourierServiceEnabled)
+    .map((item) => item.tipo_servico_id)
+    .filter(Boolean);
   const isBusy = await isCourierSellerBusy(courierRepository, courier.vendedor_id);
   const requests = !onlineTypeIds.length || isBusy ? [] : await courierRepository.findCourierRequests({
     include: requestInclude,
@@ -532,7 +585,7 @@ export async function acceptCourierRequest(userId, requestId) {
       },
     },
   });
-  if (!courier) throw new AppError("Cadastre seu perfil de motoboy", 428);
+  if (!courier) throw new AppError("Cadastre seu perfil de transporte para aceitar corridas", 428);
   const original = await courierRepository.findCourierRequestById({ include: requestInclude, where: { id } });
   if (!original || original.status !== "PENDENTE" || original.expira_em <= new Date()) throw new AppError("Esta chamada nao esta mais disponivel", 409);
   if (original.solicitante_usuario_id === userId) throw new AppError("Voce nao pode aceitar a propria chamada", 400);
@@ -540,13 +593,15 @@ export async function acceptCourierRequest(userId, requestId) {
     { city: courier.cidade_base, state: courier.estado_base },
     original.loja?.endereco ?? original.solicitante.enderecos[0],
   )) throw new AppError("Esta corrida pertence a outra cidade", 403);
-  if (original.tipo_chamada === "EQUIPE" && original.motoboy_direcionado_id !== courier.id) throw new AppError("Esta chamada pertence a outro motoboy", 403);
+  if (original.tipo_chamada === "EQUIPE" && original.motoboy_direcionado_id !== courier.id) throw new AppError("Esta chamada pertence a outro profissional", 403);
   if (original.tipo_chamada === "PLATAFORMA") {
     if (!canReceivePlatformCalls(courier, original.loja_id)) throw new AppError("Sua disponibilidade esta limitada as lojas credenciadas", 409);
   }
-  const sellerService = courier.vendedor.servicos.find((item) => item.tipo_servico_id === original.tipo_servico_id && item.status === "ATIVO" && isServiceAvailable(item));
+  const sellerService = courier.vendedor.servicos.find((item) => (
+    item.tipo_servico_id === original.tipo_servico_id && isCourierServiceEnabled(item)
+  ));
   const segment = sellerService?.tipo_servico?.segmento_venda;
-  if (!sellerService || !segment || segment.status !== "ATIVO") throw new AppError("Voce esta offline para esta entrega", 409);
+  if (!sellerService || !segment || segment.status !== "ATIVO") throw new AppError("Voce esta offline para este tipo de corrida", 409);
 
   const result = await courierRepository.transaction(async (database) => {
     const repository = createCourierRepository(database);
@@ -558,7 +613,7 @@ export async function acceptCourierRequest(userId, requestId) {
       data: { aceito_em: new Date(), motoboy_aceite_id: courier.id, status: "ACEITA" },
       where: { expira_em: { gt: new Date() }, id, status: "PENDENTE" },
     });
-    if (claimed.count !== 1) throw new AppError("Outro motoboy ja aceitou esta chamada", 409);
+    if (claimed.count !== 1) throw new AppError("Outro profissional ja aceitou esta chamada", 409);
     const conversationOrigin = original.loja_id ? original.origem : "A combinar no chat";
     const conversationDestination = original.loja_id ? original.destino : "A combinar no chat";
     const acceptanceMessage = original.loja_id

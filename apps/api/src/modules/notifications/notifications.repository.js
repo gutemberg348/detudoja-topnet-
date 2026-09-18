@@ -10,7 +10,7 @@ export function createNotificationsRepository(database = prisma) {
     },
     findActivePushTokens(userIds) {
       return database.dispositivoPush.findMany({
-        select: { token: true, usuario_id: true },
+        select: { plataforma: true, token: true, usuario_id: true },
         where: { ativo: true, usuario_id: { in: userIds } },
       });
     },

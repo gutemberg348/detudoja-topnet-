@@ -340,6 +340,26 @@ tbody tr:hover { background: #f8fcf9; }
 .service-requirements__toggle strong, .service-requirements__toggle small { display: block; }
 .service-requirements__toggle strong { color: var(--ink); font-size: 10px; }
 .service-requirements__toggle small { margin-top: 2px; color: var(--muted); font-size: 8px; font-weight: 400; }
+.service-preset-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.service-preset { display: flex; min-height: 62px; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--border-strong); border-radius: 7px; padding: 9px; color: var(--ink-soft); background: var(--surface); cursor: pointer; font: inherit; font-size: 10px; font-weight: 800; transition: border-color .15s ease, color .15s ease, background .15s ease, transform .15s ease; }
+.service-preset:hover { border-color: var(--primary-border); color: var(--primary-dark); background: #f8fffb; transform: translateY(-1px); }
+.service-preset svg { flex: 0 0 auto; }
+.service-workflow { background: #f8fbf9; }
+.service-workflow-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.service-workflow-card { display: grid !important; min-height: 108px; align-items: start; grid-template-columns: 38px minmax(0, 1fr); gap: 10px !important; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 8px; padding: 12px; background: var(--surface); cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; }
+.service-workflow-card > input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.service-workflow-card--active { border-color: #55b985; box-shadow: 0 0 0 3px rgb(11 138 92 / 8%); background: #f5fff9; }
+.service-workflow-card__icon { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 7px; color: var(--primary-dark); background: var(--primary-soft); }
+.service-workflow-card strong, .service-workflow-card small { display: block; }
+.service-workflow-card strong { margin-bottom: 5px; color: var(--ink); font-size: 11px; }
+.service-workflow-card small { color: var(--muted); font-size: 9px; font-weight: 400; line-height: 1.45; }
+.service-flow-summary { display: flex; align-items: flex-start; gap: 8px; border: 1px solid var(--primary-border); border-radius: 7px; padding: 10px; color: var(--primary-dark); background: var(--primary-soft); font-size: 9px; line-height: 1.45; }
+.service-flow-summary svg { flex: 0 0 auto; margin-top: 1px; }
+.service-icon-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; }
+.service-icon-option { display: grid; min-height: 70px; place-items: center; align-content: center; gap: 6px; border: 1px solid var(--border); border-radius: 7px; padding: 8px 5px; color: var(--muted); background: var(--surface); cursor: pointer; transition: border-color .15s ease, color .15s ease, background .15s ease, transform .15s ease; }
+.service-icon-option span { overflow: hidden; width: 100%; font-size: 8px; font-weight: 700; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.service-icon-option:hover { border-color: var(--primary-border); color: var(--primary-dark); transform: translateY(-1px); }
+.service-icon-option--active { border-color: #55b985; color: var(--primary-dark); box-shadow: 0 0 0 2px rgb(11 138 92 / 8%); background: var(--primary-soft); }
 .service-vehicle-kinds { display: flex; flex-wrap: wrap; gap: 7px; padding-top: 4px; }
 .service-vehicle-kinds > span { width: 100%; color: var(--ink-soft); font-size: 9px; font-weight: 800; text-transform: uppercase; }
 .service-vehicle-kinds label { display: flex !important; min-height: 34px; align-items: center; flex-direction: row !important; gap: 6px !important; border: 1px solid var(--border); border-radius: 999px; padding: 6px 9px; color: var(--ink-soft); background: var(--surface); font-size: 9px !important; cursor: pointer; }
@@ -755,6 +775,8 @@ tbody tr:hover { background: #f8fcf9; }
   .category-row__icon { width: 42px; height: 42px; }
   .category-row__actions { grid-column: 2; }
   .category-row__body > div { align-items: flex-start; flex-direction: column; gap: 5px; }
+  .service-preset-grid, .service-workflow-grid { grid-template-columns: 1fr; }
+  .service-icon-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .form-grid--two, .form-grid--three { grid-template-columns: 1fr; }
   .fee-row { grid-template-columns: 1fr; align-items: stretch; }
   .fee-row .button { width: 100%; }

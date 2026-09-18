@@ -15,6 +15,7 @@ import { AppButton } from "../../components/AppButton";
 import { AppInput } from "../../components/AppInput";
 import { fetchCepAddress } from "../../services/cep.api";
 import { formatCep, onlyDigits } from "../../utils/authValidation";
+import { serviceIconName } from "../../utils/service-icons";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../../utils/theme";
 
 const emptyForm = {
@@ -191,11 +192,11 @@ export function CourierRegistrationModal({ accountAddress, error, loading, onClo
           <View style={styles.handle} />
           <View style={styles.header}>
             <View style={styles.headerIcon}>
-              <Ionicons color={colors.primaryDark} name="bicycle-outline" size={24} />
+              <Ionicons color={colors.primaryDark} name={serviceIconName(service?.iconName, "navigate-outline")} size={24} />
             </View>
             <View style={styles.headerCopy}>
               <Text style={styles.eyebrow}>CADASTRO DO SERVICO</Text>
-              <Text style={styles.title}>{profile && !service ? "Dados do motoboy" : `Realizar ${service?.name ?? "Motoboy"}`}</Text>
+              <Text style={styles.title}>{profile && !service ? "Dados de transporte" : `Realizar ${service?.name ?? "Corridas"}`}</Text>
               <Text style={styles.subtitle}>Preencha somente o que este servico exige para liberar sua disponibilidade.</Text>
             </View>
             <Pressable accessibilityLabel="Fechar cadastro" onPress={onClose} style={styles.close}>
