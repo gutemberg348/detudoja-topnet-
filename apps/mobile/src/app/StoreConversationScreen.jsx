@@ -879,6 +879,7 @@ function MessageBubble({
           onOpenCatalog={onOpenCatalog}
           onOpen={onOpenSearchProduct}
           products={searchProducts}
+          query={message.content.query}
           suggestions={message.content.suggestions ?? searchSuggestions ?? []}
           total={message.content.productCount ?? searchProducts.length}
         />
@@ -887,9 +888,25 @@ function MessageBubble({
   );
 }
 
-function ChatSearchResults({ onAdd, onOpen, onOpenCatalog, products, suggestions, total }) {
+function ChatSearchResults({ onAdd, onOpen, onOpenCatalog, products, query, suggestions, total }) {
   const isSuggestion = total === 0;
-  const visibleProducts = isSuggestion ? suggestions : products;
+  const [suggestionPage, setSuggestionPage] = useState(0);
+  const suggestionBatchSize = 2;
+  const suggestionPageCount = Math.max(1, Math.ceil(suggestions.length / suggestionBatchSize));
+  const visibleProducts = isSuggestion
+    ? suggestions.slice(
+        suggestionPage * suggestionBatchSize,
+        (suggestionPage + 1) * suggestionBatchSize,
+      )
+    : products;
+
+  useEffect(() => {
+    setSuggestionPage(0);
+  }, [query, suggestions.length]);
+
+  function showOtherSuggestions() {
+    setSuggestionPage((current) => (current + 1) % suggestionPageCount);
+  }
 
   return (
     <View style={styles.chatSearchResults}>
@@ -899,13 +916,13 @@ function ChatSearchResults({ onAdd, onOpen, onOpenCatalog, products, suggestions
           {total > 0
             ? `${total} produto${total === 1 ? "" : "s"} encontrado${total === 1 ? "" : "s"}`
             : visibleProducts.length
-              ? "Sugestoes para voce"
+              ? "Produtos que podem combinar"
               : "Nenhum produto encontrado"}
         </Text>
       </View>
       {isSuggestion ? (
         <Text style={styles.searchResponseText}>
-          Nao encontramos exatamente isso, mas estes produtos podem ajudar.
+          Nao encontramos exatamente isso. Veja algumas opcoes parecidas:
         </Text>
       ) : null}
       {visibleProducts.length ? (
@@ -945,14 +962,25 @@ function ChatSearchResults({ onAdd, onOpen, onOpenCatalog, products, suggestions
         <Text style={styles.searchResponseText}>Tente outro nome ou abra todos os produtos.</Text>
       )}
       {isSuggestion && onOpenCatalog ? (
-        <Pressable
-          onPress={onOpenCatalog}
-          style={({ pressed }) => [styles.chatSearchCatalogButton, pressed && styles.pressed]}
-        >
-          <Ionicons color={colors.primaryDark} name="grid-outline" size={17} />
-          <Text style={styles.chatSearchCatalogButtonText}>Ver todos os produtos</Text>
-          <Ionicons color={colors.primaryDark} name="arrow-forward" size={16} />
-        </Pressable>
+        <View style={styles.chatSearchActions}>
+          {suggestions.length > suggestionBatchSize ? (
+            <Pressable
+              onPress={showOtherSuggestions}
+              style={({ pressed }) => [styles.chatSearchOtherButton, pressed && styles.pressed]}
+            >
+              <Ionicons color={colors.primaryDark} name="refresh-outline" size={17} />
+              <Text style={styles.chatSearchOtherButtonText}>Outros</Text>
+            </Pressable>
+          ) : null}
+          <Pressable
+            onPress={onOpenCatalog}
+            style={({ pressed }) => [styles.chatSearchCatalogButton, pressed && styles.pressed]}
+          >
+            <Ionicons color={colors.card} name="grid-outline" size={17} />
+            <Text style={styles.chatSearchCatalogButtonText}>Ver todos</Text>
+            <Ionicons color={colors.card} name="arrow-forward" size={16} />
+          </Pressable>
+        </View>
       ) : null}
     </View>
   );
@@ -1402,18 +1430,23 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: spacing.xs,
   },
-  chatSearchCatalogButton: {
-    alignItems: "center",
-    backgroundColor: colors.primarySoft,
-    borderRadius: radius.md,
+  chatSearchActions: {
     flexDirection: "row",
     gap: spacing.xs,
+  },
+  chatSearchCatalogButton: {
+    alignItems: "center",
+    backgroundColor: colors.primaryDark,
+    borderRadius: radius.md,
+    flex: 1,
+    flexDirection: "row",
+    gap: spacing.xs,
+    justifyContent: "center",
     minHeight: 42,
     paddingHorizontal: spacing.sm,
   },
   chatSearchCatalogButtonText: {
-    color: colors.primaryDark,
-    flex: 1,
+    color: colors.card,
     fontFamily: fonts.bold,
     fontSize: typography.caption,
   },
@@ -1426,6 +1459,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flexDirection: "row",
     gap: spacing.xs,
+  },
+  chatSearchOtherButton: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderColor: colors.primaryLight,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.xs,
+    justifyContent: "center",
+    minHeight: 42,
+    paddingHorizontal: spacing.md,
+  },
+  chatSearchOtherButtonText: {
+    color: colors.primaryDark,
+    fontFamily: fonts.bold,
+    fontSize: typography.caption,
   },
   chatSearchProduct: {
     backgroundColor: colors.card,

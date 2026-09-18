@@ -158,6 +158,37 @@ const catalogSearchNoiseTerms = new Set([
   "voces",
 ]);
 
+function catalogWordSimilarity(left, right) {
+  if (!left || !right) return 0;
+  if (left === right) return 1;
+  if (left.includes(right) || right.includes(left)) return 0.88;
+
+  const rows = left.length + 1;
+  const columns = right.length + 1;
+  const distances = Array.from({ length: rows }, (_, row) => {
+    const values = Array(columns).fill(0);
+    values[0] = row;
+    return values;
+  });
+
+  for (let column = 1; column < columns; column += 1) {
+    distances[0][column] = column;
+  }
+
+  for (let row = 1; row < rows; row += 1) {
+    for (let column = 1; column < columns; column += 1) {
+      const substitutionCost = left[row - 1] === right[column - 1] ? 0 : 1;
+      distances[row][column] = Math.min(
+        distances[row - 1][column] + 1,
+        distances[row][column - 1] + 1,
+        distances[row - 1][column - 1] + substitutionCost,
+      );
+    }
+  }
+
+  return 1 - (distances[left.length][right.length] / Math.max(left.length, right.length));
+}
+
 function suggestStoreProducts(products, query, matches = []) {
   const matchedIds = new Set(matches.map((product) => product.id));
   const terms = normalizeCatalogSearch(query)
@@ -168,7 +199,16 @@ function suggestStoreProducts(products, query, matches = []) {
     && (!product.estoque_controlado || Number(product.estoque_quantidade ?? 0) > 0)
   ));
 
-  if (!terms.length) return available.slice(0, 4);
+  if (!terms.length) {
+    return available
+      .map((product, index) => ({ index, product }))
+      .sort((left, right) => (
+        Number(Boolean(right.product.destaque)) - Number(Boolean(left.product.destaque))
+        || left.index - right.index
+      ))
+      .slice(0, 4)
+      .map(({ product }) => product);
+  }
 
   const ranked = available
     .map((product, index) => {
@@ -181,11 +221,16 @@ function suggestStoreProducts(products, query, matches = []) {
       ].filter(Boolean).join(" "));
       const words = searchable.split(/\s+/).filter(Boolean);
       const score = terms.reduce((total, term) => {
-        if (name.includes(term)) return total + 8;
-        if (searchable.includes(term)) return total + 5;
-        if (words.some((word) => word.startsWith(term) || term.startsWith(word))) {
-          return total + 3;
-        }
+        if (name === term) return total + 12;
+        if (name.includes(term)) return total + 9;
+        if (searchable.includes(term)) return total + 6;
+
+        const closestWord = words.reduce(
+          (best, word) => Math.max(best, catalogWordSimilarity(term, word)),
+          0,
+        );
+        if (closestWord >= 0.82) return total + 5;
+        if (closestWord >= 0.68) return total + 3;
         return total;
       }, product.destaque ? 1 : 0);
       return { index, product, score };

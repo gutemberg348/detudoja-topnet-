@@ -20,6 +20,7 @@
     "seed:admin": "node prisma/seed.js",
     "seed:demo": "node prisma/seed-demo.js",
     "seed:load-scenario": "node prisma/seed-load-scenario.js",
+    "seed:test-50": "node prisma/seed-test-50.js",
     "seed:service-types": "node prisma/seed-service-types.js",
     "test:load-scenario": "node --import ./test.setup.js --test --test-concurrency=1 scenarios/load-scenario.scenario.js",
     "media:curated": "node prisma/apply-curated-media.js",

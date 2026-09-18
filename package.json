@@ -40,6 +40,7 @@
     "seed:admin": "npm run seed:admin -w apps/api",
     "seed:demo": "npm run seed:demo -w apps/api",
     "seed:load-scenario": "npm run seed:load-scenario -w apps/api",
+    "seed:test-50": "npm run seed:test-50 -w apps/api",
     "seed:service-types": "npm run seed:service-types -w apps/api",
     "test:load-scenario": "npm run test:load-scenario -w apps/api",
     "media:curated": "npm run media:curated -w apps/api",

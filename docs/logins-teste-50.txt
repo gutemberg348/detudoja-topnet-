@@ -1,0 +1,63 @@
+MASSA INTENSIVA DE HOMOLOGACAO
+Senha comum para todas as contas: 12345678
+Execucao na VPS: docker compose run --rm api npm run seed:test-50 -- --confirm
+
+ENTREGADORES (Motoboy e Mototaxi)
+teste50.entregador01@detudoja.local
+teste50.entregador02@detudoja.local
+teste50.entregador03@detudoja.local
+teste50.entregador04@detudoja.local
+teste50.entregador05@detudoja.local
+
+LOJISTAS
+teste50.lojista01@detudoja.local
+teste50.lojista02@detudoja.local
+teste50.lojista03@detudoja.local
+teste50.lojista04@detudoja.local
+teste50.lojista05@detudoja.local
+teste50.lojista06@detudoja.local
+teste50.lojista07@detudoja.local
+teste50.lojista08@detudoja.local
+
+PRESTADORES DE SERVICO
+teste50.prestador01@detudoja.local
+teste50.prestador02@detudoja.local
+teste50.prestador03@detudoja.local
+teste50.prestador04@detudoja.local
+teste50.prestador05@detudoja.local
+teste50.prestador06@detudoja.local
+teste50.prestador07@detudoja.local
+teste50.prestador08@detudoja.local
+teste50.prestador09@detudoja.local
+teste50.prestador10@detudoja.local
+
+CLIENTES
+teste50.cliente01@detudoja.local
+teste50.cliente02@detudoja.local
+teste50.cliente03@detudoja.local
+teste50.cliente04@detudoja.local
+teste50.cliente05@detudoja.local
+teste50.cliente06@detudoja.local
+teste50.cliente07@detudoja.local
+teste50.cliente08@detudoja.local
+teste50.cliente09@detudoja.local
+teste50.cliente10@detudoja.local
+teste50.cliente11@detudoja.local
+teste50.cliente12@detudoja.local
+teste50.cliente13@detudoja.local
+teste50.cliente14@detudoja.local
+teste50.cliente15@detudoja.local
+teste50.cliente16@detudoja.local
+teste50.cliente17@detudoja.local
+teste50.cliente18@detudoja.local
+teste50.cliente19@detudoja.local
+teste50.cliente20@detudoja.local
+teste50.cliente21@detudoja.local
+teste50.cliente22@detudoja.local
+teste50.cliente23@detudoja.local
+teste50.cliente24@detudoja.local
+
+LOGINS VAZIOS
+teste50.vazio01@detudoja.local
+teste50.vazio02@detudoja.local
+teste50.vazio03@detudoja.local
