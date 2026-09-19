@@ -26,6 +26,7 @@ import {
   assertStoreMonthlyCpfLimit,
 } from "../earnings/commercial-limit.service.js";
 import {
+  creditUserWallet,
   debitUserWallet,
   ensureUserWallets,
 } from "../wallet/wallet.service.js";
@@ -34,6 +35,7 @@ import {
   reserveImmediatePixPayout,
   submitPendingPayout,
 } from "../payouts/payout.service.js";
+import { isAsaasEnabled } from "../payments/asaas.client.js";
 
 const QR_EXPIRATION_MINUTES = 30;
 
@@ -56,8 +58,12 @@ const chargeInclude = {
   pagamento: {
     select: {
       id: true,
+      gateway: true,
       metodo_principal: true,
       pago_em: true,
+      copia_cola_pix: true,
+      expira_em: true,
+      qr_code: true,
       status: true,
       transacao_comercial: {
         select: {
@@ -79,6 +85,8 @@ const chargeInclude = {
         },
       },
       valor_pago_saldo_centavos: true,
+      valor_pago_pix_centavos: true,
+      valor_total_centavos: true,
     },
   },
   proposta_servico: {
@@ -135,8 +143,23 @@ function createPublicCode() {
   return `DTJ-${randomUUID().replace(/-/g, "").slice(0, 20).toUpperCase()}`;
 }
 
+function createPermanentStoreToken() {
+  return randomUUID().replace(/-/g, "").toUpperCase();
+}
+
 function qrPayload(code) {
   return `DTJ:C:${code}`;
+}
+
+function permanentStoreQrPayload(token) {
+  return `DTJ:S:${token}`;
+}
+
+function normalizePermanentStoreToken(value) {
+  const rawValue = String(value ?? "").trim();
+  const matched = rawValue.match(/DTJ:S:([A-Z0-9]{20,64})/i);
+
+  return (matched?.[1] ?? rawValue).trim().toUpperCase();
 }
 
 function paymentSourceForWallet(code) {
@@ -198,6 +221,8 @@ function serializeCharge(charge, { includeQr = false, localRewardPolicy = undefi
           method: charge.pagamento.metodo_principal,
           paidAt: charge.pagamento.pago_em?.toISOString() ?? null,
           status: charge.pagamento.status,
+          pixCents: cents(charge.pagamento.valor_pago_pix_centavos),
+          totalCents: cents(charge.pagamento.valor_total_centavos),
           walletCents: cents(charge.pagamento.valor_pago_saldo_centavos),
         }
       : null,
@@ -242,6 +267,40 @@ async function createQrDataUrl(code) {
     margin: 1,
     width: 520,
   });
+}
+
+async function createPermanentStoreQrDataUrl(token) {
+  return QRCode.toDataURL(permanentStoreQrPayload(token), {
+    color: { dark: "#082E22", light: "#FFFFFF" },
+    errorCorrectionLevel: "H",
+    margin: 2,
+    width: 900,
+  });
+}
+
+function serializePermanentStore(store) {
+  return {
+    active: store.qr_pagamento_ativo,
+    id: store.id,
+    logoUrl: store.logo_url,
+    name: store.nome,
+    payload: permanentStoreQrPayload(store.qr_pagamento_token),
+    token: store.qr_pagamento_token,
+    updatedAt: store.qr_pagamento_atualizado_em?.toISOString() ?? null,
+  };
+}
+
+function serializePendingGatewayPayment(payment) {
+  if (!payment || payment.gateway !== "ASAAS") return null;
+
+  return {
+    expiresAt: payment.expira_em?.toISOString() ?? null,
+    gateway: payment.gateway,
+    id: payment.id,
+    pixCopyPaste: payment.copia_cola_pix,
+    qrImageDataUrl: payment.qr_code,
+    status: payment.status,
+  };
 }
 
 export async function serializeChargeWithQr(charge) {
@@ -588,6 +647,107 @@ export async function getGeneratedChargeQr(userId, chargeId) {
   return serializeChargeWithQr(charge);
 }
 
+async function findStoreForPermanentQr(userId, storeId) {
+  const id = Number(storeId);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw new AppError("Loja invalida", 400);
+  }
+
+  const store = await chargeRepository.findStore({
+    select: {
+      aceita_qrcode: true,
+      id: true,
+      logo_url: true,
+      nome: true,
+      qr_pagamento_ativo: true,
+      qr_pagamento_atualizado_em: true,
+      qr_pagamento_token: true,
+      lojista: { select: { usuario_id: true } },
+      status: true,
+    },
+    where: {
+      excluido_em: null,
+      id,
+      lojista: { usuario_id: userId },
+    },
+  });
+
+  if (!store) {
+    throw new AppError("Loja nao encontrada para gerar o QR permanente", 404);
+  }
+  if (store.status !== "ATIVA" || !store.aceita_qrcode) {
+    throw new AppError("Ative a loja e o recebimento por QR antes de gerar este codigo", 409);
+  }
+
+  await Promise.all([
+    chargeRepository.requireCommercialTier2(userId),
+    chargeRepository.requireUserCpf(userId),
+    requireActivePayoutAccount(store.lojista.usuario_id),
+  ]);
+
+  return store;
+}
+
+export async function getPermanentStorePaymentQr(userId, storeId, { regenerate = false } = {}) {
+  let store = await findStoreForPermanentQr(userId, storeId);
+
+  if (!store.qr_pagamento_token || regenerate) {
+    store = await chargeRepository.updateStore({
+      data: {
+        qr_pagamento_ativo: true,
+        qr_pagamento_atualizado_em: new Date(),
+        qr_pagamento_token: createPermanentStoreToken(),
+      },
+      select: {
+        id: true,
+        logo_url: true,
+        nome: true,
+        qr_pagamento_ativo: true,
+        qr_pagamento_atualizado_em: true,
+        qr_pagamento_token: true,
+      },
+      where: { id: store.id },
+    });
+  }
+
+  return {
+    qrImageDataUrl: await createPermanentStoreQrDataUrl(store.qr_pagamento_token),
+    store: serializePermanentStore(store),
+  };
+}
+
+export async function getPermanentStoreQrForCustomer(userId, rawToken) {
+  const token = normalizePermanentStoreToken(rawToken);
+  const store = await chargeRepository.findStore({
+    select: {
+      aceita_qrcode: true,
+      id: true,
+      logo_url: true,
+      nome: true,
+      qr_pagamento_ativo: true,
+      qr_pagamento_atualizado_em: true,
+      qr_pagamento_token: true,
+      lojista: { select: { usuario_id: true } },
+    },
+    where: {
+      aceita_qrcode: true,
+      excluido_em: null,
+      qr_pagamento_ativo: true,
+      qr_pagamento_token: token,
+      status: "ATIVA",
+    },
+  });
+
+  if (!store) {
+    throw new AppError("QR permanente invalido ou desativado", 404);
+  }
+  if (store.lojista.usuario_id === userId) {
+    throw new AppError("Use outro usuario para pagar a sua propria loja", 409);
+  }
+
+  return { store: serializePermanentStore(store) };
+}
+
 export async function getChargeForCustomer(userId, rawCode) {
   let charge = await loadCharge(chargeRepository, rawCode);
   charge = await expireChargeIfNeeded(chargeRepository, charge);
@@ -603,7 +763,7 @@ export async function getChargeForCustomer(userId, rawCode) {
   };
 }
 
-function allocateWallets(wallets, totalCents) {
+function allocateWallets(wallets, totalCents, { requireFull = true } = {}) {
   const preferredCodes = ["cashback", "saldo_pix", "rede", "vendas"];
   const sortedWallets = [...wallets].sort(
     (left, right) => preferredCodes.indexOf(left.tipo_carteira.codigo) - preferredCodes.indexOf(right.tipo_carteira.codigo),
@@ -629,14 +789,183 @@ function allocateWallets(wallets, totalCents) {
     }
   }
 
-  if (remainingCents > 0) {
+  if (requireFull && remainingCents > 0) {
     throw new AppError("Saldo insuficiente para pagar esta cobranca", 409);
   }
 
-  return allocations;
+  return { allocations, remainingCents };
 }
 
-export async function payChargeWithWallet(userId, rawCode) {
+async function completePaidCharge(database, charge, payment) {
+  const repository = createChargeRepository(database);
+  const paidAt = new Date();
+  const paidCharge = await repository.updateCharge({
+    data: {
+      paga_em: paidAt,
+      pagamento_id: payment.id,
+      status: "PAGA",
+    },
+    include: chargeInclude,
+    where: { id: charge.id },
+  });
+
+  if (charge.venda_autonoma_id) {
+    await repository.updateAutonomousSale({
+      data: { pago_em: paidAt, status: "PAGA" },
+      where: { id: charge.venda_autonoma_id },
+    });
+  }
+
+  let serviceConversation = null;
+  if (charge.proposta_servico_id && charge.proposta_servico?.conversa_servico) {
+    await repository.updateServiceProposal({
+      data: { pago_em: paidAt, status: "PAGA" },
+      where: { id: charge.proposta_servico_id },
+    });
+    await repository.updateServiceConversation({
+      data: { status: "ACORDADA" },
+      where: { id: charge.proposta_servico.conversa_servico.id },
+    });
+    await repository.createServiceMessage({
+      data: {
+        conversa_servico_id: charge.proposta_servico.conversa_servico.id,
+        lido_cliente_em: paidAt,
+        mensagem: "Pagamento confirmado pela plataforma. O servico pode seguir.",
+        origem: "SISTEMA",
+      },
+    });
+    serviceConversation = {
+      conversationId: charge.proposta_servico.conversa_servico.id,
+      customerUserId: charge.proposta_servico.conversa_servico.cliente_usuario_id,
+      sellerUserId: charge.vendedor?.usuario_id ?? null,
+    };
+  }
+
+  const earnings = charge.loja_id
+    ? await settlePaidStoreChargeEarnings(database, charge.id)
+    : charge.venda_autonoma_id
+      ? await settlePaidAutonomousChargeEarnings(database, charge.id)
+      : null;
+  const releaseImmediately = Boolean(charge.loja_id || charge.venda_autonoma_id);
+  const release = earnings?.transactionId && releaseImmediately
+    ? await releaseCommercialSettlement(database, earnings.transactionId, {
+        holdMs: 0,
+        reason: "imediatamente por ser uma venda presencial",
+      })
+    : null;
+  const payout = earnings?.transactionId && releaseImmediately
+    ? await reserveImmediatePixPayout(database, earnings.transactionId)
+    : null;
+
+  return {
+    charge: serializeCharge(paidCharge),
+    earnings,
+    payout,
+    release,
+    serviceConversation,
+    sellerUserId: charge.vendedor?.usuario_id ?? null,
+    walletUserIds: [payment.usuario_pagador_id, ...(earnings?.walletUserIds ?? [])],
+  };
+}
+
+export async function settleConfirmedChargePayment(database, paymentId) {
+  const repository = createChargeRepository(database);
+  const charge = await repository.findUniqueCharge({
+    include: chargeInclude,
+    where: { pagamento_id: Number(paymentId) },
+  });
+  if (!charge || charge.status === "PAGA") return null;
+  if (charge.status !== "PROCESSANDO") {
+    throw new AppError("A cobranca vinculada ao Pix nao esta aguardando confirmacao", 409);
+  }
+  const payment = await repository.findPayment({ where: { id: Number(paymentId) } });
+  if (!payment || payment.status !== "PAGO") {
+    throw new AppError("O pagamento ainda nao foi confirmado", 409);
+  }
+
+  return completePaidCharge(database, charge, payment);
+}
+
+export async function cancelChargePayment(database, paymentId, { refunded = false } = {}) {
+  const repository = createChargeRepository(database);
+  const charge = await repository.findUniqueCharge({
+    include: {
+      ...chargeInclude,
+      pagamento: {
+        include: {
+          composicoes: {
+            include: { carteira: { include: { tipo_carteira: true } } },
+          },
+        },
+      },
+    },
+    where: { pagamento_id: Number(paymentId) },
+  });
+  if (!charge) return null;
+
+  const walletUserIds = [];
+  for (const composition of charge.pagamento?.composicoes ?? []) {
+    if (composition.tipo_origem === "PIX" || composition.status !== "CONFIRMADO") continue;
+    await creditUserWallet({
+      database,
+      description: `Saldo devolvido da cobranca ${charge.codigo_publico}.`,
+      origin: "ESTORNO",
+      originId: charge.pagamento.id,
+      userId: charge.pagamento.usuario_pagador_id,
+      valueCents: cents(composition.valor_centavos),
+      walletCode: composition.carteira.tipo_carteira.codigo,
+    });
+    walletUserIds.push(charge.pagamento.usuario_pagador_id);
+  }
+  await repository.updatePaymentCompositions({
+    data: { status: refunded ? "ESTORNADO" : "CANCELADO" },
+    where: {
+      pagamento_id: charge.pagamento.id,
+      status: "CONFIRMADO",
+      tipo_origem: { not: "PIX" },
+    },
+  });
+  const cancelled = await repository.updateCharge({
+    data: { cancelada_em: new Date(), status: "CANCELADA" },
+    include: chargeInclude,
+    where: { id: charge.id },
+  });
+
+  return {
+    charge: serializeCharge(cancelled),
+    sellerUserId: charge.vendedor?.usuario_id ?? null,
+    walletUserIds: [...new Set(walletUserIds)],
+  };
+}
+
+export async function publishChargePaymentResult(result) {
+  if (!result?.charge) return;
+  emitChargeUpdated(result.charge, {
+    sellerUserId: result.sellerUserId,
+    storeId: result.charge.merchant.type === "STORE" ? result.charge.merchant.id : null,
+  });
+  if (result.walletUserIds?.length) {
+    emitWalletUpdated({
+      transactionId: result.earnings?.transactionId ?? result.charge.payment?.id,
+      userIds: result.walletUserIds,
+    });
+  }
+  if (result.payout?.id) {
+    try {
+      await submitPendingPayout(result.payout.id);
+    } catch (payoutError) {
+      console.error(`[pix-payout] Nao foi possivel enviar o repasse ${result.payout.id}`, payoutError);
+    }
+  }
+  if (result.serviceConversation) {
+    emitServiceChatUpdated({ ...result.serviceConversation, reason: "payment-confirmed" });
+  }
+}
+
+export async function payCharge(userId, rawCode, {
+  allowPixComplement = true,
+  useBalance = true,
+} = {}) {
   await chargeRepository.requireUserCpf(userId);
   const code = normalizePublicCode(rawCode);
   await chargeRepository.updateCharges({
@@ -660,7 +989,7 @@ export async function payChargeWithWallet(userId, rawCode) {
     });
 
     if (claimed.count !== 1) {
-      const currentCharge = await loadCharge(database, code);
+      const currentCharge = await loadCharge(repository, code);
 
       if (currentCharge.status === "ATIVA" && currentCharge.expira_em && currentCharge.expira_em <= new Date()) {
         await repository.updateCharge({
@@ -707,16 +1036,33 @@ export async function payChargeWithWallet(userId, rawCode) {
         usuario_id: userId,
       },
     });
-    const allocations = allocateWallets(wallets, cents(charge.valor_centavos));
+    const { allocations, remainingCents } = allocateWallets(
+      useBalance ? wallets : [],
+      cents(charge.valor_centavos),
+      { requireFull: !allowPixComplement },
+    );
+    const walletUsedCents = allocations.reduce((total, item) => total + item.amountCents, 0);
+    const pixCents = remainingCents;
+    if (pixCents > 0 && !isAsaasEnabled()) {
+      throw new AppError("O Pix esta temporariamente indisponivel. Tente novamente mais tarde", 503);
+    }
     const payment = await repository.createPayment({
       data: {
-        gateway: "INTERNO",
+        gateway: pixCents > 0 ? "ASAAS" : "INTERNO",
         loja_id: charge.loja_id,
-        metodo_principal: primaryPaymentMethod(allocations),
-        pago_em: new Date(),
-        status: "PAGO",
+        metodo_principal: pixCents > 0
+          ? allocations.length > 0 ? "MISTO" : "PIX"
+          : primaryPaymentMethod(allocations),
+        pago_em: pixCents > 0 ? null : new Date(),
+        status: pixCents > 0 ? "AGUARDANDO_PAGAMENTO" : "PAGO",
         usuario_pagador_id: userId,
-        valor_pago_saldo_centavos: BigInt(cents(charge.valor_centavos)),
+        valor_cashback_usado_centavos: BigInt(
+          allocations
+            .filter((item) => item.code === "cashback")
+            .reduce((total, item) => total + item.amountCents, 0),
+        ),
+        valor_pago_pix_centavos: BigInt(pixCents),
+        valor_pago_saldo_centavos: BigInt(walletUsedCents),
         valor_total_centavos: charge.valor_centavos,
         vendedor_id: charge.vendedor_id,
       },
@@ -744,107 +1090,165 @@ export async function payChargeWithWallet(userId, rawCode) {
       });
     }
 
-    const paidCharge = await repository.updateCharge({
-      data: {
-        paga_em: new Date(),
-        pagamento_id: payment.id,
-        status: "PAGA",
-      },
-      include: chargeInclude,
-      where: { id: charge.id },
-    });
-
-    if (charge.venda_autonoma_id) {
-      await repository.updateAutonomousSale({
-        data: { pago_em: new Date(), status: "PAGA" },
-        where: { id: charge.venda_autonoma_id },
-      });
-    }
-
-    let serviceConversation = null;
-
-    if (charge.proposta_servico_id && charge.proposta_servico?.conversa_servico) {
-      const paidAt = new Date();
-      await repository.updateServiceProposal({
-        data: { pago_em: paidAt, status: "PAGA" },
-        where: { id: charge.proposta_servico_id },
-      });
-      await repository.updateServiceConversation({
-        data: { status: "ACORDADA" },
-        where: { id: charge.proposta_servico.conversa_servico.id },
-      });
-      await repository.createServiceMessage({
+    if (pixCents > 0) {
+      await repository.createPaymentComposition({
         data: {
-          conversa_servico_id: charge.proposta_servico.conversa_servico.id,
-          lido_cliente_em: paidAt,
-          mensagem: "Pagamento confirmado pela plataforma. O servico pode seguir.",
-          origem: "SISTEMA",
+          pagamento_id: payment.id,
+          status: "PENDENTE",
+          tipo_origem: "PIX",
+          valor_centavos: BigInt(pixCents),
         },
       });
-      serviceConversation = {
-        conversationId: charge.proposta_servico.conversa_servico.id,
-        customerUserId: charge.proposta_servico.conversa_servico.cliente_usuario_id,
+      const pendingCharge = await repository.updateCharge({
+        data: { pagamento_id: payment.id, status: "PROCESSANDO" },
+        include: chargeInclude,
+        where: { id: charge.id },
+      });
+      return {
+        charge: serializeCharge(pendingCharge),
+        gatewayPaymentRequired: true,
+        paymentId: payment.id,
+        pixCents,
         sellerUserId: charge.vendedor?.usuario_id ?? null,
+        walletUserIds: walletUsedCents > 0 ? [userId] : [],
+        walletUsedCents,
       };
     }
 
-    const earnings = charge.loja_id
-      ? await settlePaidStoreChargeEarnings(database, charge.id)
-      : charge.venda_autonoma_id
-        ? await settlePaidAutonomousChargeEarnings(database, charge.id)
-        : null;
-
-    const isImmediatePhysical = Boolean(
-      charge.loja_id
-      || charge.venda_autonoma_id,
-    );
-    const releaseImmediately = isImmediatePhysical;
-    const release = earnings?.transactionId && releaseImmediately
-      ? await releaseCommercialSettlement(database, earnings.transactionId, {
-          holdMs: 0,
-          reason: "imediatamente por ser uma venda presencial",
-        })
-      : null;
-    const payout = earnings?.transactionId && releaseImmediately
-      ? await reserveImmediatePixPayout(database, earnings.transactionId)
-      : null;
-
-    return {
-      charge: serializeCharge(paidCharge),
-      earnings,
-      payout,
-      release,
-      serviceConversation,
-      sellerUserId: charge.vendedor?.usuario_id ?? null,
-      walletUserIds: [userId, ...(earnings?.walletUserIds ?? [])],
-    };
+    return completePaidCharge(database, charge, payment);
   });
 
-  emitChargeUpdated(result.charge, {
-    sellerUserId: result.sellerUserId,
-    storeId: result.charge.merchant.type === "STORE" ? result.charge.merchant.id : null,
-  });
-  emitWalletUpdated({
-    transactionId: result.earnings?.transactionId ?? result.charge.payment?.id,
-    userIds: result.walletUserIds,
-  });
-
-  if (result.payout?.id) {
+  if (result.gatewayPaymentRequired) {
+    const {
+      createPendingAsaasPix,
+      failPendingAsaasPayment,
+    } = await import("../payments/asaas.service.js");
+    let gatewayPayment;
     try {
-      await submitPendingPayout(result.payout.id);
-    } catch (payoutError) {
-      console.error(
-        `[pix-payout] Nao foi possivel enviar o repasse ${result.payout.id}`,
-        payoutError,
-      );
+      gatewayPayment = await createPendingAsaasPix({
+        description: `Pagamento ${result.charge.title}`,
+        paymentId: result.paymentId,
+        userId,
+      });
+    } catch (error) {
+      await failPendingAsaasPayment(result.paymentId);
+      throw error;
+    }
+    if (result.walletUserIds.length) {
+      emitWalletUpdated({ transactionId: result.paymentId, userIds: result.walletUserIds });
+    }
+    return {
+      charge: result.charge,
+      gatewayPayment,
+      paymentBreakdown: {
+        pixCents: result.pixCents,
+        totalCents: result.charge.amountCents,
+        walletCents: result.walletUsedCents,
+      },
+    };
+  }
+
+  await publishChargePaymentResult(result);
+  return {
+    charge: result.charge,
+    gatewayPayment: null,
+    paymentBreakdown: {
+      pixCents: 0,
+      totalCents: result.charge.amountCents,
+      walletCents: result.charge.amountCents,
+    },
+  };
+}
+
+export async function payChargeWithWallet(userId, rawCode) {
+  return payCharge(userId, rawCode, {
+    allowPixComplement: false,
+    useBalance: true,
+  });
+}
+
+export async function createPermanentStoreQrPayment(userId, rawToken, data) {
+  await chargeRepository.requireUserCpf(userId);
+  const token = normalizePermanentStoreToken(rawToken);
+  const store = await chargeRepository.findStore({
+    select: {
+      id: true,
+      nome: true,
+      qr_pagamento_token: true,
+      lojista: { select: { usuario_id: true } },
+    },
+    where: {
+      aceita_qrcode: true,
+      excluido_em: null,
+      qr_pagamento_ativo: true,
+      qr_pagamento_token: token,
+      status: "ATIVA",
+    },
+  });
+  if (!store) throw new AppError("QR permanente invalido ou desativado", 404);
+  if (store.lojista.usuario_id === userId) {
+    throw new AppError("Nao e possivel pagar a sua propria loja", 409);
+  }
+  await requireActivePayoutAccount(store.lojista.usuario_id);
+
+  const idempotencyKey = `store-qr:${userId}:${data.idempotencyKey}`;
+  let charge = await chargeRepository.findUniqueCharge({
+    include: chargeInclude,
+    where: { chave_idempotencia: idempotencyKey },
+  });
+  if (!charge) {
+    const seller = await chargeRepository.findSeller({
+      select: { id: true },
+      where: { usuario_id: store.lojista.usuario_id },
+    });
+    try {
+      charge = await chargeRepository.createCharge({
+        data: {
+          chave_idempotencia: idempotencyKey,
+          codigo_publico: createPublicCode(),
+          criador_usuario_id: store.lojista.usuario_id,
+          descricao: "Pagamento pelo QR permanente da loja",
+          expira_em: null,
+          loja_id: store.id,
+          origem: "PRESENCIAL",
+          titulo: `Compra em ${store.nome}`,
+          valor_centavos: BigInt(data.amountCents),
+          vendedor_id: seller?.id ?? null,
+        },
+        include: chargeInclude,
+      });
+    } catch (error) {
+      if (error.code !== "P2002") throw error;
+      charge = await chargeRepository.findUniqueCharge({
+        include: chargeInclude,
+        where: { chave_idempotencia: idempotencyKey },
+      });
     }
   }
-  if (result.serviceConversation) {
-    emitServiceChatUpdated({
-      ...result.serviceConversation,
-      reason: "payment-confirmed",
-    });
+
+  if (cents(charge.valor_centavos) !== Number(data.amountCents) || charge.loja_id !== store.id) {
+    throw new AppError("Esta tentativa de pagamento ja foi usada com outros dados", 409);
+  }
+  if (charge.status === "PAGA") {
+    return { charge: serializeCharge(charge), gatewayPayment: null };
+  }
+  if (charge.status === "PROCESSANDO" && charge.pagamento) {
+    return {
+      charge: serializeCharge(charge),
+      gatewayPayment: serializePendingGatewayPayment(charge.pagamento),
+      paymentBreakdown: {
+        pixCents: cents(charge.pagamento.valor_pago_pix_centavos),
+        totalCents: cents(charge.pagamento.valor_total_centavos),
+        walletCents: cents(charge.pagamento.valor_pago_saldo_centavos),
+      },
+    };
+  }
+  if (charge.status !== "ATIVA") {
+    throw new AppError("Esta tentativa de pagamento nao esta mais disponivel", 409);
   }
 
-  return { charge: result.charge };
+  return payCharge(userId, charge.codigo_publico, {
+    allowPixComplement: true,
+    useBalance: data.useBalance,
+  });
 }

@@ -1,12 +1,18 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useCallback, useState } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { AppButton } from "../components/AppButton";
 import { ScreenContainer } from "../components/ScreenContainer";
+import { useRealtimeCharge } from "../hooks/useRealtimeCharge";
+import { useAuthStore } from "../stores/useAuthStore";
 import { formatarDinheiro } from "../utils/money";
 import { colors, fonts, radius, shadow, spacing, typography } from "../utils/theme";
 
 export function GatewayPixPaymentScreen({ navigation, route }) {
+  const { session } = useAuthStore();
   const gatewayPayment = route.params?.gatewayPayment;
+  const [charge, setCharge] = useState(route.params?.charge ?? null);
+  const paymentBreakdown = route.params?.paymentBreakdown;
   const order = route.params?.order;
   const store = route.params?.store;
   const checkoutGroups = Array.isArray(route.params?.checkoutGroups)
@@ -14,8 +20,19 @@ export function GatewayPixPaymentScreen({ navigation, route }) {
     : [];
   const checkoutIndex = Math.max(0, Number(route.params?.checkoutIndex ?? 0));
   const hasNextStore = checkoutIndex + 1 < checkoutGroups.length;
+  const handleChargeUpdated = useCallback((updatedCharge) => setCharge(updatedCharge), []);
+
+  useRealtimeCharge({
+    accessToken: session?.accessToken,
+    chargeId: charge?.id,
+    onChargeUpdated: handleChargeUpdated,
+  });
 
   function continueFlow() {
+    if (charge) {
+      navigation.popToTop();
+      return;
+    }
     if (hasNextStore) {
       navigation.reset({
         index: 2,
@@ -45,34 +62,42 @@ export function GatewayPixPaymentScreen({ navigation, route }) {
           <Ionicons color={colors.primaryDark} name="qr-code-outline" size={28} />
         </View>
         <View style={styles.heroCopy}>
-          <Text style={styles.eyebrow}>PAGAMENTO PIX</Text>
-          <Text style={styles.title}>Escaneie para pagar</Text>
+          <Text style={styles.eyebrow}>{charge?.status === "PAGA" ? "PAGAMENTO CONFIRMADO" : "PAGAMENTO PIX"}</Text>
+          <Text style={styles.title}>{charge?.status === "PAGA" ? "Pagamento concluido" : "Escaneie para pagar"}</Text>
           <Text style={styles.subtitle}>
-            {store?.name ?? "Sua compra"} sera enviada quando o Asaas confirmar o pagamento.
+            {charge
+              ? `${store?.name ?? "A loja"} recebe somente depois da confirmacao do Pix.`
+              : `${store?.name ?? "Sua compra"} sera enviada quando o Asaas confirmar o pagamento.`}
           </Text>
         </View>
       </View>
 
       <View style={styles.amountCard}>
         <Text style={styles.amountLabel}>Valor do Pix</Text>
-        <Text style={styles.amount}>{formatarDinheiro(order?.payment?.pixCents ?? order?.totalCents ?? 0)}</Text>
-        <Text style={styles.orderCode}>{order?.code ?? "Pedido Brasil Cashback"}</Text>
+        <Text style={styles.amount}>{formatarDinheiro(paymentBreakdown?.pixCents ?? order?.payment?.pixCents ?? order?.totalCents ?? 0)}</Text>
+        <Text style={styles.orderCode}>{charge?.code ?? order?.code ?? "Pagamento Brasil Cashback"}</Text>
+        {charge && Number(paymentBreakdown?.walletCents ?? 0) > 0 ? (
+          <Text style={styles.orderCode}>{formatarDinheiro(paymentBreakdown.walletCents)} reservado do seu saldo</Text>
+        ) : null}
       </View>
 
       <View style={styles.qrCard}>
-        {gatewayPayment?.qrImageDataUrl ? (
+        {charge?.status === "PAGA" ? (
+          <View style={styles.paidIcon}><Ionicons color={colors.card} name="checkmark" size={42} /></View>
+        ) : null}
+        {charge?.status !== "PAGA" && gatewayPayment?.qrImageDataUrl ? (
           <Image source={{ uri: gatewayPayment.qrImageDataUrl }} style={styles.qrImage} />
-        ) : (
+        ) : charge?.status !== "PAGA" ? (
           <View style={styles.qrUnavailable}>
             <Ionicons color={colors.warning} name="warning-outline" size={26} />
             <Text style={styles.qrUnavailableText}>Nao foi possivel carregar o QR agora.</Text>
           </View>
-        )}
-        <Text style={styles.qrTitle}>Abra o app do seu banco e leia o QR</Text>
-        <Text style={styles.qrCopy}>O pagamento e confirmado automaticamente.</Text>
+        ) : null}
+        <Text style={styles.qrTitle}>{charge?.status === "PAGA" ? "Recebido pela loja" : "Abra o app do seu banco e leia o QR"}</Text>
+        <Text style={styles.qrCopy}>{charge?.status === "PAGA" ? "A confirmacao chegou em tempo real." : "O pagamento e confirmado automaticamente."}</Text>
       </View>
 
-      {gatewayPayment?.pixCopyPaste ? (
+      {charge?.status !== "PAGA" && gatewayPayment?.pixCopyPaste ? (
         <View style={styles.copyCard}>
           <View style={styles.copyHeader}>
             <Ionicons color={colors.primaryDark} name="copy-outline" size={18} />
@@ -89,27 +114,29 @@ export function GatewayPixPaymentScreen({ navigation, route }) {
           size={20}
         />
         <Text style={styles.noticeText}>
-          {hasNextStore
+          {charge
+            ? "O saldo usado fica reservado. Se este Pix expirar ou falhar, ele volta automaticamente para sua carteira."
+            : hasNextStore
             ? "Este Pix pertence somente a esta loja. Voce pode seguir para a proxima sem perder este pedido."
             : "Confira o valor antes de pagar. A confirmacao chega em tempo real no pedido."}
         </Text>
       </View>
 
       <AppButton
-        icon={hasNextStore ? "arrow-forward" : "receipt-outline"}
+        icon={charge ? "home-outline" : hasNextStore ? "arrow-forward" : "receipt-outline"}
         onPress={continueFlow}
-        title={hasNextStore ? "Continuar para a proxima loja" : "Acompanhar pedido"}
+        title={charge ? charge.status === "PAGA" ? "Concluir" : "Voltar ao inicio" : hasNextStore ? "Continuar para a proxima loja" : "Acompanhar pedido"}
       />
-      <Pressable
-        onPress={() => hasNextStore
-          ? navigation.navigate("CustomerOrderDetails", { order })
-          : navigation.navigate("Main")}
-        style={styles.laterButton}
-      >
-        <Text style={styles.laterText}>
-          {hasNextStore ? "Acompanhar este pedido" : "Pagar depois"}
-        </Text>
-      </Pressable>
+      {!charge ? (
+        <Pressable
+          onPress={() => hasNextStore
+            ? navigation.navigate("CustomerOrderDetails", { order })
+            : navigation.navigate("Main")}
+          style={styles.laterButton}
+        >
+          <Text style={styles.laterText}>{hasNextStore ? "Acompanhar este pedido" : "Pagar depois"}</Text>
+        </Pressable>
+      ) : null}
     </ScreenContainer>
   );
 }
@@ -216,6 +243,14 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontFamily: fonts.medium,
     fontSize: typography.caption,
+  },
+  paidIcon: {
+    alignItems: "center",
+    backgroundColor: colors.success,
+    borderRadius: radius.round,
+    height: 82,
+    justifyContent: "center",
+    width: 82,
   },
   qrCard: {
     alignItems: "center",

@@ -13,6 +13,13 @@ function normalizeChargeCode(value) {
   return (matched?.[1] ?? rawValue).trim().toUpperCase();
 }
 
+function normalizeStoreQrToken(value) {
+  const rawValue = String(value ?? "").trim();
+  const matched = rawValue.match(/DTJ:S:([A-Z0-9]{20,64})/i);
+
+  return matched?.[1]?.toUpperCase() ?? null;
+}
+
 export function ChargeScanScreen({ navigation }) {
   const [permission, requestPermission] = useCameraPermissions();
   const [code, setCode] = useState("");
@@ -20,6 +27,11 @@ export function ChargeScanScreen({ navigation }) {
   const [error, setError] = useState("");
 
   function openCharge(value) {
+    const storeQrToken = normalizeStoreQrToken(value);
+    if (storeQrToken) {
+      navigation.navigate("ChargePayment", { storeQrToken });
+      return;
+    }
     const normalizedCode = normalizeChargeCode(value);
 
     if (normalizedCode.length < 8) {
@@ -47,8 +59,8 @@ export function ChargeScanScreen({ navigation }) {
         </View>
         <View style={styles.headerCopy}>
           <Text style={styles.kicker}>Pagar no local</Text>
-          <Text style={styles.title}>Leia a cobranca</Text>
-          <Text style={styles.subtitle}>Confira loja e valor antes de confirmar o pagamento.</Text>
+          <Text style={styles.title}>Leia o QR da loja</Text>
+          <Text style={styles.subtitle}>QR fixo ou cobranca: voce sempre confere a loja e o valor antes de pagar.</Text>
         </View>
       </View>
 
@@ -67,7 +79,7 @@ export function ChargeScanScreen({ navigation }) {
         <View style={styles.permissionCard}>
           <Ionicons color={colors.primaryDark} name="camera-outline" size={32} />
           <Text style={styles.permissionTitle}>Camera para ler o QR</Text>
-          <Text style={styles.permissionText}>A camera e usada apenas para identificar a cobranca que voce esta pagando.</Text>
+          <Text style={styles.permissionText}>A camera e usada apenas para identificar a loja ou cobranca que voce esta pagando.</Text>
           <AppButton icon="camera-outline" onPress={requestPermission} title="Permitir camera" />
         </View>
       )}

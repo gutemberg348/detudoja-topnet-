@@ -15,6 +15,11 @@ import { serializeOrder, serializeOrderMessage } from "../orders/orders.serializ
 import { ensureAsaasCustomer } from "./asaas-customer.service.js";
 import { emitWalletDepositUpdate, settleWalletDepositPayment } from "../wallet-deposits/wallet-deposit.service.js";
 import {
+  cancelChargePayment,
+  publishChargePaymentResult,
+  settleConfirmedChargePayment,
+} from "../charges/charge.service.js";
+import {
   createAsaasPixPayment,
   deleteAsaasPayment,
   getAsaasPaymentStatus,
@@ -130,8 +135,11 @@ export function shouldUseAsaasPix({ pixComplementCents, walletUsedCents }) {
 export async function createPendingAsaasPix({ description, paymentId, userId }) {
   const payment = await asaasRepository.findPayment({
     select: {
+      copia_cola_pix: true,
+      expira_em: true,
       gateway: true,
       id: true,
+      qr_code: true,
       status: true,
       usuario_pagador_id: true,
       valor_pago_pix_centavos: true,
@@ -201,7 +209,7 @@ export async function createPendingAsaasPix({ description, paymentId, userId }) 
 }
 
 export async function failPendingAsaasPayment(paymentId) {
-  await asaasRepository.transaction(async (database) => {
+  const result = await asaasRepository.transaction(async (database) => {
     const repository = createAsaasRepository(database);
     const payment = await repository.findPayment({
       select: { id: true },
@@ -209,16 +217,21 @@ export async function failPendingAsaasPayment(paymentId) {
     });
 
     if (!payment) {
-      return;
+      return null;
     }
 
-    await repository.updatePayments({
+    const claimed = await repository.updatePayments({
       data: { status: "FALHOU" },
       where: { id: payment.id, status: { in: ["AGUARDANDO_PAGAMENTO", "EM_RECONCILIACAO"] } },
     });
+    if (claimed.count !== 1) return null;
     await repository.updateWalletDeposits({
       data: { status: "FALHOU" },
       where: { pagamento_id: payment.id, status: "PENDENTE" },
+    });
+    await repository.updatePaymentCompositions({
+      data: { status: "CANCELADO" },
+      where: { pagamento_id: payment.id, status: "PENDENTE", tipo_origem: "PIX" },
     });
     const order = await repository.findFirstOrder({
       select: { id: true },
@@ -236,7 +249,10 @@ export async function failPendingAsaasPayment(paymentId) {
         where: { pedido_id: order.id, status: "ACEITA" },
       });
     }
+    return cancelChargePayment(database, payment.id);
   });
+  await publishChargePaymentResult(result);
+  return result;
 }
 
 function isPaymentConfirmed(event) {
@@ -432,6 +448,15 @@ async function settleAsaasPayment(database, paymentId, event) {
         reason: "Estorno Pix confirmado pelo Asaas.",
       })
     : null;
+
+  const chargeSettlement = nextStatus === "PAGO"
+    ? await settleConfirmedChargePayment(database, paymentId)
+    : await cancelChargePayment(database, paymentId, {
+        refunded: nextStatus === "ESTORNADO",
+      });
+  if (chargeSettlement) {
+    return { ...chargeSettlement, reversal };
+  }
 
   const order = await repository.findFirstOrder({
     include: orderInclude,
@@ -725,8 +750,12 @@ export async function processAsaasWebhook(payload) {
     });
   }
 
-  if (result.settled?.walletUserIds?.length) {
+  if (result.settled?.walletUserIds?.length && !result.settled?.charge) {
     emitWalletDepositUpdate(result.settled.walletUserIds);
+  }
+
+  if (result.settled?.charge) {
+    await publishChargePaymentResult(result.settled);
   }
 
   return { duplicate: Boolean(result.duplicate), processed: true };

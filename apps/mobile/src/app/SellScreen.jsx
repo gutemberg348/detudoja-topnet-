@@ -1175,6 +1175,7 @@ export function SellScreen() {
           onCreateCharge={openStoreCharge}
           onNewProduct={openProductForm}
           onOpenCharge={reopenGeneratedCharge}
+          onOpenPermanentQr={(store) => navigation.navigate("StorePermanentQr", { store })}
           onOpenStoreChats={() =>
             navigation.navigate("StoreChatsInbox", {
               scope: "seller",

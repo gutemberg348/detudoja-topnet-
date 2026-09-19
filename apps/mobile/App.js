@@ -113,10 +113,13 @@ const routesWithoutFloatingCart = new Set([
   "Checkout",
   "CheckoutPayment",
   "GatewayPixPayment",
+  "ChargePayment",
+  "ChargeScan",
   "PersonalConversation",
   "ProductDetails",
   "ServiceConversation",
   "StoreConversation",
+  "StorePermanentQr",
 ]);
 
 function GlobalCartButton({ activeRouteName }) {

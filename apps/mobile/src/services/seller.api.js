@@ -178,6 +178,20 @@ export function createStoreQrCharge(accessToken, storeId, data) {
   });
 }
 
+export function getPermanentStorePaymentQr(accessToken, storeId) {
+  return apiRequest(`/api/app/seller/stores/${storeId}/permanent-payment-qr`, {
+    token: accessToken,
+  });
+}
+
+export function regeneratePermanentStorePaymentQr(accessToken, storeId) {
+  return apiRequest(`/api/app/seller/stores/${storeId}/permanent-payment-qr/regenerate`, {
+    body: {},
+    method: "POST",
+    token: accessToken,
+  });
+}
+
 export function createSellerStore(accessToken, data) {
   return apiRequest("/api/app/seller/stores", {
     body: data,

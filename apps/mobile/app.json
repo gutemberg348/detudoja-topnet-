@@ -92,7 +92,8 @@
           "microphonePermission": "O Brasil Cashback usa o microfone para gravar audios enviados no chat."
         }
       ],
-      "expo-video"
+      "expo-video",
+      "expo-sharing"
     ],
     "extra": {
       "eas": {

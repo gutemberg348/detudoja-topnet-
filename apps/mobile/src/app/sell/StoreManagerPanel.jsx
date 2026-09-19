@@ -61,6 +61,7 @@ export function StoreManagerPanel({
   onManageTeam,
   onNewProduct,
   onOpenCharge,
+  onOpenPermanentQr,
   onOpenStoreChats,
   onRefresh,
   onToggleAvailability,
@@ -272,6 +273,11 @@ export function StoreManagerPanel({
       </View>
 
       <View style={styles.managerActionGrid}>
+        <ManagerAction
+          icon="print-outline"
+          label="QR permanente"
+          onPress={() => onOpenPermanentQr?.(store)}
+        />
         <ManagerAction
           icon="qr-code-outline"
           label="Nova cobranca"

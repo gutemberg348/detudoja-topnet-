@@ -20,9 +20,11 @@ import {
 import {
   createStoreQrChargeController,
   getGeneratedChargeQrController,
+  getPermanentStorePaymentQrController,
   listGeneratedChargesController,
   listGeneratedChargesHistoryController,
   listStoreGeneratedChargesController,
+  regeneratePermanentStorePaymentQrController,
 } from "../modules/charges/charge.controller.js";
 import { createStoreSignupQrController } from "../modules/auth/store-signup.controller.js";
 import { createStoreChargeSchema } from "../modules/charges/charge.validator.js";
@@ -132,6 +134,14 @@ sellerRoutes.post(
   createStoreQrChargeController,
 );
 sellerRoutes.get("/stores/:storeId/charges", listStoreGeneratedChargesController);
+sellerRoutes.get(
+  "/stores/:storeId/permanent-payment-qr",
+  getPermanentStorePaymentQrController,
+);
+sellerRoutes.post(
+  "/stores/:storeId/permanent-payment-qr/regenerate",
+  regeneratePermanentStorePaymentQrController,
+);
 sellerRoutes.get("/stores/:storeId/signup-qr", createStoreSignupQrController);
 sellerRoutes.patch(
   "/stores/:storeId/media",

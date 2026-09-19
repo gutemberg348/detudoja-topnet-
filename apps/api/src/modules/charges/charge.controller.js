@@ -1,11 +1,15 @@
 import {
   createStoreQrCharge,
+  createPermanentStoreQrPayment,
   getChargeForCustomer,
   getGeneratedChargeQr,
+  getPermanentStorePaymentQr,
+  getPermanentStoreQrForCustomer,
   listGeneratedCharges,
   listGeneratedChargesHistory,
   listStoreGeneratedCharges,
   payChargeWithWallet,
+  payCharge,
 } from "./charge.service.js";
 
 export async function createStoreQrChargeController(req, res, next) {
@@ -59,6 +63,52 @@ export async function getGeneratedChargeQrController(req, res, next) {
 export async function payChargeWithWalletController(req, res, next) {
   try {
     res.json(await payChargeWithWallet(req.auth.user.id, req.params.code));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function payChargeController(req, res, next) {
+  try {
+    res.json(await payCharge(req.auth.user.id, req.params.code, req.body));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getPermanentStorePaymentQrController(req, res, next) {
+  try {
+    res.json(await getPermanentStorePaymentQr(req.auth.user.id, req.params.storeId));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function regeneratePermanentStorePaymentQrController(req, res, next) {
+  try {
+    res.json(await getPermanentStorePaymentQr(req.auth.user.id, req.params.storeId, {
+      regenerate: true,
+    }));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getPermanentStoreQrForCustomerController(req, res, next) {
+  try {
+    res.json(await getPermanentStoreQrForCustomer(req.auth.user.id, req.params.token));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function createPermanentStoreQrPaymentController(req, res, next) {
+  try {
+    res.status(201).json(await createPermanentStoreQrPayment(
+      req.auth.user.id,
+      req.params.token,
+      req.body,
+    ));
   } catch (error) {
     next(error);
   }

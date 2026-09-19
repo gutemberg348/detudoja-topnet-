@@ -25,6 +25,7 @@ import { StoreCourierTeamScreen } from "../app/StoreCourierTeamScreen";
 import { StoreChatsInboxScreen } from "../app/StoreChatsInboxScreen";
 import { StoreStaffQrScanScreen } from "../app/StoreStaffQrScanScreen";
 import { StoreTeamScreen } from "../app/StoreTeamScreen";
+import { StorePermanentQrScreen } from "../app/StorePermanentQrScreen";
 import { ServiceProvidersScreen } from "../app/ServiceProvidersScreen";
 import { ServiceConversationScreen } from "../app/ServiceConversationScreen";
 import { ServiceDeskScreen } from "../app/ServiceDeskScreen";
@@ -270,6 +271,11 @@ function Routes() {
         component={ChargeQrScreen}
         name="ChargeQr"
         options={backHeaderOptions("Receber")}
+      />
+      <Stack.Screen
+        component={StorePermanentQrScreen}
+        name="StorePermanentQr"
+        options={backHeaderOptions("QR permanente")}
       />
       <Stack.Screen
         component={GeneratedChargesHistoryScreen}

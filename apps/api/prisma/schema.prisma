@@ -1071,6 +1071,9 @@ model Loja {
   horarios_funcionamento                   Json?
   aceita_pagamento_online                  Boolean    @default(false)
   aceita_qrcode                            Boolean    @default(false)
+  qr_pagamento_token                       String?    @unique @db.VarChar(64)
+  qr_pagamento_ativo                       Boolean    @default(true)
+  qr_pagamento_atualizado_em               DateTime?  @db.Timestamptz(3)
   taxa_entrega_centavos                    BigInt     @default(0) @db.BigInt
   taxa_servico_online_centavos             BigInt?    @db.BigInt
   taxa_processamento_local_centavos        BigInt?    @db.BigInt
@@ -1798,6 +1801,7 @@ model Cobranca {
   venda_autonoma_id   Int?           @unique
   proposta_servico_id Int?           @unique
   pagamento_id        Int?           @unique
+  chave_idempotencia  String?        @unique @db.VarChar(120)
   origem              OrigemCobranca
   titulo              String         @db.VarChar(180)
   descricao           String?

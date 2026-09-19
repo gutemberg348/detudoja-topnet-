@@ -14,6 +14,7 @@ export function createChargeRepository(database = prisma) {
     findSeller(args) { return database.vendedor.findUnique(args); },
     findStore(args) { return database.loja.findFirst(args); },
     findUniqueCharge(args) { return database.cobranca.findUnique(args); },
+    findPayment(args) { return database.pagamento.findUnique(args); },
     findWallets(args) { return database.carteira.findMany(args); },
     requireCommercialTier2(userId) { return requireCommercialTier2(database, userId); },
     requireUserCpf(userId) { return requireUserCpf(database, userId); },
@@ -21,6 +22,8 @@ export function createChargeRepository(database = prisma) {
     updateAutonomousSale(args) { return database.vendaAutonoma.update(args); },
     updateCharge(args) { return database.cobranca.update(args); },
     updateCharges(args) { return database.cobranca.updateMany(args); },
+    updatePaymentCompositions(args) { return database.pagamentoComposicao.updateMany(args); },
+    updateStore(args) { return database.loja.update(args); },
     updateServiceConversation(args) { return database.conversaServico.update(args); },
     updateServiceProposal(args) { return database.propostaServico.update(args); },
   };
