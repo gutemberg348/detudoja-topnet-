@@ -101,6 +101,14 @@ export function removeStoreStaffMember(accessToken, storeId, memberId) {
   });
 }
 
+export function updateStoreStaffPermissions(accessToken, storeId, memberId, permissions) {
+  return apiRequest(`/api/app/seller/stores/${storeId}/team/members/${memberId}/permissions`, {
+    body: { permissions },
+    method: "PATCH",
+    token: accessToken,
+  });
+}
+
 export function getPayoutAccount(accessToken) {
   return apiRequest("/api/app/seller/payout-account", { token: accessToken });
 }

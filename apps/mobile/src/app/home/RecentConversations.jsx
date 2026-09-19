@@ -58,7 +58,7 @@ export function RecentConversations({
     <View style={styles.section}>
       <View style={styles.heading}>
         <View style={styles.headingCopy}>
-          <Text style={styles.title}>Ultimas conversas</Text>
+          <Text style={styles.title}>Conversas</Text>
         </View>
         <Pressable
           accessibilityLabel={actionLabel}

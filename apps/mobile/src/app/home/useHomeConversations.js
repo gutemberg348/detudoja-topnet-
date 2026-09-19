@@ -176,7 +176,10 @@ export function useHomeConversations(accessToken) {
       .sort((first, second) => new Date(second.date ?? 0) - new Date(first.date ?? 0)),
     [orders, personalChats, serviceConversations, storeConversations],
   );
-  const conversations = searchableConversations.slice(0, 3);
+  // A Home e a lista principal de conversas. Nao limitamos a tres itens:
+  // o ScreenContainer ja oferece rolagem e assim nenhuma conversa ativa fica
+  // escondida ate a pessoa abrir outra tela.
+  const conversations = searchableConversations;
 
   const personalUnreadCount = personalChats.reduce(
     (total, conversation) => total + Number(conversation.unreadCount ?? 0),

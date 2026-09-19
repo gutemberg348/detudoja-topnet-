@@ -62,10 +62,12 @@ import {
   getMyStoreWorkplacesController,
   getStoreTeamController,
   revokeStoreMemberController,
+  updateStoreMemberPermissionsController,
 } from "../modules/store-staff/store-staff.controller.js";
 import {
   createStoreStaffInviteSchema,
   decideStoreStaffInviteSchema,
+  updateStoreStaffPermissionsSchema,
 } from "../modules/store-staff/store-staff.validator.js";
 
 export const sellerRoutes = Router();
@@ -118,6 +120,11 @@ sellerRoutes.post(
 sellerRoutes.delete(
   "/stores/:storeId/team/members/:memberId",
   revokeStoreMemberController,
+);
+sellerRoutes.patch(
+  "/stores/:storeId/team/members/:memberId/permissions",
+  validate(updateStoreStaffPermissionsSchema),
+  updateStoreMemberPermissionsController,
 );
 sellerRoutes.post(
   "/stores/:storeId/charges",

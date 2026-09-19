@@ -632,6 +632,7 @@ model Usuario {
   tipo_conta                  TipoContaUsuario @default(CONSUMIDOR)
   nivel_kyc                   NivelKyc         @default(TIER_1)
   ganhos_rede_bloqueados      Boolean          @default(false)
+  perfil_profissional_ativo   Boolean          @default(true)
   ganhos_rede_bloqueados_em   DateTime?        @db.Timestamptz(3)
   motivo_bloqueio_ganhos_rede String?          @db.VarChar(500)
   loja_origem_cadastro_id     Int?

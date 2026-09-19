@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
+  Keyboard,
   Modal,
   Platform,
   Pressable,
@@ -55,6 +56,7 @@ export function StoreConversationScreen({ navigation, route }) {
   const initialConversation = route.params?.conversation ?? null;
   const initialStore = route.params?.store ?? null;
   const scrollRef = useRef(null);
+  const searchRevealTimerRef = useRef(null);
   const [conversation, setConversation] = useState(initialConversation);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
@@ -65,6 +67,8 @@ export function StoreConversationScreen({ navigation, route }) {
   const [shareOpen, setShareOpen] = useState(false);
   const [sharing, setSharing] = useState("");
   const [supportMode, setSupportMode] = useState(false);
+  const [searchPendingMessageId, setSearchPendingMessageId] = useState(null);
+  const [searchThinking, setSearchThinking] = useState(false);
   const [catalogSearchFocused, setCatalogSearchFocused] = useState(false);
   const [storeCatalog, setStoreCatalog] = useState(
     initialStore?.products ? initialStore : null,
@@ -125,6 +129,12 @@ export function StoreConversationScreen({ navigation, route }) {
     load();
   }, [load]);
 
+  useEffect(() => () => {
+    if (searchRevealTimerRef.current) {
+      clearTimeout(searchRevealTimerRef.current);
+    }
+  }, []);
+
   const refreshConversation = useCallback(() => {
     load({ silent: true });
   }, [load]);
@@ -143,6 +153,9 @@ export function StoreConversationScreen({ navigation, route }) {
     const isCommercial = payload?.type && payload.type !== "TEXTO";
     const message = payload?.message ?? (isCommercial ? "" : draft.trim());
     const sendsSupport = !conversation?.isStore && supportMode && !isCommercial;
+    const searchesCatalog = !conversation?.isStore
+      && !sendsSupport
+      && Boolean(message && !payload?.attachment && !isCommercial);
 
     if ((!message && !payload?.attachment && !isCommercial) || !conversation?.id || sending || !session?.accessToken) {
       return;
@@ -150,6 +163,19 @@ export function StoreConversationScreen({ navigation, route }) {
 
     setSending(true);
     setError("");
+    Keyboard.dismiss();
+    setCatalogSearchFocused(false);
+    if (!payload?.attachment && !isCommercial) {
+      setDraft("");
+    }
+    const searchStartedAt = Date.now();
+    if (searchesCatalog) {
+      if (searchRevealTimerRef.current) {
+        clearTimeout(searchRevealTimerRef.current);
+      }
+      setSearchPendingMessageId(null);
+      setSearchThinking(true);
+    }
 
     try {
       const response = await sendStoreConversationMessage(
@@ -160,16 +186,35 @@ export function StoreConversationScreen({ navigation, route }) {
           : {
               ...(payload ?? {}),
               message,
-              searchCatalog: !sendsSupport && Boolean(message && !payload?.attachment && !isCommercial),
+              searchCatalog: searchesCatalog,
               support: sendsSupport,
             },
       );
 
-      setDraft("");
       if (sendsSupport) setSupportMode(false);
-      setCatalogSearchFocused(false);
       setConversation(response.conversation);
+      if (searchesCatalog) {
+        const searchMessage = [...(response.conversation?.messages ?? [])]
+          .reverse()
+          .find((item) => item.isMine && item.content?.kind === "SEARCH");
+        setSearchPendingMessageId(searchMessage?.id ?? null);
+        const remainingDelay = Math.max(350, 2000 - (Date.now() - searchStartedAt));
+        searchRevealTimerRef.current = setTimeout(() => {
+          setSearchPendingMessageId(null);
+          setSearchThinking(false);
+          searchRevealTimerRef.current = null;
+        }, remainingDelay);
+      }
     } catch (requestError) {
+      if (searchRevealTimerRef.current) {
+        clearTimeout(searchRevealTimerRef.current);
+        searchRevealTimerRef.current = null;
+      }
+      setSearchPendingMessageId(null);
+      setSearchThinking(false);
+      if (!payload?.attachment && !isCommercial) {
+        setDraft((current) => current || message);
+      }
       setError(requestError.message ?? "Nao foi possivel enviar a mensagem.");
       throw requestError;
     } finally {
@@ -348,6 +393,13 @@ export function StoreConversationScreen({ navigation, route }) {
         ))
         .slice(0, 6)
     : [];
+  const visiblePendingSearchMessageId = searchPendingMessageId ?? (
+    searchThinking
+      ? [...(conversation?.messages ?? [])]
+          .reverse()
+          .find((item) => item.isMine && item.content?.kind === "SEARCH")?.id
+      : null
+  );
 
   return (
     <ScreenContainer
@@ -447,6 +499,7 @@ export function StoreConversationScreen({ navigation, route }) {
                 onOpenCatalog={!conversation?.isStore ? () => setCatalogOpen(true) : null}
                 onOpenContent={openCommercialContent}
                 onOpenSearchProduct={!conversation?.isStore ? openProduct : null}
+                searchPending={searchThinking && String(message.id) === String(visiblePendingSearchMessageId)}
                 searchSuggestions={!conversation?.isStore ? storeView?.products : null}
               />
             ))
@@ -461,6 +514,7 @@ export function StoreConversationScreen({ navigation, route }) {
               </Text>
             </View>
           )}
+          {searchThinking ? <StoreTypingIndicator /> : null}
         </ScrollView>
         <ChatScrollToLatestButton onPress={timeline.scrollToLatest} unreadCount={timeline.unreadBelow} visible={!timeline.isAtBottom} />
       </View>
@@ -789,6 +843,40 @@ function CustomerCatalogModal({ onAddProduct, onClose, onOpenProduct, store, vis
   );
 }
 
+function StoreTypingIndicator() {
+  const [activeDot, setActiveDot] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setActiveDot((current) => (current + 1) % 3);
+    }, 260);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <View
+      accessibilityLabel="A loja esta procurando produtos"
+      accessibilityLiveRegion="polite"
+      style={styles.storeTypingLine}
+    >
+      <View style={styles.storeTypingAvatar}>
+        <Ionicons color={colors.primaryDark} name="storefront-outline" size={15} />
+      </View>
+      <View style={styles.storeTypingBubble}>
+        {[0, 1, 2].map((dot) => (
+          <View
+            key={dot}
+            style={[
+              styles.storeTypingDot,
+              dot === activeDot && styles.storeTypingDotActive,
+            ]}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function MessageBubble({
   accessToken,
   loading,
@@ -797,6 +885,7 @@ function MessageBubble({
   onOpenCatalog,
   onOpenContent,
   onOpenSearchProduct,
+  searchPending,
   searchSuggestions,
 }) {
   if (message.author === "system" && message.content?.kind === "PRODUCT") {
@@ -841,7 +930,7 @@ function MessageBubble({
     );
   }
 
-  const searchProducts = message.content?.kind === "SEARCH"
+  const searchProducts = message.content?.kind === "SEARCH" && !searchPending
     ? message.content.products ?? []
     : null;
 
@@ -1832,6 +1921,45 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
   },
   messagesBottom: { justifyContent: "flex-end" },
+  storeTypingAvatar: {
+    alignItems: "center",
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.round,
+    height: 30,
+    justifyContent: "center",
+    width: 30,
+  },
+  storeTypingBubble: {
+    alignItems: "center",
+    backgroundColor: colors.cardMuted,
+    borderColor: colors.border,
+    borderRadius: 18,
+    borderBottomLeftRadius: 6,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 5,
+    height: 38,
+    paddingHorizontal: spacing.md,
+  },
+  storeTypingDot: {
+    backgroundColor: colors.textMuted,
+    borderRadius: radius.round,
+    height: 6,
+    opacity: 0.35,
+    transform: [{ scale: 0.85 }],
+    width: 6,
+  },
+  storeTypingDotActive: {
+    backgroundColor: colors.primaryDark,
+    opacity: 1,
+    transform: [{ scale: 1.25 }],
+  },
+  storeTypingLine: {
+    alignItems: "flex-end",
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    gap: spacing.xs,
+  },
   timeline: { flex: 1, position: "relative" },
   infoChip: {
     alignItems: "center",

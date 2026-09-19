@@ -53,6 +53,7 @@ function serializeUser(user, accountLevel) {
     name: user.nome,
     phone: user.telefone,
     phoneVerified: user.telefone_verificado,
+    professionalProfileActive: user.perfil_profissional_ativo,
     publicId: user.identificador_publico,
     profiles: deriveProfiles(user),
     status: user.status,
@@ -123,6 +124,9 @@ export async function updateCurrentUser(userId, data) {
         ...(data.email ? { email: data.email } : {}),
         ...(data.name ? { nome: data.name } : {}),
         ...(data.phone ? { telefone: data.phone } : {}),
+        ...(data.professionalProfileActive !== undefined
+          ? { perfil_profissional_ativo: data.professionalProfileActive }
+          : {}),
         ...(data.location
           ? { cidade_busca: data.location.city, estado_busca: data.location.state }
           : {}),

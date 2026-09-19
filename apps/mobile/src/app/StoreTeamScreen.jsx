@@ -1,7 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import QRCode from "react-native-qrcode-svg";
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Image, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, Image, Modal, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { AppButton } from "../components/AppButton";
 import { AppInput } from "../components/AppInput";
 import { PageHeader } from "../components/PageHeader";
@@ -10,6 +10,7 @@ import {
   createStoreStaffInvitation,
   getStoreTeam,
   removeStoreStaffMember,
+  updateStoreStaffPermissions,
 } from "../services/seller.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { resolveMediaUrl } from "../utils/media";
@@ -24,6 +25,7 @@ export function StoreTeamScreen({ route }) {
   const [publicId, setPublicId] = useState("");
   const [saving, setSaving] = useState(false);
   const [qrInvite, setQrInvite] = useState(null);
+  const [savingMemberId, setSavingMemberId] = useState(null);
 
   const load = useCallback(async () => {
     if (!session?.accessToken || !store?.id) return;
@@ -92,6 +94,29 @@ export function StoreTeamScreen({ route }) {
     );
   }
 
+  async function changePermission(member, key, value) {
+    if (savingMemberId) return;
+    const permissions = {
+      createCharges: Boolean(member.permissions?.createCharges),
+      manageOrders: Boolean(member.permissions?.manageOrders),
+      storeChats: Boolean(member.permissions?.storeChats),
+      [key]: value,
+    };
+    setSavingMemberId(member.id);
+    setError("");
+    setData((current) => ({
+      ...current,
+      members: current.members.map((item) => item.id === member.id ? { ...item, permissions } : item),
+    }));
+    try {
+      await updateStoreStaffPermissions(session.accessToken, store.id, member.id, permissions);
+    } catch (requestError) {
+      setError(requestError.message ?? "Nao foi possivel alterar as permissoes.");
+      await load();
+    } finally {
+      setSavingMemberId(null);
+    }
+  }
   return (
     <ScreenContainer contentContainerStyle={styles.content} edges={["left", "right"]}>
       <PageHeader
@@ -127,17 +152,27 @@ export function StoreTeamScreen({ route }) {
         <Text style={styles.sectionCount}>{data.members?.length ?? 0}</Text>
       </View>
       {loading ? <Text style={styles.muted}>Carregando equipe...</Text> : (data.members ?? []).map((member) => (
-        <View key={member.id} style={styles.personRow}>
-          <Avatar person={member.user} />
-          <View style={styles.personCopy}>
+        <View key={member.id} style={styles.memberCard}>
+          <View style={styles.personRow}>
+            <Avatar person={member.user} />
+            <View style={styles.personCopy}>
             <Text numberOfLines={1} style={styles.personName}>{member.user?.name}</Text>
             <Text numberOfLines={1} style={styles.personMeta}>{member.role === "DONO" ? "Dono da loja" : "Atendente"} · @{member.user?.publicId ?? member.user?.id}</Text>
+            </View>
+            {member.role !== "DONO" ? (
+              <Pressable accessibilityLabel="Remover funcionario" onPress={() => removeMember(member)} style={styles.removeButton}>
+                <Ionicons color={colors.danger} name="trash-outline" size={19} />
+              </Pressable>
+            ) : <Ionicons color={colors.primaryDark} name="shield-checkmark" size={20} />}
           </View>
           {member.role !== "DONO" ? (
-            <Pressable accessibilityLabel="Remover funcionario" onPress={() => removeMember(member)} style={styles.removeButton}>
-              <Ionicons color={colors.danger} name="trash-outline" size={19} />
-            </Pressable>
-          ) : <Ionicons color={colors.primaryDark} name="shield-checkmark" size={20} />}
+            <View style={styles.permissionPanel}>
+              <Text style={styles.permissionTitle}>Permissoes liberadas pelo dono</Text>
+              <PermissionSwitch disabled={savingMemberId === member.id} icon="chatbubbles-outline" label="Responder chats" onChange={(value) => changePermission(member, "storeChats", value)} value={member.permissions?.storeChats} />
+              <PermissionSwitch disabled={savingMemberId === member.id} icon="qr-code-outline" label="Gerar cobrancas" onChange={(value) => changePermission(member, "createCharges", value)} value={member.permissions?.createCharges} />
+              <PermissionSwitch disabled={savingMemberId === member.id} icon="cube-outline" label="Atualizar pedidos" onChange={(value) => changePermission(member, "manageOrders", value)} value={member.permissions?.manageOrders} />
+            </View>
+          ) : null}
         </View>
       ))}
 
@@ -180,6 +215,16 @@ function Avatar({ person }) {
   return <View style={styles.avatar}>{imageUrl ? <Image source={{ uri: imageUrl }} style={styles.avatarImage} /> : <Text style={styles.avatarText}>{person?.name?.slice(0, 2).toUpperCase() ?? "AT"}</Text>}</View>;
 }
 
+function PermissionSwitch({ disabled, icon, label, onChange, value }) {
+  return (
+    <View style={styles.permissionRow}>
+      <View style={styles.permissionIcon}><Ionicons color={colors.primaryDark} name={icon} size={17} /></View>
+      <Text style={styles.permissionLabel}>{label}</Text>
+      <Switch disabled={disabled} onValueChange={onChange} trackColor={{ false: colors.border, true: colors.primaryLight }} thumbColor={value ? colors.primaryDark : colors.textMuted} value={Boolean(value)} />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   avatar: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 44, justifyContent: "center", overflow: "hidden", width: 44 },
   avatarImage: { height: "100%", width: "100%" },
@@ -195,13 +240,19 @@ const styles = StyleSheet.create({
   headingCopy: { flex: 1, gap: 3 },
   headingIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 44, justifyContent: "center", width: 44 },
   inviteCard: { backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.xl, borderWidth: 1, gap: spacing.md, padding: spacing.lg, ...shadowSoft },
+  memberCard: { backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.xl, borderWidth: 1, overflow: "hidden", ...shadowSoft },
   muted: { color: colors.textMuted, fontFamily: fonts.medium, textAlign: "center" },
   overlay: { alignItems: "center", backgroundColor: "rgba(15,23,42,0.55)", flex: 1, justifyContent: "center", padding: spacing.lg },
   pendingRow: { alignItems: "center", backgroundColor: colors.warningSoft, borderColor: colors.warning, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.md, padding: spacing.md },
+  permissionIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, height: 32, justifyContent: "center", width: 32 },
+  permissionLabel: { color: colors.textPrimary, flex: 1, fontFamily: fonts.semiBold, fontSize: typography.caption },
+  permissionPanel: { borderTopColor: colors.border, borderTopWidth: 1, gap: spacing.xs, padding: spacing.md },
+  permissionRow: { alignItems: "center", flexDirection: "row", gap: spacing.sm, minHeight: 44 },
+  permissionTitle: { color: colors.textMuted, fontFamily: fonts.bold, fontSize: 10, letterSpacing: 0.5, marginBottom: spacing.xs, textTransform: "uppercase" },
   personCopy: { flex: 1, gap: 3, minWidth: 0 },
   personMeta: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption },
   personName: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small },
-  personRow: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.md, padding: spacing.md },
+  personRow: { alignItems: "center", flexDirection: "row", gap: spacing.md, padding: spacing.md },
   qrBox: { backgroundColor: colors.card, borderRadius: radius.lg, padding: spacing.md },
   qrCard: { alignItems: "center", backgroundColor: colors.card, borderRadius: radius.xl, gap: spacing.md, maxWidth: 420, padding: spacing.xl, width: "100%" },
   qrExpiry: { color: colors.textMuted, fontFamily: fonts.medium, fontSize: typography.caption },

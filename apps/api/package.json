@@ -23,6 +23,7 @@
     "seed:test-50": "node prisma/seed-test-50.js",
     "seed:service-types": "node prisma/seed-service-types.js",
     "test:load-scenario": "node --import ./test.setup.js --test --test-concurrency=1 scenarios/load-scenario.scenario.js",
+    "test:sicredi-multipag": "node scripts/sicredi-multipag-smoke.js",
     "media:curated": "node prisma/apply-curated-media.js",
     "audit:business": "node prisma/audit-business.js",
     "reconcile:completed-orders": "node prisma/reconcile-completed-orders.js"

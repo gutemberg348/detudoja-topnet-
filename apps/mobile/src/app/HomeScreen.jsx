@@ -178,16 +178,40 @@ export function HomeScreen({ navigation }) {
           ) : null}
 
           <RecentConversations
-            actionLabel="Conversar"
+            actionLabel="Meus amigos"
             conversations={recent.conversations}
             isLoading={recent.isLoading}
             onOpen={openConversation}
             onViewAll={() => navigation.navigate("PersonalChatsInbox")}
           />
+
+          <Pressable
+            accessibilityHint="Abre seus contatos e permite iniciar uma conversa pelo ID ou QR"
+            accessibilityLabel="Meus amigos e contatos"
+            onPress={() => navigation.navigate("PersonalChatsInbox")}
+            style={({ pressed }) => [styles.friendsShortcut, pressed && styles.friendsShortcutPressed]}
+          >
+            <View style={styles.friendsShortcutIcon}>
+              <Ionicons color={colors.primaryDark} name="people-outline" size={21} />
+            </View>
+            <View style={styles.friendsShortcutCopy}>
+              <Text style={styles.friendsShortcutTitle}>Meus amigos e contatos</Text>
+              <Text style={styles.friendsShortcutText}>Encontre pessoas pelo ID ou codigo QR.</Text>
+            </View>
+            {recent.personalUnreadCount > 0 ? (
+              <View style={styles.friendsUnreadBadge}>
+                <Text style={styles.friendsUnreadText}>
+                  {recent.personalUnreadCount > 99 ? "99+" : recent.personalUnreadCount}
+                </Text>
+              </View>
+            ) : null}
+            <Ionicons color={colors.primaryDark} name="chevron-forward" size={19} />
+          </Pressable>
         </View>
       </ScreenContainer>
       <Pressable
-        accessibilityLabel="Abrir conversas com amigos"
+        accessibilityHint="Abre seus contatos ou permite iniciar uma conversa pelo ID e QR"
+        accessibilityLabel="Abrir mensagens e contatos"
         onPress={() => navigation.navigate("PersonalChatsInbox")}
         style={({ pressed }) => [styles.chatFab, pressed && styles.chatFabPressed]}
       >
@@ -195,7 +219,7 @@ export function HomeScreen({ navigation }) {
         {recent.personalUnreadCount > 0 ? (
           <View style={styles.chatBadge}>
             <Text style={styles.chatBadgeText}>
-              {recent.personalUnreadCount > 9 ? "9+" : recent.personalUnreadCount}
+              {recent.personalUnreadCount > 99 ? "99+" : recent.personalUnreadCount}
             </Text>
           </View>
         ) : null}
@@ -257,13 +281,13 @@ const styles = StyleSheet.create({
     borderColor: colors.card,
     borderRadius: 999,
     borderWidth: 2,
-    height: 22,
+    height: 23,
     justifyContent: "center",
+    minWidth: 23,
+    paddingHorizontal: 4,
     position: "absolute",
     right: -5,
     top: -5,
-    minWidth: 22,
-    paddingHorizontal: 4,
   },
   chatBadgeText: {
     color: "#4A2B00",
@@ -284,6 +308,48 @@ const styles = StyleSheet.create({
     width: 58,
   },
   chatFabPressed: { opacity: 0.8, transform: [{ scale: 0.97 }] },
+  friendsShortcut: {
+    alignItems: "center",
+    alignSelf: "stretch",
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primaryLight,
+    borderRadius: 16,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 74,
+    padding: spacing.md,
+  },
+  friendsShortcutCopy: { flex: 1, gap: 2, minWidth: 0 },
+  friendsShortcutIcon: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderRadius: 999,
+    height: 42,
+    justifyContent: "center",
+    width: 42,
+  },
+  friendsShortcutPressed: { opacity: 0.72, transform: [{ scale: 0.99 }] },
+  friendsShortcutText: {
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    fontSize: typography.caption,
+  },
+  friendsShortcutTitle: {
+    color: colors.textPrimary,
+    fontFamily: fonts.bold,
+    fontSize: typography.small,
+  },
+  friendsUnreadBadge: {
+    alignItems: "center",
+    backgroundColor: colors.warning,
+    borderRadius: 999,
+    height: 23,
+    justifyContent: "center",
+    minWidth: 23,
+    paddingHorizontal: 5,
+  },
+  friendsUnreadText: { color: "#4A2B00", fontFamily: fonts.bold, fontSize: 10 },
   content: {
     alignItems: "center",
     flex: 1,

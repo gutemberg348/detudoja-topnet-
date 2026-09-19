@@ -59,16 +59,34 @@ export function NetworkPage({ accessToken, canManageNetwork = false }) {
   );
   const selectedPerson = peopleById.get(selectedId) ?? data?.root ?? null;
   const focusPerson = peopleById.get(focusId) ?? data?.root ?? null;
-  const branchLevels = useMemo(
-    () => buildVisibleLevels(focusPerson, data?.people ?? [], 2),
+  const visibleTree = useMemo(
+    () => buildVisibleTree(focusPerson, data?.people ?? [], 3),
     [data?.people, focusPerson],
   );
+  const selectedPath = useMemo(
+    () => buildAncestorPath(selectedPerson, peopleById),
+    [peopleById, selectedPerson],
+  );
+  const selectedStats = useMemo(
+    () => buildMemberStats(selectedPerson, data?.people ?? []),
+    [data?.people, selectedPerson],
+  );
+  const searchSuggestions = useMemo(() => {
+    const term = normalize(search).trim();
+    if (term.length < 2) return [];
+    return allPeople
+      .filter((person) => [person.name, person.email, person.phone, person.id, person.publicIdentifier]
+        .filter(Boolean)
+        .some((value) => normalize(value).includes(term)))
+      .slice(0, 8);
+  }, [allPeople, search]);
   const filteredPeople = useMemo(() => {
     const term = normalize(search);
     return (data?.people ?? []).filter((person) => {
       if (!matchesStatus(person, statusFilter)) return false;
       if (!term) return true;
-      return [person.name, person.email, person.parentName, person.parentEmail,
+      return [person.name, person.email, person.phone, person.publicIdentifier, person.id,
+        person.parentName, person.parentEmail,
         person.parentSide, person.parentConnectionType, person.directSponsorName,
         person.directSponsorEmail, person.branch, person.status, person.kycStatus]
         .filter(Boolean)
@@ -85,6 +103,15 @@ export function NetworkPage({ accessToken, canManageNetwork = false }) {
   function selectPerson(person, focus = false) {
     setSelectedId(person.id);
     if (focus) setFocusId(person.id);
+  }
+
+  function locatePerson(person) {
+    setSelectedId(person.id);
+    setFocusId(person.parentId && peopleById.has(person.parentId) ? person.parentId : person.id);
+    setSearch("");
+    window.requestAnimationFrame(() => {
+      document.querySelector(".network-explorer")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   }
 
   function openMove(person) {
@@ -186,7 +213,22 @@ export function NetworkPage({ accessToken, canManageNetwork = false }) {
       </section>
 
       <section className="toolbar toolbar--network" aria-label="Filtros da rede">
-        <form className="search-field" onSubmit={(event) => event.preventDefault()}><Search size={18} /><input onChange={(event) => setSearch(event.target.value)} placeholder="Buscar nome, e-mail, patrocinador ou lado" value={search} /></form>
+        <div className="network-search-locator">
+          <form className="search-field" onSubmit={(event) => { event.preventDefault(); if (searchSuggestions[0]) locatePerson(searchSuggestions[0]); }}><Search size={18} /><input onChange={(event) => setSearch(event.target.value)} placeholder="Localizar usuario por nome, e-mail, telefone ou ID" value={search} /></form>
+          {searchSuggestions.length ? (
+            <div className="network-search-results">
+              <span className="network-search-results__label">Encontrados na matriz</span>
+              {searchSuggestions.map((person) => (
+                <button key={person.id} onClick={() => locatePerson(person)} type="button">
+                  <span className="avatar">{initials(person.name)}</span>
+                  <span><strong>{person.name}</strong><small>{person.email}</small></span>
+                  <em>{person.level === 0 ? "Raiz" : `Nivel ${person.level} · ${person.parentSide || "-"}`}</em>
+                  <ChevronRight size={15} />
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
         <select aria-label="Filtrar situacao" onChange={(event) => setStatusFilter(event.target.value)} value={statusFilter}>
           <option value="TODOS">Todos os participantes</option><option value="ATIVOS">Contas ativas</option><option value="BLOQUEADOS">Contas bloqueadas</option><option value="QUALIFICADOS">Qualificados</option><option value="GANHOS_BLOQUEADOS">Ganhos bloqueados</option><option value="KYC_PENDENTE">KYC pendente</option>
         </select>
@@ -205,23 +247,32 @@ export function NetworkPage({ accessToken, canManageNetwork = false }) {
       <section className="network-command-layout">
         <article className="data-section network-explorer">
           <div className="section-heading network-explorer__heading">
-            <div><h2>Explorador lateral da matriz</h2><p>O participante em foco fica a esquerda; abra qualquer descendente para avancar mais dois niveis.</p></div>
+            <div><h2>Árvore visual da matriz</h2><p>Três níveis por vez. Clique na bolinha para ver os dados ou centralize nela para continuar descendo.</p></div>
             <div className="network-explorer__nav">
               <button className="button button--secondary" disabled={!focusPerson?.parentId} onClick={() => setFocusId(focusPerson?.parentId)} type="button"><ArrowLeft size={15} /> Subir</button>
               <button className="button button--secondary" disabled={focusId === data.root?.id} onClick={() => setFocusId(data.root?.id)} type="button">Ir para raiz</button>
             </div>
           </div>
-          {focusPerson ? (
-            <div className="network-lateral-scroll"><div className="network-lateral-map">
-              <div className="network-generation network-generation--focus"><span className="network-generation__label">Em foco</span><NetworkPersonCard active person={focusPerson} onFocus={selectPerson} onSelect={selectPerson} /></div>
-              {branchLevels.map((level, index) => (
-                <div className="network-generation" key={`generation-${index + 1}`}><span className="network-generation__label">Nivel +{index + 1} <b>{level.length}</b></span><div className="network-generation__people">{level.length ? level.map((person) => <NetworkPersonCard key={person.id} person={person} selected={person.id === selectedId} onFocus={selectPerson} onSelect={selectPerson} />) : <div className="network-generation__empty">Nenhum participante neste nivel</div>}</div></div>
-              ))}
+          {visibleTree ? (
+            <div className="network-tree-context">
+              <span><GitBranch size={15} /> Ramo iniciado em <strong>{focusPerson.name}</strong></span>
+              <small>Clique em “Abrir ramo” para trazer a pessoa ao topo e carregar mais três níveis.</small>
+            </div>
+          ) : null}
+          {visibleTree ? (
+            <div className="network-tree-scroll"><div className="network-tree">
+              <NetworkTreeNode
+                focusId={focusPerson.id}
+                node={visibleTree}
+                onFocus={selectPerson}
+                onSelect={selectPerson}
+                selectedId={selectedId}
+              />
             </div></div>
           ) : <div className="empty-state"><GitBranch size={24} /><p>Raiz da empresa ainda nao existe.</p></div>}
         </article>
 
-        <MemberControlPanel canManage={canManageNetwork} isRoot={selectedPerson?.id === data.root?.id} onMove={openMove} onOperation={openOperation} person={selectedPerson} />
+        <MemberControlPanel canManage={canManageNetwork} isRoot={selectedPerson?.id === data.root?.id} onLocate={locatePerson} onMove={openMove} onOperation={openOperation} path={selectedPath} person={selectedPerson} stats={selectedStats} />
       </section>
 
       <section className="network-safety-note" aria-label="Politica de alteracoes"><LockKeyhole size={20} /><div><strong>Controles protegidos</strong><p>Mover nao troca o patrocinador. Bloquear ganhos impede apenas novas comissoes; saldo ja creditado permanece intacto. Todas as alteracoes de matriz e ganhos sao auditadas.</p></div></section>
@@ -264,14 +315,41 @@ export function NetworkPage({ accessToken, canManageNetwork = false }) {
   );
 }
 
-function MemberControlPanel({ canManage, isRoot, onMove, onOperation, person }) {
+function MemberControlPanel({ canManage, isRoot, onLocate, onMove, onOperation, path, person, stats }) {
   if (!person) return null;
   return (
     <aside className="network-member-panel">
-      <div className="network-member-panel__hero"><span className="avatar">{initials(person.name)}</span><div><p className="eyebrow">Participante selecionado</p><h2>{person.name}</h2><span>{person.email}</span></div></div>
+      <div className="network-member-panel__hero"><span className="avatar">{initials(person.name)}</span><div><p className="eyebrow">Participante selecionado</p><h2>{person.name}</h2><span>{person.email}</span><small>ID {person.id}{person.publicIdentifier ? ` · @${person.publicIdentifier}` : ""}</small></div></div>
       <div className="network-member-panel__badges"><StatusBadge status={person.status} /><StatusBadge status={person.kycStatus} />{person.networkEarningsBlocked ? <span className="network-pill network-pill--danger">Ganhos bloqueados</span> : <span className="network-pill">Ganhos liberados</span>}</div>
+      <div className="network-member-path">
+        <span>CAMINHO NA MATRIZ</span>
+        <div>{path.map((item, index) => <span key={item.id}><button onClick={() => onLocate(item)} title={`Localizar ${item.name}`} type="button">{index === 0 ? "Raiz" : initials(item.name)}</button>{index < path.length - 1 ? <ChevronRight size={12} /> : null}</span>)}</div>
+      </div>
+      <div className="network-member-stats">
+        <MemberStat label="Pessoas abaixo" value={stats.totalBelow} />
+        <MemberStat label="Filhos na matriz" value={`${stats.directChildren}/2`} />
+        <MemberStat label="Ativos abaixo" value={stats.activeBelow} />
+        <MemberStat label="Qualificados" value={stats.qualifiedBelow} />
+      </div>
+      <p className="network-member-section-title">Posição e indicação</p>
       <dl className="network-member-details">
-        <div><dt>Posicao</dt><dd>{person.level === 0 ? "Raiz operacional" : `Nivel ${person.level} · ${person.parentSide || "sem lado"}`}</dd></div><div><dt>Pai na matriz</dt><dd>{person.parentName || "-"}</dd></div><div><dt>Patrocinador</dt><dd>{person.directSponsorName || "-"}</dd></div><div><dt>Diretos validos</dt><dd>{person.activeVerifiedDirects ?? 0} de 2</dd></div><div><dt>Qualificacao</dt><dd>{person.qualified ? "Qualificado para a rede" : "Nao qualificado"}</dd></div>
+        <div><dt>Posição</dt><dd>{person.level === 0 ? "Raiz operacional" : `Nível ${person.level} · ${person.parentSide || "sem lado"}`}</dd></div>
+        <div><dt>Perna principal</dt><dd>{person.branch || "-"}</dd></div>
+        <div><dt>Pai na matriz</dt><dd>{person.parentName || "-"}</dd></div>
+        <div><dt>Ligação com o pai</dt><dd>{formatConnection(person.parentConnectionType)}</dd></div>
+        <div><dt>Patrocinador</dt><dd>{person.directSponsorName || "-"}</dd></div>
+        <div><dt>Diretos válidos</dt><dd>{person.activeVerifiedDirects ?? 0} de 2</dd></div>
+        <div><dt>Qualificação</dt><dd>{person.qualified ? "Qualificado para a rede" : "Não qualificado"}</dd></div>
+      </dl>
+      <p className="network-member-section-title">Conta do participante</p>
+      <dl className="network-member-details">
+        <div><dt>Tipo de conta</dt><dd>{formatAccountType(person.accountType)}</dd></div>
+        <div><dt>Telefone</dt><dd>{person.phone || "Não informado"}</dd></div>
+        <div><dt>Localidade</dt><dd>{[person.city, person.state].filter(Boolean).join("/") || "Não informada"}</dd></div>
+        <div><dt>Nível KYC</dt><dd>{person.kycLevel || "-"}</dd></div>
+        <div><dt>Cadastro</dt><dd>{formatDateTime(person.createdAt)}</dd></div>
+        <div><dt>Último acesso</dt><dd>{formatDateTime(person.lastLoginAt)}</dd></div>
+        <div><dt>Maior nível abaixo</dt><dd>{stats.deepestLevel ? `Nível ${stats.deepestLevel}` : "Sem descendentes"}</dd></div>
       </dl>
       {person.networkEarningsBlockReason ? <div className="network-block-reason"><strong>Motivo do bloqueio</strong><p>{person.networkEarningsBlockReason}</p></div> : null}
       {canManage && !isRoot ? (
@@ -285,13 +363,35 @@ function MemberControlPanel({ canManage, isRoot, onMove, onOperation, person }) 
   );
 }
 
-function NetworkPersonCard({ active = false, onFocus, onSelect, person, selected = false }) {
+function MemberStat({ label, value }) {
+  return <div><strong>{value}</strong><span>{label}</span></div>;
+}
+
+function NetworkTreeNode({ focusId, node, onFocus, onSelect, selectedId }) {
+  const { children, person } = node;
+  const selected = person.id === selectedId;
+  const focused = person.id === focusId;
   return (
-    <article className={`network-person-card ${active ? "is-focus" : ""} ${selected ? "is-selected" : ""}`}>
-      <button className="network-person-card__main" onClick={() => onSelect(person)} type="button"><span className="avatar">{initials(person.name)}</span><span><strong>{person.name}</strong><small>{person.level === 0 ? "Raiz operacional" : `N${person.level} · ${person.parentSide || "sem lado"}`}</small></span></button>
-      <div className="network-person-card__state"><span className={person.active ? "is-on" : ""}>{person.active ? "Ativo" : person.status}</span>{person.networkEarningsBlocked ? <em>Ganhos bloqueados</em> : person.qualified ? <em className="is-qualified">Qualificado</em> : null}</div>
-      <button className="network-person-card__focus" onClick={() => onFocus(person, true)} type="button">Abrir ramo <ChevronRight size={14} /></button>
-    </article>
+    <div className="network-node-wrap">
+      <article className={`network-tree-person ${focused ? "is-focus" : ""} ${selected ? "is-selected" : ""} ${person.networkEarningsBlocked ? "is-blocked" : ""}`}>
+        <button aria-label={`Ver informações de ${person.name}`} className="network-tree-orb" onClick={() => onSelect(person)} type="button">
+          <span>{initials(person.name)}</span>
+          <i className={person.active ? "is-online" : ""} />
+        </button>
+        <strong title={person.name}>{person.name}</strong>
+        <small>{person.level === 0 ? "Raiz operacional" : `N${person.level} · ${person.parentSide || "sem lado"}`}</small>
+        <div className="network-tree-person__badges">
+          <em className={person.parentConnectionType === "DIRETA" ? "is-direct" : ""}>{formatConnection(person.parentConnectionType)}</em>
+          {person.qualified ? <em className="is-qualified">Qualificado</em> : null}
+        </div>
+        <button className="network-tree-person__focus" onClick={() => onFocus(person, true)} type="button">Abrir ramo <ChevronRight size={12} /></button>
+      </article>
+      {children.length ? (
+        <div className={`network-node-children ${children.length > 1 ? "network-node-children--multi" : ""}`}>
+          {children.map((child) => <NetworkTreeNode focusId={focusId} key={child.person.id} node={child} onFocus={onFocus} onSelect={onSelect} selectedId={selectedId} />)}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -317,15 +417,61 @@ function UserIdentity({ person }) {
   return <div className="user-identity"><span className="avatar">{initials(person.name)}</span><div><strong>{person.name}</strong><small>{person.email}</small></div></div>;
 }
 
-function buildVisibleLevels(focusPerson, people, depth) {
-  if (!focusPerson) return [];
+function buildVisibleTree(focusPerson, people, depth) {
+  if (!focusPerson) return null;
   const childrenByParent = new Map();
   people.forEach((person) => { const children = childrenByParent.get(person.parentId) ?? []; children.push(person); childrenByParent.set(person.parentId, children); });
   childrenByParent.forEach((children) => children.sort((a, b) => (a.position ?? 0) - (b.position ?? 0)));
-  const levels = [];
-  let current = [focusPerson];
-  for (let index = 0; index < depth; index += 1) { current = current.flatMap((person) => childrenByParent.get(person.id) ?? []); levels.push(current); }
-  return levels;
+  function build(person, remainingDepth) {
+    return {
+      children: remainingDepth > 0
+        ? (childrenByParent.get(person.id) ?? []).map((child) => build(child, remainingDepth - 1))
+        : [],
+      person,
+    };
+  }
+  return build(focusPerson, depth);
+}
+
+function buildAncestorPath(person, peopleById) {
+  if (!person) return [];
+  const path = [];
+  const visited = new Set();
+  let current = person;
+  while (current && !visited.has(current.id)) {
+    path.unshift(current);
+    visited.add(current.id);
+    current = current.parentId ? peopleById.get(current.parentId) : null;
+  }
+  return path;
+}
+
+function buildMemberStats(person, people) {
+  if (!person) return { activeBelow: 0, directChildren: 0, deepestLevel: 0, qualifiedBelow: 0, totalBelow: 0 };
+  const childrenByParent = new Map();
+  people.forEach((item) => {
+    const children = childrenByParent.get(item.parentId) ?? [];
+    children.push(item);
+    childrenByParent.set(item.parentId, children);
+  });
+  const directChildren = childrenByParent.get(person.id) ?? [];
+  const descendants = [];
+  const queue = [...directChildren];
+  const visited = new Set();
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || visited.has(current.id)) continue;
+    visited.add(current.id);
+    descendants.push(current);
+    queue.push(...(childrenByParent.get(current.id) ?? []));
+  }
+  return {
+    activeBelow: descendants.filter((item) => item.active).length,
+    directChildren: directChildren.length,
+    deepestLevel: descendants.reduce((maximum, item) => Math.max(maximum, item.level ?? 0), 0),
+    qualifiedBelow: descendants.filter((item) => item.qualified).length,
+    totalBelow: descendants.length,
+  };
 }
 
 function matchesStatus(person, filter) {
@@ -339,6 +485,8 @@ function matchesStatus(person, filter) {
 
 function initials(name = "") { return name.split(" ").filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase(); }
 function formatConnection(type) { if (type === "DIRETA") return "Direto"; if (type === "REDE") return "Rede"; return "Raiz"; }
+function formatAccountType(type) { return ({ CONSUMIDOR: "Consumidor", LOJISTA: "Lojista", VENDEDOR: "Prestador" })[type] ?? type ?? "-"; }
+function formatDateTime(value) { return value ? dateFormatter.format(new Date(value)) : "Nunca"; }
 function normalize(value = "") { return value.toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase(); }
 
 function collectDescendantIds(userId, people) {

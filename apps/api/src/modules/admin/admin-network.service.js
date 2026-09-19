@@ -54,6 +54,8 @@ function serializeUser(user, context = {}) {
     indicationStatus: context.indicationStatus ?? null,
     isDirectToRoot: context.directSponsorId === context.rootUserId,
     kycStatus: user.kyc?.status ?? "PENDENTE",
+    kycLevel: user.nivel_kyc,
+    lastLoginAt: user.ultimo_login_em?.toISOString() ?? null,
     level: context.level ?? 0,
     name: user.nome,
     parentEmail: context.parentEmail ?? null,
@@ -63,12 +65,15 @@ function serializeUser(user, context = {}) {
     parentSide: context.parentSide ?? sideLabel(context.position),
     phone: user.telefone,
     position: context.position ?? null,
+    publicIdentifier: user.identificador_publico,
     qualified: active && verified && activeVerifiedDirects >= 2 && !user.ganhos_rede_bloqueados,
     reward: {
       direct: parentConnectionType === "DIRETA",
       network: parentConnectionType !== "RAIZ",
     },
     status: user.status,
+    city: user.cidade_busca,
+    state: user.estado_busca,
     verified,
   };
 }

@@ -30,7 +30,7 @@ const tabIcons = {
   Inicio: ["home", "home-outline"],
   Perfil: ["person", "person-outline"],
   Rede: ["git-network", "git-network-outline"],
-  Vender: ["briefcase", "briefcase-outline"],
+  Vender: ["storefront", "storefront-outline"],
 };
 
 const activeOrderStatuses = new Set([
@@ -455,7 +455,7 @@ export function MainTabs() {
     >
       <Tab.Screen component={HomeScreen} name="Inicio" />
       <Tab.Screen component={StoresScreen} name="Buscar" />
-      <Tab.Screen component={SellScreen} name="Vender" options={{ tabBarLabel: "Trabalho" }} />
+      <Tab.Screen component={SellScreen} name="Vender" options={{ tabBarLabel: "Vendas" }} />
       <Tab.Screen component={NetworkScreen} name="Rede" />
       <Tab.Screen component={ProfileScreen} name="Perfil" />
       </Tab.Navigator>

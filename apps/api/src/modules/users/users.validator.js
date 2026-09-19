@@ -29,5 +29,6 @@ export const updateCurrentUserSchema = z
       .transform(onlyDigits)
       .refine((value) => /^[1-9]{2}\d{8,9}$/.test(value), "Telefone invalido")
       .optional(),
+    professionalProfileActive: z.boolean().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "Informe um campo para atualizar");

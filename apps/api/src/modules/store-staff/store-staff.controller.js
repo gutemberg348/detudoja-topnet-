@@ -5,6 +5,7 @@ import {
   getMyStoreWorkplaces,
   getStoreTeam,
   revokeStoreMember,
+  updateStoreMemberPermissions,
 } from "./store-staff.service.js";
 
 export async function getStoreTeamController(req, res, next) {
@@ -29,4 +30,15 @@ export async function declineStoreStaffInviteController(req, res, next) {
 
 export async function revokeStoreMemberController(req, res, next) {
   try { res.json(await revokeStoreMember(req.auth.user.id, req.params.storeId, req.params.memberId)); } catch (error) { next(error); }
+}
+
+export async function updateStoreMemberPermissionsController(req, res, next) {
+  try {
+    res.json(await updateStoreMemberPermissions(
+      req.auth.user.id,
+      req.params.storeId,
+      req.params.memberId,
+      req.body,
+    ));
+  } catch (error) { next(error); }
 }

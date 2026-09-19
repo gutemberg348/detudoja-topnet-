@@ -61,8 +61,17 @@ function serializeInvite(invite) {
 }
 
 function serializeMembership(member) {
+  const savedPermissions = member.permissoes && typeof member.permissoes === "object"
+    ? member.permissoes
+    : {};
+  const isOwner = member.cargo === "DONO";
   return {
     id: member.id,
+    permissions: {
+      createCharges: isOwner || savedPermissions.createCharges === true,
+      manageOrders: isOwner || savedPermissions.manageOrders === true,
+      storeChats: isOwner || savedPermissions.storeChats === true,
+    },
     role: member.cargo,
     status: member.status,
     store: member.loja ? serializeStore(member.loja) : undefined,
@@ -246,4 +255,26 @@ export async function revokeStoreMember(userId, storeId, memberId, repository = 
     where: { id: member.id, loja_id: store.id },
   });
   return { removed: true };
+}
+
+export async function updateStoreMemberPermissions(userId, storeId, memberId, data, repository = storeStaffRepository) {
+  const store = await requireOwner(repository, userId, storeId);
+  const parsedMemberId = parsePositiveId(memberId, "Funcionario invalido");
+  const member = await repository.findMember({
+    where: { id: parsedMemberId, loja_id: store.id, status: "ATIVO" },
+  });
+  if (!member) throw new AppError("Funcionario nao encontrado nesta loja", 404);
+  if (member.cargo === "DONO" || member.usuario_id === userId) {
+    throw new AppError("As permissoes do dono nao podem ser limitadas", 409);
+  }
+
+  await repository.updateMember({
+    data: { permissoes: data.permissions },
+    where: { id: member.id, loja_id: store.id },
+  });
+
+  return {
+    member: serializeMembership({ ...member, permissoes: data.permissions }),
+    updated: true,
+  };
 }

@@ -10,3 +10,11 @@ export const decideStoreStaffInviteSchema = z.object({
 }).refine((data) => Boolean(data.invitationId || data.token), {
   message: "Informe o convite ou token",
 });
+
+export const updateStoreStaffPermissionsSchema = z.object({
+  permissions: z.object({
+    createCharges: z.boolean(),
+    manageOrders: z.boolean(),
+    storeChats: z.boolean(),
+  }),
+});

@@ -9,6 +9,104 @@ const city = "Patos";
 const state = "PB";
 const now = new Date();
 
+const imageUrl = (photoId, width = 1200) => (
+  `https://images.unsplash.com/${photoId}?auto=format&fit=crop&w=${width}&q=82`
+);
+
+const storefronts = [
+  {
+    bannerUrl: imageUrl("photo-1542838132-92c53300491e", 1600),
+    category: "Mercado",
+    description: "Mercado completo com alimentos, bebidas e itens para o dia a dia.",
+    logoUrl: imageUrl("photo-1578916171728-46686eac8d58", 600),
+    name: "Mercado Avenida",
+  },
+  {
+    bannerUrl: imageUrl("photo-1517248135467-4c7edcad34c4", 1600),
+    category: "Restaurantes",
+    description: "Refeicoes, lanches e pratos preparados para pedir pelo aplicativo.",
+    logoUrl: imageUrl("photo-1414235077428-338989a2e8c0", 600),
+    name: "Sabor da Praca",
+  },
+  {
+    bannerUrl: imageUrl("photo-1555041469-a586c61ea9bc", 1600),
+    category: "Casa",
+    description: "Utilidades, organizacao e produtos para deixar sua casa completa.",
+    logoUrl: imageUrl("photo-1586023492125-27b2c045efd7", 600),
+    name: "Casa Forte Utilidades",
+  },
+  {
+    bannerUrl: imageUrl("photo-1560066984-138dadb4c035", 1600),
+    category: "Beleza",
+    description: "Beleza, cabelo e autocuidado com atendimento especializado.",
+    logoUrl: imageUrl("photo-1596462502278-27bfdc403348", 600),
+    name: "Studio Bella",
+  },
+  {
+    bannerUrl: imageUrl("photo-1547592180-85f173990554", 1600),
+    category: "Mercado",
+    description: "Produtos selecionados, mercearia e sabores regionais.",
+    logoUrl: imageUrl("photo-1601599561213-832382fd07ba", 600),
+    name: "Emporio Sertao",
+  },
+  {
+    bannerUrl: imageUrl("photo-1568901346375-23c9450c58cd", 1600),
+    category: "Restaurantes",
+    description: "Hamburgueres, porcoes, bebidas e combos preparados na hora.",
+    logoUrl: imageUrl("photo-1550547660-d9450f859349", 600),
+    name: "Ponto do Lanche",
+  },
+  {
+    bannerUrl: imageUrl("photo-1504307651254-35680f356dfd", 1600),
+    category: "Casa",
+    description: "Materiais, ferramentas e acabamentos para construir e reformar.",
+    logoUrl: imageUrl("photo-1581244277943-fe4a9c777189", 600),
+    name: "Constrular",
+  },
+  {
+    bannerUrl: imageUrl("photo-1522335789203-aabd1fc54bc9", 1600),
+    category: "Beleza",
+    description: "Cosmeticos e cuidados pessoais escolhidos para sua rotina.",
+    logoUrl: imageUrl("photo-1598440947619-2c35fc9aa908", 600),
+    name: "Beleza Viva",
+  },
+];
+
+const catalogs = {
+  Restaurantes: [
+    ["Hamburguer artesanal", "Carne, queijo e salada no pao brioche.", "photo-1568901346375-23c9450c58cd"],
+    ["Pizza especial", "Pizza preparada com ingredientes selecionados.", "photo-1579751626657-72bc17010498"],
+    ["Prato executivo", "Refeicao completa para o almoco do dia.", "photo-1547592180-85f173990554"],
+    ["Porcao de batata", "Batatas crocantes servidas com molho da casa.", "photo-1573080496219-bb080dd4f877"],
+    ["Suco natural", "Suco de fruta preparado na hora.", "photo-1622597467836-f3285f2131b8"],
+    ["Combo lanche", "Lanche, acompanhamento e bebida em um unico pedido.", "photo-1550547660-d9450f859349"],
+  ],
+  Beleza: [
+    ["Kit skincare", "Cuidados essenciais para limpeza e hidratacao da pele.", "photo-1556228578-0d85b1a4d571"],
+    ["Escova modelada", "Servico de escova com acabamento profissional.", "photo-1560066984-138dadb4c035"],
+    ["Design de sobrancelha", "Modelagem para realcar o formato natural.", "photo-1616683693504-3ea7e9ad6fec"],
+    ["Kit para cabelos", "Shampoo, condicionador e tratamento capilar.", "photo-1522337360788-8b13dee7a37e"],
+    ["Maquiagem profissional", "Producao completa para eventos e ocasioes especiais.", "photo-1522335789203-aabd1fc54bc9"],
+    ["Hidratante corporal", "Hidratacao e cuidado diario para a pele.", "photo-1608248543803-ba4f8c70ae0b"],
+  ],
+  Casa: [
+    ["Piso ceramico", "Revestimento resistente com acabamento moderno.", "photo-1581858726788-75bc0f6a952d"],
+    ["Jogo de ferramentas", "Ferramentas essenciais para reparos e montagem.", "photo-1581147036324-c17ac41dfa6c"],
+    ["Tinta para parede", "Tinta de alta cobertura para ambientes internos.", "photo-1562259949-e8e7689d7828"],
+    ["Kit organizador", "Conjunto pratico para organizar diferentes ambientes.", "photo-1616486338812-3dadae4b4ace"],
+    ["Torneira gourmet", "Torneira moderna para cozinha com bica movel.", "photo-1584622650111-993a426fbf0a"],
+    ["Luminaria decorativa", "Iluminacao aconchegante para casa ou escritorio.", "photo-1507473885765-e6ed057f782c"],
+  ],
+  Mercado: [
+    ["Cesta de frutas", "Selecao de frutas frescas para sua casa.", "photo-1610348725531-843dff563e2c"],
+    ["Kit cafe da manha", "Itens selecionados para comecar bem o dia.", "photo-1495474472287-4d71bcdd2085"],
+    ["Arroz tipo 1", "Pacote de arroz selecionado para o dia a dia.", "photo-1536304993881-ff6e9eefa2a6"],
+    ["Feijao carioca", "Feijao selecionado, saboroso e de preparo facil.", "photo-1515543904379-3d757afe72e4"],
+    ["Leite integral", "Leite integral para sua familia.", "photo-1550583724-b2692b85b150"],
+    ["Cesta de compras", "Combinacao de itens essenciais para abastecer a casa.", "photo-1542838132-92c53300491e"],
+  ],
+};
+
 const roleDefinitions = [
   ["entregador", 5, "Entregador Teste"],
   ["lojista", 8, "Lojista Teste"],
@@ -49,13 +147,13 @@ function pastDate(days, extraMinutes = 0) {
   return new Date(now.getTime() - ((days * 24 * 60 + extraMinutes) * 60 * 1000));
 }
 
-async function ensureCategory(name, description) {
+async function ensureCategory(name, description, iconUrl = null) {
   const existing = await prisma.categoriaLoja.findFirst({ where: { nome: name, excluido_em: null } });
   if (existing) return prisma.categoriaLoja.update({
-    data: { descricao: description, status: "ATIVA" },
+    data: { descricao: description, icone_url: existing.icone_url || iconUrl, status: "ATIVA" },
     where: { id: existing.id },
   });
-  return prisma.categoriaLoja.create({ data: { descricao: description, nome: name, status: "ATIVA" } });
+  return prisma.categoriaLoja.create({ data: { descricao: description, icone_url: iconUrl, nome: name, status: "ATIVA" } });
 }
 
 async function ensureSegment({ category, icon, name, slug }) {
@@ -363,20 +461,24 @@ async function main() {
   const passwordHash = await argon2.hash(password, { memoryCost: 19456, parallelism: 1, timeCost: 2, type: argon2.argon2id });
 
   const categoryDefinitions = [
-    ["Mercado Teste 50", "Mercados e conveniencias para testes intensivos.", "basket", "teste50-mercado"],
-    ["Restaurante Teste 50", "Alimentacao e delivery para testes intensivos.", "restaurant", "teste50-restaurante"],
-    ["Casa Teste 50", "Casa, construcao e utilidades para testes intensivos.", "home", "teste50-casa"],
-    ["Beleza Teste 50", "Beleza e autocuidado para testes intensivos.", "sparkles", "teste50-beleza"],
+    ["Mercado", "Mercados, mercearias e conveniencias.", "basket", "teste50-mercado", imageUrl("photo-1542838132-92c53300491e", 500)],
+    ["Restaurantes", "Restaurantes, lanchonetes e delivery.", "restaurant", "teste50-restaurante", imageUrl("photo-1414235077428-338989a2e8c0", 500)],
+    ["Casa", "Casa, construcao, ferramentas e utilidades.", "home", "teste50-casa", imageUrl("photo-1586023492125-27b2c045efd7", 500)],
+    ["Beleza", "Beleza, cosmeticos e autocuidado.", "sparkles", "teste50-beleza", imageUrl("photo-1596462502278-27bfdc403348", 500)],
   ];
   const categories = [];
   const segments = [];
-  for (const [name, description, icon, slug] of categoryDefinitions) {
-    const category = await ensureCategory(name, description);
+  for (const [name, description, icon, slug, iconUrl] of categoryDefinitions) {
+    const category = await ensureCategory(name, description, iconUrl);
     categories.push(category);
     segments.push(await ensureSegment({ category, icon, name, slug }));
   }
-  const serviceCategory = await ensureCategory("Servicos Teste 50", "Servicos profissionais da massa intensiva.");
-  const serviceSegment = await ensureSegment({ category: serviceCategory, icon: "construct", name: "Servicos Teste 50", slug: "teste50-servicos" });
+  const serviceCategory = await ensureCategory(
+    "Servicos",
+    "Prestadores e profissionais disponiveis na sua cidade.",
+    imageUrl("photo-1581578731548-c64695cc6952", 500),
+  );
+  const serviceSegment = await ensureSegment({ category: serviceCategory, icon: "construct", name: "Servicos", slug: "teste50-servicos" });
   const serviceDefinitions = [
     { description: "Entregas locais com aceite em tempo real.", icon: "bicycle", name: "Motoboy", operation: "ENTREGA_LOCAL", order: 1, requirements: { requiresDriverLicense: true, requiresPlate: true, requiresVehicle: true, vehicleKinds: ["MOTO"] }, slug: "motoboy" },
     { description: "Corridas de passageiros por moto com aceite em tempo real.", icon: "navigate", name: "Mototaxi", operation: "ENTREGA_LOCAL", order: 2, requirements: { requiresDriverLicense: true, requiresPlate: true, requiresVehicle: true, vehicleKinds: ["MOTO"] }, slug: "mototaxi" },
@@ -445,9 +547,9 @@ async function main() {
   const activeUsers = users.filter((user) => user.seedRole !== "vazio");
 
   const owners = users.filter((user) => user.seedRole === "lojista");
-  const storeNames = ["Mercado Avenida", "Sabor da Praca", "Casa Forte Utilidades", "Studio Bella", "Emporio Sertao", "Ponto do Lanche", "Constrular", "Beleza Viva"];
   const stores = [];
   for (const [index, owner] of owners.entries()) {
+    const storefront = storefronts[index];
     const merchant = await ensureMerchant(owner);
     const category = categories[index % categories.length];
     const segment = segments[index % segments.length];
@@ -457,11 +559,13 @@ async function main() {
         aceita_pagamento_online: true,
         aceita_qrcode: true,
         aberta_para_pedidos: true,
+        banner_url: storefront.bannerUrl,
         categoria_id: category.id,
-        descricao: `${storeNames[index]} com catalogo completo para testes.`,
+        descricao: storefront.description,
         email: owner.email,
+        logo_url: storefront.logoUrl,
         lojista_id: merchant.id,
-        nome: storeNames[index],
+        nome: storefront.name,
         segmento_venda_id: segment.id,
         slug,
         status: "ATIVA",
@@ -470,7 +574,18 @@ async function main() {
         visivel_no_app: true,
         whatsapp: owner.telefone,
       },
-      update: { aberta_para_pedidos: true, categoria_id: category.id, excluido_em: null, segmento_venda_id: segment.id, status: "ATIVA", visivel_no_app: true },
+      update: {
+        aberta_para_pedidos: true,
+        banner_url: storefront.bannerUrl,
+        categoria_id: category.id,
+        descricao: storefront.description,
+        excluido_em: null,
+        logo_url: storefront.logoUrl,
+        nome: storefront.name,
+        segmento_venda_id: segment.id,
+        status: "ATIVA",
+        visivel_no_app: true,
+      },
       where: { slug },
     });
     await prisma.enderecoLoja.upsert({
@@ -479,20 +594,23 @@ async function main() {
       where: { loja_id: store.id },
     });
     const products = [];
+    const catalog = catalogs[storefront.category];
     for (let productIndex = 1; productIndex <= 6; productIndex += 1) {
+      const [productName, productDescription, productPhotoId] = catalog[productIndex - 1];
       const sku = `T50-L${index + 1}-P${productIndex}`;
       const productData = {
         aceita_entrega: true,
         aceita_retirada: true,
-        descricao: `Produto ${productIndex} da loja ${storeNames[index]} para testar busca, carrinho e checkout.`,
+        descricao: productDescription,
         destaque: productIndex <= 2,
         estoque_controlado: true,
         estoque_quantidade: 50 + productIndex,
+        imagem_url: imageUrl(productPhotoId, 1000),
         loja_id: store.id,
-        nome: `${["Kit", "Combo", "Oferta", "Produto", "Selecao", "Especial"][productIndex - 1]} ${storeNames[index]}`,
+        nome: productName,
         ordem: productIndex,
         preco_centavos: BigInt(1290 + (index * 500) + (productIndex * 700)),
-        resumo_curto: "Item da massa intensiva de homologacao.",
+        resumo_curto: productDescription,
         sku,
         status: "ATIVO",
       };
@@ -503,6 +621,24 @@ async function main() {
     }
     stores.push({ ...store, merchantId: merchant.id, ownerUserId: owner.id, products });
   }
+
+  // Versoes anteriores desta seed criavam categorias visiveis com o sufixo
+  // "Teste 50". Depois de mover as lojas para categorias reais, escondemos
+  // esses registros antigos para limpar imediatamente a vitrine da busca.
+  await prisma.categoriaLoja.updateMany({
+    data: { excluido_em: now, status: "INATIVA" },
+    where: {
+      nome: {
+        in: [
+          "Mercado Teste 50",
+          "Restaurante Teste 50",
+          "Casa Teste 50",
+          "Beleza Teste 50",
+          "Servicos Teste 50",
+        ],
+      },
+    },
+  });
 
   const couriers = [];
   for (const [index, user] of users.filter((item) => item.seedRole === "entregador").entries()) {

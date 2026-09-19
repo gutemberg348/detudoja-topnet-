@@ -43,6 +43,7 @@
     "seed:test-50": "npm run seed:test-50 -w apps/api --",
     "seed:service-types": "npm run seed:service-types -w apps/api",
     "test:load-scenario": "npm run test:load-scenario -w apps/api",
+    "test:sicredi-multipag": "npm run test:sicredi-multipag -w apps/api",
     "media:curated": "npm run media:curated -w apps/api",
     "audit:business": "npm run audit:business -w apps/api",
     "reconcile:completed-orders": "npm run reconcile:completed-orders -w apps/api"
