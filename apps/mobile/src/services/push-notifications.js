@@ -39,6 +39,24 @@ export async function registerDeviceForPushNotifications(accessToken) {
   if (!Notifications) return null;
 
   if (Platform.OS === "android") {
+    await Notifications.setNotificationChannelAsync("general", {
+      importance: Notifications.AndroidImportance.HIGH,
+      name: "Mensagens e atualizacoes",
+      sound: "default",
+      vibrationPattern: [0, 180, 100, 180],
+    });
+    await Notifications.setNotificationChannelAsync("messages", {
+      importance: Notifications.AndroidImportance.HIGH,
+      name: "Conversas",
+      sound: "default",
+      vibrationPattern: [0, 180, 100, 180],
+    });
+    await Notifications.setNotificationChannelAsync("orders", {
+      importance: Notifications.AndroidImportance.HIGH,
+      name: "Pedidos e vendas",
+      sound: "default",
+      vibrationPattern: [0, 220, 120, 220],
+    });
     await Notifications.setNotificationChannelAsync("courier-calls", {
       importance: Notifications.AndroidImportance.MAX,
       name: "Chamadas de entrega",

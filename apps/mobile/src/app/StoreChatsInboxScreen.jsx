@@ -53,7 +53,9 @@ export function StoreChatsInboxScreen({ navigation, route }) {
       if (sellerResponse) {
         const availableStores = [
           ...(sellerResponse.stores ?? []),
-          ...(workplacesResponse?.workplaces ?? []).map((item) => item.store),
+          ...(workplacesResponse?.workplaces ?? [])
+            .filter((item) => item.permissions?.storeChats)
+            .map((item) => item.store),
         ].filter((item, index, all) => item?.id && all.findIndex((candidate) => candidate?.id === item.id) === index);
         setStores(availableStores);
       }

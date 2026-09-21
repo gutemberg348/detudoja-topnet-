@@ -22,7 +22,7 @@ export async function unregisterPushToken(userId, token) {
   await notificationsRepository.removeUserPushToken(userId, token);
 }
 
-export async function sendExpoPushToUsers({ body, data = {}, title, userIds }) {
+export async function sendExpoPushToUsers({ body, channelId = "general", data = {}, title, userIds }) {
   if (!env.push.enabled || !userIds?.length) return;
 
   try {
@@ -34,7 +34,7 @@ export async function sendExpoPushToUsers({ body, data = {}, title, userIds }) {
         body: JSON.stringify(deviceChunk.map((device) => ({
           body,
           ...(device.plataforma === "android"
-            ? { channelId: "courier-calls", priority: "high" }
+            ? { channelId, priority: "high" }
             : {}),
           data,
           sound: "default",

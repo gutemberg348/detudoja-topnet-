@@ -16,14 +16,17 @@ const conversationListInclude = {
   usuario_b: { select: personSelect },
 };
 
-const conversationDetailInclude = {
-  mensagens: {
-    orderBy: { criado_em: "desc" },
-    take: 100,
-  },
-  usuario_a: { select: personSelect },
-  usuario_b: { select: personSelect },
-};
+function conversationDetailInclude({ beforeMessageId = null, messageLimit = 51 } = {}) {
+  return {
+    mensagens: {
+      orderBy: { criado_em: "desc" },
+      take: messageLimit,
+      ...(beforeMessageId ? { where: { id: { lt: beforeMessageId } } } : {}),
+    },
+    usuario_a: { select: personSelect },
+    usuario_b: { select: personSelect },
+  };
+}
 
 export const personalChatsRepository = {
   createMessageRequest({ requesterId, text, userAId, userBId }) {
@@ -100,9 +103,9 @@ export const personalChatsRepository = {
     });
   },
 
-  findById(id) {
+  findById(id, page = {}) {
     return prisma.conversaPessoal.findUnique({
-      include: conversationDetailInclude,
+      include: conversationDetailInclude(page),
       where: { id },
     });
   },

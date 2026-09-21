@@ -39,6 +39,7 @@ export function createCourierRepository(database = prisma) {
     updateCourierRequest(args) { return database.solicitacaoMotoboy.update(args); },
     updateCourierRequests(args) { return database.solicitacaoMotoboy.updateMany(args); },
     upsertCourier(args) { return database.motoboy.upsert(args); },
+    upsertCourierRequestRejection(args) { return database.recusaSolicitacaoMotoboy.upsert(args); },
     upsertTeamMember(args) { return database.motoboyLoja.upsert(args); },
   };
 }

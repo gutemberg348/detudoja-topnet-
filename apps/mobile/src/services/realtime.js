@@ -2,6 +2,7 @@ import { io } from "socket.io-client";
 import { apiBaseUrl } from "./api";
 
 export const realtimeEvents = {
+  chatTyping: "chat.typing",
   chargeUpdated: "charge.updated",
   courierTeamUpdated: "courier.team.updated",
   courierRequestCreated: "courier.request.created",

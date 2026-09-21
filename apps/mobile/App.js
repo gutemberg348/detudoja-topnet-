@@ -24,6 +24,33 @@ import {
 import { CartStoreProvider, useCartStore } from "./src/stores/useCartStore";
 import { colors, fonts, radius, shadow, spacing } from "./src/utils/theme";
 
+function openPushNotification(data, attempt = 0) {
+  if (!data?.screen) return;
+  if (!navigationRef.isReady()) {
+    if (attempt < 8) setTimeout(() => openPushNotification(data, attempt + 1), 350);
+    return;
+  }
+
+  const conversationId = Number(data.conversationId) || undefined;
+  const orderId = Number(data.orderId) || undefined;
+  if (data.screen === "ServiceDesk") {
+    navigationRef.navigate("ServiceDesk", { courierRequestId: Number(data.requestId) || undefined });
+  } else if (data.screen === "PersonalConversation" && conversationId) {
+    navigationRef.navigate("PersonalConversation", { conversation: { id: conversationId } });
+  } else if (data.screen === "StoreConversation" && conversationId) {
+    navigationRef.navigate("StoreConversation", { conversation: { id: conversationId }, scope: data.scope });
+  } else if (data.screen === "ServiceConversation" && conversationId) {
+    navigationRef.navigate("ServiceConversation", { conversation: { id: conversationId } });
+  } else if (data.screen === "CustomerOrderDetails" && orderId) {
+    navigationRef.navigate("CustomerOrderDetails", { order: { id: orderId } });
+  } else if (data.screen === "SellerOrders") {
+    navigationRef.navigate("Main", {
+      params: { notificationOrderId: orderId, notificationStoreId: Number(data.storeId) || undefined },
+      screen: "Vender",
+    });
+  }
+}
+
 export function App() {
   return (
     <SafeAreaProvider>
@@ -84,13 +111,8 @@ function AppContent() {
 
   useEffect(() => {
     if (!session?.accessToken) return undefined;
-    const openNotification = (data) => {
-      if (data?.screen === "ServiceDesk" && navigationRef.isReady()) {
-        navigationRef.navigate("ServiceDesk", { courierRequestId: Number(data.requestId) || undefined });
-      }
-    };
-    const subscription = subscribePushNotificationResponses(openNotification);
-    getInitialPushNotificationData().then(openNotification).catch(() => {});
+    const subscription = subscribePushNotificationResponses(openPushNotification);
+    getInitialPushNotificationData().then(openPushNotification).catch(() => {});
     return () => subscription.remove();
   }, [session?.accessToken]);
 

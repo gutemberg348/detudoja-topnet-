@@ -749,18 +749,43 @@ function WorkProfilePanel({ invitations, navigation, onDecision, workplaces }) {
       ))}
       {workplaces.map((membership) => {
         const logoUrl = resolveMediaUrl(membership.store?.logoUrl);
+        const permissions = membership.permissions ?? {};
+        const operationalAccess = permissions.createCharges || permissions.manageOrders;
+        const accessLabels = [
+          permissions.storeChats ? "chats" : null,
+          permissions.createCharges ? "cobrancas" : null,
+          permissions.manageOrders ? "pedidos" : null,
+        ].filter(Boolean);
+        const openWorkplace = () => {
+          if (operationalAccess) {
+            navigation.navigate("Main", { screen: "Vender" });
+            return;
+          }
+          if (permissions.storeChats) {
+            navigation.navigate("StoreChatsInbox", {
+              scope: "seller",
+              store: membership.store,
+              storeId: membership.store?.id,
+            });
+          }
+        };
         return (
           <Pressable
+            disabled={!accessLabels.length}
             key={membership.id}
-            onPress={() => navigation.navigate("StoreChatsInbox", { scope: "seller", store: membership.store, storeId: membership.store?.id })}
+            onPress={openWorkplace}
             style={({ pressed }) => [styles.workStore, pressed && styles.pressed]}
           >
             <View style={styles.workLogo}>{logoUrl ? <Image source={{ uri: logoUrl }} style={styles.workLogoImage} /> : <Ionicons color={colors.primaryDark} name="storefront-outline" size={22} />}</View>
             <View style={styles.workCopy}>
               <Text numberOfLines={1} style={styles.workStoreName}>{membership.store?.name}</Text>
-              <Text style={styles.workText}>Atendente · tocar para entrar na loja</Text>
+              <Text style={styles.workText}>
+                {accessLabels.length
+                  ? `Acesso a ${accessLabels.join(", ")} · tocar para entrar`
+                  : "Aguardando permissoes do dono"}
+              </Text>
             </View>
-            <View style={styles.workEnter}><Ionicons color={colors.card} name="arrow-forward" size={18} /></View>
+            {accessLabels.length ? <View style={styles.workEnter}><Ionicons color={colors.card} name="arrow-forward" size={18} /></View> : null}
           </Pressable>
         );
       })}

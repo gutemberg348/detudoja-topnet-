@@ -4,6 +4,8 @@ import {
   listStoreConversations,
   openStoreConversation,
   trackStoreConversationActivity,
+  setStoreConversationTyping,
+  markStoreConversationRead,
 } from "./store-chats.service.js";
 
 export async function openStoreConversationController(req, res, next) {
@@ -32,7 +34,7 @@ export async function listStoreConversationsController(req, res, next) {
 export async function getStoreConversationController(req, res, next) {
   try {
     res.json(
-      await getStoreConversation(req.auth.user.id, req.params.conversationId),
+      await getStoreConversation(req.auth.user.id, req.params.conversationId, req.query),
     );
   } catch (error) {
     next(error);
@@ -61,6 +63,22 @@ export async function trackStoreConversationActivityController(req, res, next) {
       req.params.conversationId,
       req.body,
     ));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function setStoreConversationTypingController(req, res, next) {
+  try {
+    res.json(await setStoreConversationTyping(req.auth.user.id, req.params.conversationId, req.body?.isTyping));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function markStoreConversationReadController(req, res, next) {
+  try {
+    res.json(await markStoreConversationRead(req.auth.user.id, req.params.conversationId));
   } catch (error) {
     next(error);
   }

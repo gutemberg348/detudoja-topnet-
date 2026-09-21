@@ -62,6 +62,9 @@ export function SellerDashboard({
   const servicesFirst = serviceOperationCreated && stores.length === 0;
   const hasBothOperations = serviceOperationCreated && stores.length > 0;
   const openStoreCount = stores.filter((store) => store.openForOrders !== false).length;
+  const chatEnabledStoreCount = stores.filter(
+    (store) => store.access?.isOwner !== false || store.access?.permissions?.storeChats,
+  ).length;
   const storeChatUnreadCount = storeConversations.reduce(
     (total, conversation) => total + Number(conversation.unreadCount ?? 0),
     0,
@@ -217,7 +220,7 @@ export function SellerDashboard({
           label="Cobrar agora"
           onPress={onCreateSale}
         />
-        {stores.length ? (
+        {chatEnabledStoreCount ? (
           <CommandCard
             hint="Abra as conversas gerais das suas lojas"
             icon="chatbubbles-outline"

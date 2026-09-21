@@ -50,8 +50,12 @@ export function updateFriendAlias(token, conversationId, alias) {
   });
 }
 
-export function getPersonalConversation(token, conversationId) {
-  return apiRequest(`/api/app/personal-chats/${conversationId}`, { token });
+export function getPersonalConversation(token, conversationId, page = {}) {
+  const query = new URLSearchParams();
+  if (page.beforeMessageId) query.set("beforeMessageId", String(page.beforeMessageId));
+  if (page.limit) query.set("limit", String(page.limit));
+  const suffix = query.toString() ? `?${query}` : "";
+  return apiRequest(`/api/app/personal-chats/${conversationId}${suffix}`, { token });
 }
 
 export function sendPersonalMessage(token, conversationId, payload) {
@@ -59,5 +63,17 @@ export function sendPersonalMessage(token, conversationId, payload) {
     body: buildChatMessageFormData(payload),
     method: "POST",
     token,
+  });
+}
+
+export function setPersonalConversationTyping(token, conversationId, isTyping) {
+  return apiRequest(`/api/app/personal-chats/${conversationId}/typing`, {
+    body: { isTyping }, method: "POST", token,
+  });
+}
+
+export function markPersonalConversationRead(token, conversationId) {
+  return apiRequest(`/api/app/personal-chats/${conversationId}/read`, {
+    body: {}, method: "POST", token,
   });
 }

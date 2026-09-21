@@ -7,6 +7,8 @@ import {
   listStoreConversationsController,
   openStoreConversationController,
   trackStoreConversationActivityController,
+  setStoreConversationTypingController,
+  markStoreConversationReadController,
 } from "../modules/store-chats/store-chats.controller.js";
 import {
   createStoreChatMessageSchema,
@@ -18,6 +20,8 @@ export const storeChatsRoutes = Router();
 storeChatsRoutes.get("/", listStoreConversationsController);
 storeChatsRoutes.post("/stores/:storeId/open", openStoreConversationController);
 storeChatsRoutes.get("/:conversationId", getStoreConversationController);
+storeChatsRoutes.post("/:conversationId/typing", setStoreConversationTypingController);
+storeChatsRoutes.post("/:conversationId/read", markStoreConversationReadController);
 storeChatsRoutes.post(
   "/:conversationId/activity",
   validate(storeChatActivitySchema),

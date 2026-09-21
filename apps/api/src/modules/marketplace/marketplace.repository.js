@@ -195,7 +195,6 @@ export const marketplaceRepository = {
         where: {
           excluido_em: null,
           ...(matches ? { id: { in: matches.serviceTypeIds } } : {}),
-          modo_atendimento: "NEGOCIACAO_CHAT",
           slug: { not: "entregador" },
           status: "ATIVO",
           servicos_vendedor: {
@@ -271,7 +270,7 @@ export const marketplaceRepository = {
       prisma.$queryRawUnsafe(
         `SELECT id FROM tipos_servico
          WHERE excluido_em IS NULL AND status::text = 'ATIVO'
-           AND modo_atendimento::text = 'NEGOCIACAO_CHAT' AND slug <> 'entregador'
+           AND slug <> 'entregador'
            AND (${normalizedSql("nome")} LIKE ANY($1::text[])
              OR ${normalizedSql("descricao")} LIKE ANY($1::text[]))`,
         patterns,

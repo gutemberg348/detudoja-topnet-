@@ -14,6 +14,7 @@ import {
   getCustomerCourierRequestState,
   getStoreCourierDispatch,
   listCourierRequests,
+  rejectCourierRequest,
 } from "./courier-dispatch.service.js";
 
 export async function getCourierProfileController(req, res, next) {
@@ -82,6 +83,10 @@ export async function acceptCourierRequestController(req, res, next) {
 
 export async function cancelCourierRequestController(req, res, next) {
   try { res.json(await cancelCourierRequest(req.auth.user.id, req.params.requestId)); } catch (error) { next(error); }
+}
+
+export async function rejectCourierRequestController(req, res, next) {
+  try { res.json(await rejectCourierRequest(req.auth.user.id, req.params.requestId)); } catch (error) { next(error); }
 }
 
 export async function getCustomerCourierRequestStateController(req, res, next) {

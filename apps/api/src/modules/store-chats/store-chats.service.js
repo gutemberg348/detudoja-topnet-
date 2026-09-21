@@ -2,10 +2,13 @@ import {
   emitStoreChatCreated,
   emitStoreChatMessageCreated,
   emitStoreChatUpdated,
+  emitStoreChatTyping,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
 import { parsePositiveId } from "../../utils/ids.js";
 import { deletePrivateChatAttachment, savePrivateChatAttachment, serializeChatAttachment } from "../chat-media/chat-media.service.js";
+import { getStorePermissionUserIds, userHasStorePermission } from "../store-staff/store-permissions.js";
+import { sendExpoPushToUsers } from "../notifications/notifications.service.js";
 import { storeChatsRepository } from "./store-chats.repository.js";
 
 function ensureStoreChatPrismaClient() {
@@ -416,11 +419,7 @@ async function getConversationAccess(userId, conversationId) {
   }
 
   const isCustomer = conversation.cliente_usuario_id === userId;
-  const isStore =
-    conversation.loja.lojista.usuario_id === userId
-    || conversation.loja.usuarios.some(
-      (member) => member.usuario_id === userId && member.status === "ATIVO",
-    );
+  const isStore = userHasStorePermission(conversation.loja, userId, "storeChats");
 
   if (!isCustomer && !isStore) {
     throw new AppError("Voce nao pode acessar esta conversa", 403);
@@ -429,8 +428,10 @@ async function getConversationAccess(userId, conversationId) {
   return { conversation, isCustomer, isStore };
 }
 
-async function loadConversation(conversationId) {
-  return storeChatsRepository.loadConversation(conversationId);
+async function loadConversation(conversationId, page = {}) {
+  const conversation = await storeChatsRepository.loadConversation(conversationId, page);
+  if (conversation?.mensagens) conversation.mensagens.reverse();
+  return conversation;
 }
 
 export async function openStoreConversation(userId, storeIdValue) {
@@ -495,13 +496,22 @@ export async function listStoreConversations(
   };
 }
 
-export async function getStoreConversation(userId, conversationId) {
+export async function getStoreConversation(userId, conversationId, page = {}) {
   ensureStoreChatPrismaClient();
   const access = await getConversationAccess(userId, conversationId);
   const scope = access.isCustomer ? "customer" : "seller";
   const markedAsRead = await storeChatsRepository.markRead(access.conversation.id, scope);
 
-  const conversation = await loadConversation(access.conversation.id);
+  const limit = Math.min(100, Math.max(20, Number(page.limit) || 50));
+  const beforeMessageId = page.beforeMessageId
+    ? parsePositiveId(page.beforeMessageId, "Cursor de mensagem invalido")
+    : null;
+  const conversation = await loadConversation(access.conversation.id, {
+    beforeMessageId,
+    messageLimit: limit + 1,
+  });
+  const hasMore = conversation.mensagens.length > limit;
+  if (hasMore) conversation.mensagens.shift();
 
   if (markedAsRead > 0) {
     emitStoreChatUpdated({
@@ -517,7 +527,41 @@ export async function getStoreConversation(userId, conversationId) {
       includeMessages: true,
       scope,
     }),
+    messagePage: {
+      hasMore,
+      nextCursor: hasMore ? conversation.mensagens[0]?.id ?? null : null,
+    },
   };
+}
+
+export async function setStoreConversationTyping(userId, conversationId, isTyping) {
+  ensureStoreChatPrismaClient();
+  if (typeof isTyping !== "boolean") throw new AppError("Estado de digitacao invalido", 400);
+  const access = await getConversationAccess(userId, conversationId);
+  emitStoreChatTyping({
+    conversationId: access.conversation.id,
+    customerUserId: access.conversation.cliente_usuario_id,
+    isTyping,
+    senderUserId: userId,
+    storeId: access.conversation.loja_id,
+  });
+  return { ok: true };
+}
+
+export async function markStoreConversationRead(userId, conversationId) {
+  ensureStoreChatPrismaClient();
+  const access = await getConversationAccess(userId, conversationId);
+  const scope = access.isCustomer ? "customer" : "seller";
+  const count = await storeChatsRepository.markRead(access.conversation.id, scope);
+  if (count > 0) {
+    emitStoreChatUpdated({
+      conversationId: access.conversation.id,
+      customerUserId: access.conversation.cliente_usuario_id,
+      reason: "read",
+      storeId: access.conversation.loja_id,
+    });
+  }
+  return { count };
 }
 
 export async function createStoreConversationMessage(
@@ -554,8 +598,25 @@ export async function createStoreConversationMessage(
     conversationId: conversation.id,
     customerUserId: conversation.cliente_usuario_id,
     message: serializedMessage,
+    senderUserId: userId,
     storeId: conversation.loja_id,
   });
+  void (async () => {
+    const recipientUserIds = scope === "customer"
+      ? await getStorePermissionUserIds(conversation.loja_id, "storeChats")
+      : [conversation.cliente_usuario_id];
+    await sendExpoPushToUsers({
+      body: commercialMessage.message || (attachment ? "Novo anexo no atendimento" : "Nova mensagem"),
+      channelId: "messages",
+      data: {
+        conversationId: conversation.id,
+        scope: scope === "customer" ? "seller" : "customer",
+        screen: "StoreConversation",
+      },
+      title: scope === "customer" ? "Cliente no chat da loja" : conversation.loja.nome,
+      userIds: recipientUserIds.filter((id) => id !== userId),
+    });
+  })().catch(() => {});
 
   return {
     conversation: serializeConversation(conversation, userId, {

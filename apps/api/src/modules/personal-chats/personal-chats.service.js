@@ -2,10 +2,12 @@ import {
   emitPersonalChatCreated,
   emitPersonalChatMessageCreated,
   emitPersonalChatUpdated,
+  emitPersonalChatTyping,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
 import { deletePrivateChatAttachment, savePrivateChatAttachment, serializeChatAttachment } from "../chat-media/chat-media.service.js";
 import { parsePositiveId } from "../../utils/ids.js";
+import { sendExpoPushToUsers } from "../notifications/notifications.service.js";
 import { personalChatsRepository } from "./personal-chats.repository.js";
 
 function ensurePrismaClient() {
@@ -349,7 +351,7 @@ export async function updateFriendAlias(userId, conversationId, data) {
   return { conversation: serializeConversation(conversation, userId) };
 }
 
-export async function getPersonalChat(userId, conversationId) {
+export async function getPersonalChat(userId, conversationId, page = {}) {
   ensurePrismaClient();
   const access = await getConversationAccess(userId, conversationId, { active: true });
   const markedAsRead = await personalChatsRepository.markRead(
@@ -357,7 +359,17 @@ export async function getPersonalChat(userId, conversationId) {
     userId,
     access.viewerSide,
   );
-  const conversation = await personalChatsRepository.findById(access.conversation.id);
+  const limit = Math.min(100, Math.max(20, Number(page.limit) || 50));
+  const beforeMessageId = page.beforeMessageId
+    ? parsePositiveId(page.beforeMessageId, "Cursor de mensagem invalido")
+    : null;
+  const conversation = await personalChatsRepository.findById(access.conversation.id, {
+    beforeMessageId,
+    messageLimit: limit + 1,
+  });
+  const hasMore = conversation.mensagens.length > limit;
+  const pagedMessages = conversation.mensagens.slice(0, limit);
+  const pagedConversation = { ...conversation, mensagens: pagedMessages };
 
   if (markedAsRead > 0) {
     emitPersonalChatUpdated({
@@ -367,7 +379,40 @@ export async function getPersonalChat(userId, conversationId) {
     });
   }
 
-  return { conversation: serializeConversation(conversation, userId, true) };
+  return {
+    conversation: serializeConversation(pagedConversation, userId, true),
+    messagePage: {
+      hasMore,
+      nextCursor: hasMore ? pagedMessages.at(-1)?.id ?? null : null,
+    },
+  };
+}
+
+export async function setPersonalChatTyping(userId, conversationId, isTyping) {
+  ensurePrismaClient();
+  if (typeof isTyping !== "boolean") throw new AppError("Estado de digitacao invalido", 400);
+  const access = await getConversationAccess(userId, conversationId, { active: true });
+  emitPersonalChatTyping({
+    conversationId: access.conversation.id,
+    isTyping,
+    senderUserId: userId,
+    userIds: getParticipantIds(access.conversation),
+  });
+  return { ok: true };
+}
+
+export async function markPersonalChatRead(userId, conversationId) {
+  ensurePrismaClient();
+  const access = await getConversationAccess(userId, conversationId, { active: true });
+  const count = await personalChatsRepository.markRead(access.conversation.id, userId, access.viewerSide);
+  if (count > 0) {
+    emitPersonalChatUpdated({
+      conversationId: access.conversation.id,
+      reason: "read",
+      userIds: getParticipantIds(access.conversation),
+    });
+  }
+  return { count };
 }
 
 export async function createPersonalMessage(userId, conversationId, data, attachmentFile = null) {
@@ -400,7 +445,18 @@ export async function createPersonalMessage(userId, conversationId, data, attach
   emitPersonalChatMessageCreated({
     conversationId: conversation.id,
     message: serializedMessage,
+    senderUserId: userId,
     userIds: getParticipantIds(conversation),
+  });
+  const recipientId = getParticipantIds(conversation).find((id) => id !== userId);
+  void sendExpoPushToUsers({
+    body: data.message || (attachment ? "Enviou um anexo" : "Nova mensagem"),
+    channelId: "messages",
+    data: { conversationId: conversation.id, screen: "PersonalConversation" },
+    title: conversation.usuario_a_id === userId
+      ? conversation.usuario_a.nome
+      : conversation.usuario_b.nome,
+    userIds: recipientId ? [recipientId] : [],
   });
 
   return {

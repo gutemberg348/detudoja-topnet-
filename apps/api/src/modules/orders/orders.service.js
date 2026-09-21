@@ -38,6 +38,8 @@ import {
   getPaymentPolicy,
   resolvePaymentPolicy,
 } from "../earnings/order-earnings.config.js";
+import { sendExpoPushToUsers } from "../notifications/notifications.service.js";
+import { getStorePermissionUserIds } from "../store-staff/store-permissions.js";
 
 
 const orderInclude = {
@@ -73,6 +75,19 @@ const orderInclude = {
     orderBy: { criado_em: "asc" },
   },
 };
+
+function pushOrderToStore(order, { body, reason, title = "Novo pedido na loja" }) {
+  void (async () => {
+    const userIds = await getStorePermissionUserIds(order.loja_id, "manageOrders");
+    await sendExpoPushToUsers({
+      body,
+      channelId: "orders",
+      data: { orderId: order.id, reason, screen: "SellerOrders", storeId: order.loja_id },
+      title,
+      userIds: userIds.filter((id) => id !== order.usuario_id),
+    });
+  })().catch(() => {});
+}
 
 function paymentSourceForWallet(walletCode) {
   if (walletCode === "cashback") return "CASHBACK";
@@ -457,6 +472,10 @@ export async function createOnlineOrderRequest(userId, data, { idempotencyKey = 
 
   if (result.created) {
     emitOrderCreated(serializedOrder);
+    pushOrderToStore(result.order, {
+      body: `${result.order.comprador?.nome ?? "Um cliente"} enviou o pedido ${result.order.codigo}.`,
+      reason: "order-created",
+    });
   }
 
   return { order: serializedOrder, reused: !result.created };
@@ -575,12 +594,6 @@ export async function createCheckoutOrder(userId, data, { idempotencyKey = null 
     : 0;
   const balanceUsedCents = Math.min(Math.max(requestedBalanceCents, 0), totalCents);
   const pixComplementCents = Math.max(totalCents - balanceUsedCents, 0);
-  if (balanceUsedCents > 0 && pixComplementCents > 0) {
-    throw new AppError(
-      "No Pix externo, escolha pagar integralmente pelas carteiras ou integralmente por Pix",
-      400,
-    );
-  }
   if (pixComplementCents > 0 && !isAsaasEnabled()) {
     throw new AppError(
       "Pagamento Pix esta indisponivel no momento. Use suas carteiras ou tente novamente mais tarde.",
@@ -776,6 +789,10 @@ export async function createCheckoutOrder(userId, data, { idempotencyKey = null 
 
   if (result.created) {
     emitOrderCreated(serializedOrder);
+    pushOrderToStore(result.order, {
+      body: `${result.order.comprador?.nome ?? "Um cliente"} fez o pedido ${result.order.codigo}.`,
+      reason: "order-created",
+    });
   }
 
   return { gatewayPayment, order: serializedOrder, reused: !result.created };
@@ -1176,12 +1193,6 @@ export async function payCustomerOrderProposal(userId, orderId, proposalId, data
     : 0;
   const balanceUsedCents = Math.min(Math.max(requestedBalanceCents, 0), totalCents);
   const pixComplementCents = Math.max(totalCents - balanceUsedCents, 0);
-  if (balanceUsedCents > 0 && pixComplementCents > 0) {
-    throw new AppError(
-      "No Pix externo, escolha pagar integralmente pelas carteiras ou integralmente por Pix",
-      400,
-    );
-  }
   if (pixComplementCents > 0 && !isAsaasEnabled()) {
     throw new AppError(
       "Pagamento Pix esta indisponivel no momento. Use suas carteiras ou tente novamente mais tarde.",
@@ -1391,6 +1402,11 @@ export async function createCustomerOrderMessage(userId, orderId, data, attachme
     message: serializedMessage,
     orderId: order.id,
     storeId: order.loja_id,
+  });
+  pushOrderToStore(order, {
+    body: data.message || "O cliente enviou um anexo no pedido.",
+    reason: "order-message-created",
+    title: "Nova mensagem em um pedido",
   });
 
   return { message: serializedMessage };

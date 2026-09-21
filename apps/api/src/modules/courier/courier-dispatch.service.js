@@ -474,6 +474,7 @@ export async function listCourierRequests(userId) {
       solicitante_usuario_id: { not: userId },
       status: "PENDENTE",
       tipo_servico_id: { in: onlineTypeIds },
+      recusas: { none: { motoboy_id: courier.id } },
       OR: [
         { motoboy_direcionado_id: courier.id, tipo_chamada: "EQUIPE" },
         {
@@ -694,4 +695,68 @@ export async function cancelCourierRequest(userId, requestId) {
     ],
   });
   return { request: serializeRequest(updated) };
+}
+
+export async function rejectCourierRequest(userId, requestId) {
+  await courierRepository.requireCommercialTier2(userId);
+  const id = parseId(requestId, "Chamada invalida");
+  await expireCourierRequests({ id });
+  const courier = await courierRepository.findCourier({
+    where: {
+      status: "ATIVO",
+      vendedor: {
+        excluido_em: null,
+        status: "ATIVO",
+        status_kyc: "APROVADO",
+        usuario: { is: commercialTier2UserWhere },
+        usuario_id: userId,
+      },
+    },
+  });
+  if (!courier) throw new AppError("Perfil de transporte nao encontrado", 404);
+
+  const original = await courierRepository.findCourierRequest({
+    include: requestInclude,
+    where: { id },
+  });
+  if (!original || original.status !== "PENDENTE" || original.expira_em <= new Date()) {
+    throw new AppError("Esta chamada nao esta mais disponivel", 409);
+  }
+  if (original.solicitante_usuario_id === userId) {
+    throw new AppError("Voce nao pode recusar a propria chamada", 400);
+  }
+  if (original.tipo_chamada === "EQUIPE" && original.motoboy_direcionado_id !== courier.id) {
+    throw new AppError("Esta chamada pertence a outro profissional", 403);
+  }
+  if (original.tipo_chamada === "PLATAFORMA" && !canReceivePlatformCalls(courier, original.loja_id)) {
+    throw new AppError("Esta chamada nao esta disponivel para seu perfil", 403);
+  }
+
+  if (original.tipo_chamada === "EQUIPE") {
+    const updated = await courierRepository.transaction(async (database) => {
+      const repository = createCourierRepository(database);
+      const claimed = await repository.updateCourierRequests({
+        data: { cancelado_em: new Date(), status: "CANCELADA" },
+        where: { id, motoboy_direcionado_id: courier.id, status: "PENDENTE" },
+      });
+      if (claimed.count !== 1) throw new AppError("Esta chamada nao esta mais disponivel", 409);
+      return repository.findCourierRequestById({ include: requestInclude, where: { id } });
+    });
+    emitCourierRequestUpdated({
+      request: serializeRequest(updated),
+      targetUserIds: [userId, original.solicitante_usuario_id],
+    });
+    return { rejected: true, request: serializeRequest(updated) };
+  }
+
+  await courierRepository.upsertCourierRequestRejection({
+    create: { motoboy_id: courier.id, solicitacao_id: id },
+    update: { criado_em: new Date() },
+    where: { solicitacao_id_motoboy_id: { motoboy_id: courier.id, solicitacao_id: id } },
+  });
+  emitCourierRequestUpdated({
+    request: serializeRequest(original),
+    targetUserIds: [userId],
+  });
+  return { rejected: true, request: serializeRequest(original) };
 }

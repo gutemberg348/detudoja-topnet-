@@ -21,12 +21,16 @@ import { ChatComposer } from "../components/ChatComposer";
 import { ChatAttachment } from "../components/ChatAttachment";
 import { ChatMessageMeta } from "../components/ChatMessageMeta";
 import { ChatScrollToLatestButton } from "../components/ChatScrollToLatestButton";
+import { ChatTypingIndicator } from "../components/ChatTypingIndicator";
 import { ContactAvatar } from "../components/ContactAvatar";
 import { useChatTimeline } from "../hooks/useChatTimeline";
+import { useChatTyping } from "../hooks/useChatTyping";
 import {
   blockPersonalConversation,
   getPersonalConversation,
+  markPersonalConversationRead,
   sendPersonalMessage,
+  setPersonalConversationTyping,
   updateFriendAlias,
 } from "../services/personal-chats.api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
@@ -45,10 +49,18 @@ export function PersonalConversationScreen({ navigation, route }) {
   const [aliasOpen, setAliasOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(!initialConversation?.messages);
   const [isSending, setIsSending] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [messagePage, setMessagePage] = useState({ hasMore: true, nextCursor: null });
   const [error, setError] = useState("");
   const timeline = useChatTimeline({
-    itemCount: conversation?.messages?.length ?? 0,
+    latestMessageId: conversation?.messages?.at(-1)?.id,
+    latestMessageIsMine: conversation?.messages?.at(-1)?.isMine,
     scrollRef: listRef,
+  });
+  const typing = useChatTyping({
+    conversationId,
+    draft,
+    sendTyping: (isTyping) => setPersonalConversationTyping(session?.accessToken, conversationId, isTyping),
   });
 
   const load = useCallback(async () => {
@@ -57,6 +69,7 @@ export function PersonalConversationScreen({ navigation, route }) {
     try {
       const response = await getPersonalConversation(session.accessToken, conversationId);
       setConversation(response.conversation);
+      setMessagePage(response.messagePage ?? { hasMore: false, nextCursor: null });
       setAlias(response.conversation.alias ?? "");
       setError("");
     } catch (requestError) {
@@ -66,6 +79,27 @@ export function PersonalConversationScreen({ navigation, route }) {
     }
   }, [conversationId, session?.accessToken]);
 
+  const loadOlder = useCallback(async () => {
+    if (!session?.accessToken || !conversationId || loadingOlder || !messagePage.hasMore || !messagePage.nextCursor) return;
+    setLoadingOlder(true);
+    try {
+      const response = await getPersonalConversation(session.accessToken, conversationId, {
+        beforeMessageId: messagePage.nextCursor,
+      });
+      setConversation((current) => {
+        if (!current) return response.conversation;
+        const known = new Set((current.messages ?? []).map((item) => Number(item.id)));
+        const older = (response.conversation?.messages ?? []).filter((item) => !known.has(Number(item.id)));
+        return { ...current, messages: [...older, ...(current.messages ?? [])] };
+      });
+      setMessagePage(response.messagePage ?? { hasMore: false, nextCursor: null });
+    } catch (requestError) {
+      setError(requestError.message ?? "Nao foi possivel carregar mensagens antigas.");
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [conversationId, loadingOlder, messagePage.hasMore, messagePage.nextCursor, session?.accessToken]);
+
   useFocusEffect(useCallback(() => {
     load();
   }, [load]));
@@ -74,16 +108,38 @@ export function PersonalConversationScreen({ navigation, route }) {
     if (!session?.accessToken) return undefined;
     const socket = getRealtimeSocket(session.accessToken);
     const onMessage = (payload) => {
-      if (Number(payload?.conversationId) === Number(conversationId)) load();
+      if (Number(payload?.conversationId) !== Number(conversationId) || !payload?.message) return;
+      const message = {
+        ...payload.message,
+        isMine: Number(payload.senderUserId) === Number(session.user?.id),
+      };
+      setConversation((current) => {
+        if (!current || current.messages?.some((item) => Number(item.id) === Number(message.id))) return current;
+        return { ...current, lastMessage: message, messages: [...(current.messages ?? []), message] };
+      });
+      if (!message.isMine) void markPersonalConversationRead(session.accessToken, conversationId).catch(() => {});
     };
 
     socket?.on(realtimeEvents.personalChatMessageCreated, onMessage);
-    socket?.on(realtimeEvents.personalChatUpdated, onMessage);
+    const onUpdated = (payload = {}) => {
+      if (payload.reason === "read") {
+        const readAt = new Date().toISOString();
+        setConversation((current) => current
+          ? { ...current, messages: (current.messages ?? []).map((item) => item.isMine && !item.readAt ? { ...item, readAt } : item) }
+          : current);
+      } else load();
+    };
+    const onTyping = (payload) => {
+      if (payload?.scope === "personal" && Number(payload.senderUserId) !== Number(session.user?.id)) typing.receiveTyping(payload);
+    };
+    socket?.on(realtimeEvents.personalChatUpdated, onUpdated);
+    socket?.on(realtimeEvents.chatTyping, onTyping);
     return () => {
       socket?.off(realtimeEvents.personalChatMessageCreated, onMessage);
-      socket?.off(realtimeEvents.personalChatUpdated, onMessage);
+      socket?.off(realtimeEvents.personalChatUpdated, onUpdated);
+      socket?.off(realtimeEvents.chatTyping, onTyping);
     };
-  }, [conversationId, load, session?.accessToken]);
+  }, [conversationId, load, session?.accessToken, session?.user?.id, typing.receiveTyping]);
 
   async function sendMessage(payload = null) {
     const message = payload?.message ?? draft.trim();
@@ -98,7 +154,12 @@ export function PersonalConversationScreen({ navigation, route }) {
         conversationId,
         payload ?? message,
       );
-      setConversation(response.conversation);
+      setConversation((current) => {
+        if (!current) return response.conversation;
+        const messages = [...(current.messages ?? [])];
+        if (response.message && !messages.some((item) => Number(item.id) === Number(response.message.id))) messages.push(response.message);
+        return { ...current, ...response.conversation, messages };
+      });
     } catch (requestError) {
       if (!payload) setDraft(message);
       setError(requestError.message);
@@ -208,6 +269,8 @@ export function PersonalConversationScreen({ navigation, route }) {
               keyExtractor={(item) => String(item.id)}
               keyboardDismissMode="interactive"
               keyboardShouldPersistTaps="handled"
+              ListHeaderComponent={loadingOlder ? <ActivityIndicator color={colors.primary} size="small" /> : null}
+              ListFooterComponent={<ChatTypingIndicator visible={typing.isOtherTyping} />}
               ListEmptyComponent={(
                 <View style={styles.empty}>
                   <View style={styles.emptyIcon}>
@@ -218,7 +281,11 @@ export function PersonalConversationScreen({ navigation, route }) {
                 </View>
               )}
               onContentSizeChange={timeline.onContentSizeChange}
-              onScroll={timeline.onScroll}
+              onScroll={(event) => {
+                timeline.onScroll(event);
+                if (event.nativeEvent.contentOffset.y < 60) void loadOlder();
+              }}
+              maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
               ref={listRef}
               renderItem={({ item }) => <MessageBubble accessToken={session.accessToken} message={item} />}
               scrollEventThrottle={16}

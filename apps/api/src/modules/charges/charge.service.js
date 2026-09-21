@@ -6,7 +6,6 @@ import {
   emitWalletUpdated,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
-import { commercialTier2UserWhere } from "../../utils/commercial-access.js";
 import { chargeRepository, createChargeRepository } from "./charge.repository.js";
 import {
   getStoreCommissionDistribution,
@@ -36,8 +35,23 @@ import {
   submitPendingPayout,
 } from "../payouts/payout.service.js";
 import { isAsaasEnabled } from "../payments/asaas.client.js";
+import { storePermissionAccessWhere } from "../store-staff/store-permissions.js";
 
 const QR_EXPIRATION_MINUTES = 30;
+
+export async function assertUserIsNotStoreOperator(repository, store, userId) {
+  if (!store?.id) return;
+  if (store.lojista?.usuario_id === userId) {
+    throw new AppError("Nao e possivel pagar uma loja vinculada a sua conta", 409);
+  }
+  const membership = await repository.findStoreMember({
+    select: { id: true },
+    where: { loja_id: store.id, status: "ATIVO", usuario_id: userId },
+  });
+  if (membership) {
+    throw new AppError("Funcionarios ativos nao podem pagar a propria loja", 409);
+  }
+}
 
 const chargeInclude = {
   loja: {
@@ -385,10 +399,10 @@ async function expireChargeIfNeeded(repository, charge) {
 function generatedChargeAccessWhere(userId) {
   return {
     OR: [
-      { criador_usuario_id: userId },
+      { criador_usuario_id: userId, loja_id: null },
       {
         loja: {
-          lojista: { usuario_id: userId },
+          ...storePermissionAccessWhere(userId, "createCharges"),
         },
       },
     ],
@@ -426,7 +440,7 @@ async function findAccessibleStoreForCharges(userId, storeId) {
     where: {
       excluido_em: null,
       id,
-      lojista: { usuario_id: userId },
+      ...storePermissionAccessWhere(userId, "createCharges"),
     },
   });
 
@@ -438,10 +452,6 @@ async function findAccessibleStoreForCharges(userId, storeId) {
 }
 
 export async function createStoreQrCharge(userId, storeId, data) {
-  await Promise.all([
-    chargeRepository.requireCommercialTier2(userId),
-    chargeRepository.requireUserCpf(userId),
-  ]);
   const parsedStoreId = Number(storeId);
   const store = await chargeRepository.findStore({
     select: {
@@ -453,15 +463,18 @@ export async function createStoreQrCharge(userId, storeId, data) {
     where: {
       excluido_em: null,
       id: parsedStoreId,
-      lojista: {
-        is: {
-          status: "ATIVO",
-          status_kyc: "APROVADO",
-          usuario: { is: commercialTier2UserWhere },
-        },
-      },
       status: "ATIVA",
-      lojista: { usuario_id: userId },
+      AND: [
+        {
+          lojista: {
+            is: {
+              status: "ATIVO",
+              status_kyc: "APROVADO",
+            },
+          },
+        },
+        storePermissionAccessWhere(userId, "createCharges"),
+      ],
     },
   });
 
@@ -473,6 +486,7 @@ export async function createStoreQrCharge(userId, storeId, data) {
     throw new AppError("Esta loja esta com o pagamento por QR desativado", 409);
   }
 
+  await chargeRepository.requireCommercialTier2(store.lojista.usuario_id);
   await requireActivePayoutAccount(store.lojista.usuario_id);
 
   const seller = await chargeRepository.findSeller({
@@ -668,7 +682,17 @@ async function findStoreForPermanentQr(userId, storeId) {
     where: {
       excluido_em: null,
       id,
-      lojista: { usuario_id: userId },
+      AND: [
+        {
+          lojista: {
+            is: {
+              status: "ATIVO",
+              status_kyc: "APROVADO",
+            },
+          },
+        },
+        storePermissionAccessWhere(userId, "createCharges"),
+      ],
     },
   });
 
@@ -679,11 +703,8 @@ async function findStoreForPermanentQr(userId, storeId) {
     throw new AppError("Ative a loja e o recebimento por QR antes de gerar este codigo", 409);
   }
 
-  await Promise.all([
-    chargeRepository.requireCommercialTier2(userId),
-    chargeRepository.requireUserCpf(userId),
-    requireActivePayoutAccount(store.lojista.usuario_id),
-  ]);
+  await chargeRepository.requireCommercialTier2(store.lojista.usuario_id);
+  await requireActivePayoutAccount(store.lojista.usuario_id);
 
   return store;
 }
@@ -741,9 +762,7 @@ export async function getPermanentStoreQrForCustomer(userId, rawToken) {
   if (!store) {
     throw new AppError("QR permanente invalido ou desativado", 404);
   }
-  if (store.lojista.usuario_id === userId) {
-    throw new AppError("Use outro usuario para pagar a sua propria loja", 409);
-  }
+  await assertUserIsNotStoreOperator(chargeRepository, store, userId);
 
   return { store: serializePermanentStore(store) };
 }
@@ -755,6 +774,7 @@ export async function getChargeForCustomer(userId, rawCode) {
   if (charge.criador_usuario_id === userId) {
     throw new AppError("Use outro usuario para ler a sua propria cobranca", 409);
   }
+  await assertUserIsNotStoreOperator(chargeRepository, charge.loja, userId);
 
   return {
     charge: serializeCharge(charge, {
@@ -1014,6 +1034,7 @@ export async function payCharge(userId, rawCode, {
     if (charge.criador_usuario_id === userId) {
       throw new AppError("Nao e possivel pagar uma cobranca criada por voce", 409);
     }
+    await assertUserIsNotStoreOperator(repository, charge.loja, userId);
 
     const commercialReceiverUserId = charge.loja?.lojista?.usuario_id
       ?? charge.vendedor?.usuario_id;
@@ -1186,9 +1207,8 @@ export async function createPermanentStoreQrPayment(userId, rawToken, data) {
     },
   });
   if (!store) throw new AppError("QR permanente invalido ou desativado", 404);
-  if (store.lojista.usuario_id === userId) {
-    throw new AppError("Nao e possivel pagar a sua propria loja", 409);
-  }
+  await assertUserIsNotStoreOperator(chargeRepository, store, userId);
+  await chargeRepository.requireCommercialTier2(store.lojista.usuario_id);
   await requireActivePayoutAccount(store.lojista.usuario_id);
 
   const idempotencyKey = `store-qr:${userId}:${data.idempotencyKey}`;
@@ -1243,12 +1263,40 @@ export async function createPermanentStoreQrPayment(userId, rawToken, data) {
       },
     };
   }
+  if (
+    ["CANCELADA", "EXPIRADA"].includes(charge.status)
+    || ["CANCELADO", "FALHOU", "ESTORNADO"].includes(charge.pagamento?.status)
+  ) {
+    throw new AppError(
+      "A tentativa anterior foi encerrada com seguranca. Toque novamente para criar um novo pagamento.",
+      409,
+      { code: "PAYMENT_ATTEMPT_FINAL_FAILURE", retryWithNewKey: true },
+    );
+  }
   if (charge.status !== "ATIVA") {
     throw new AppError("Esta tentativa de pagamento nao esta mais disponivel", 409);
   }
 
-  return payCharge(userId, charge.codigo_publico, {
-    allowPixComplement: true,
-    useBalance: data.useBalance,
-  });
+  try {
+    return await payCharge(userId, charge.codigo_publico, {
+      allowPixComplement: true,
+      useBalance: data.useBalance,
+    });
+  } catch (error) {
+    const failedAttempt = await chargeRepository.findUniqueCharge({
+      include: chargeInclude,
+      where: { chave_idempotencia: idempotencyKey },
+    });
+    if (
+      ["CANCELADA", "EXPIRADA"].includes(failedAttempt?.status)
+      || ["CANCELADO", "FALHOU", "ESTORNADO"].includes(failedAttempt?.pagamento?.status)
+    ) {
+      throw new AppError(
+        "O gateway nao concluiu esta tentativa. Seu saldo foi liberado e voce ja pode tentar novamente.",
+        409,
+        { code: "PAYMENT_ATTEMPT_FINAL_FAILURE", retryWithNewKey: true },
+      );
+    }
+    throw error;
+  }
 }

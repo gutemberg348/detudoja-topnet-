@@ -16,6 +16,8 @@ import {
   listPersonalChatsController,
   lookupPersonalContactController,
   updateFriendAliasController,
+  setPersonalChatTypingController,
+  markPersonalChatReadController,
 } from "../modules/personal-chats/personal-chats.controller.js";
 import {
   createFriendInvitationSchema,
@@ -57,6 +59,8 @@ personalChatsRoutes.patch(
   updateFriendAliasController,
 );
 personalChatsRoutes.get("/:conversationId", getPersonalChatController);
+personalChatsRoutes.post("/:conversationId/typing", setPersonalChatTypingController);
+personalChatsRoutes.post("/:conversationId/read", markPersonalChatReadController);
 personalChatsRoutes.post(
   "/:conversationId/messages",
   personalMessageRateLimit,

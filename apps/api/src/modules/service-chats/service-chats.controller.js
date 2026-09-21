@@ -19,6 +19,8 @@ import {
   markServiceDelivered,
   registerSellerService,
   updateSellerService,
+  setServiceConversationTyping,
+  markServiceConversationRead,
 } from "./service-chats.service.js";
 
 export async function acceptServiceConversationController(req, res, next) {
@@ -67,7 +69,23 @@ export async function listServiceConversationsController(req, res, next) {
 
 export async function getServiceConversationController(req, res, next) {
   try {
-    res.json(await getServiceConversation(req.auth.user.id, req.params.conversationId));
+    res.json(await getServiceConversation(req.auth.user.id, req.params.conversationId, req.query));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function setServiceConversationTypingController(req, res, next) {
+  try {
+    res.json(await setServiceConversationTyping(req.auth.user.id, req.params.conversationId, req.body?.isTyping));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function markServiceConversationReadController(req, res, next) {
+  try {
+    res.json(await markServiceConversationRead(req.auth.user.id, req.params.conversationId));
   } catch (error) {
     next(error);
   }

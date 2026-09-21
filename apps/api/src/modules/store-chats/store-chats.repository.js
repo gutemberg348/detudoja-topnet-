@@ -1,5 +1,6 @@
 import { prisma } from "../../config/prisma.js";
 import { commercialTier2UserWhere } from "../../utils/commercial-access.js";
+import { storePermissionAccessWhere } from "../store-staff/store-permissions.js";
 
 const storeSelect = {
   banner_url: true,
@@ -54,21 +55,16 @@ const catalogStoreSelect = {
     select: { id: true, negocia_pedido_por_chat: true, nome: true, slug: true },
   },
 };
-const conversationDetailInclude = {
-  cliente: { select: customerSelect },
-  loja: { select: catalogStoreSelect },
-  mensagens: {
-    include: { autor: { select: customerSelect } },
-    orderBy: { criado_em: "asc" },
-  },
-};
-
-function storeAccessWhere(userId) {
+function conversationDetailInclude({ beforeMessageId = null, messageLimit = 51 } = {}) {
   return {
-    OR: [
-      { lojista: { usuario_id: userId } },
-      { usuarios: { some: { status: "ATIVO", usuario_id: userId } } },
-    ],
+    cliente: { select: customerSelect },
+    loja: { select: catalogStoreSelect },
+    mensagens: {
+      include: { autor: { select: customerSelect } },
+      orderBy: { criado_em: "desc" },
+      take: messageLimit,
+      ...(beforeMessageId ? { where: { id: { lt: beforeMessageId } } } : {}),
+    },
   };
 }
 
@@ -162,7 +158,14 @@ export const storeChatsRepository = {
         loja: {
           include: {
             lojista: { select: { usuario_id: true } },
-            usuarios: { select: { status: true, usuario_id: true } },
+            usuarios: {
+              select: {
+                cargo: true,
+                permissoes: true,
+                status: true,
+                usuario_id: true,
+              },
+            },
           },
         },
       },
@@ -225,7 +228,10 @@ export const storeChatsRepository = {
       where: isSeller
         ? {
             ...(storeId ? { loja_id: storeId } : {}),
-            loja: { excluido_em: null, ...storeAccessWhere(userId) },
+            loja: {
+              excluido_em: null,
+              ...storePermissionAccessWhere(userId, "storeChats"),
+            },
           }
         : {
             cliente_usuario_id: userId,
@@ -234,9 +240,9 @@ export const storeChatsRepository = {
     });
   },
 
-  loadConversation(conversationId) {
+  loadConversation(conversationId, page = {}) {
     return prisma.conversaLoja.findUnique({
-      include: conversationDetailInclude,
+      include: conversationDetailInclude(page),
       where: { id: conversationId },
     });
   },

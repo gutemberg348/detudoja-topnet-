@@ -44,8 +44,12 @@ export function createServiceConversation(token, sellerServiceOrData) {
   return apiRequest("/api/app/service-chats", { body, method: "POST", token });
 }
 
-export function getServiceConversation(token, conversationId) {
-  return apiRequest(`/api/app/service-chats/${conversationId}`, { token });
+export function getServiceConversation(token, conversationId, page = {}) {
+  const query = new URLSearchParams();
+  if (page.beforeMessageId) query.set("beforeMessageId", String(page.beforeMessageId));
+  if (page.limit) query.set("limit", String(page.limit));
+  const suffix = query.toString() ? `?${query}` : "";
+  return apiRequest(`/api/app/service-chats/${conversationId}${suffix}`, { token });
 }
 
 export function acceptServiceConversation(token, conversationId) {
@@ -120,5 +124,17 @@ export function cancelServiceConversation(token, conversationId) {
     body: {},
     method: "POST",
     token,
+  });
+}
+
+export function setServiceConversationTyping(token, conversationId, isTyping) {
+  return apiRequest(`/api/app/service-chats/${conversationId}/typing`, {
+    body: { isTyping }, method: "POST", token,
+  });
+}
+
+export function markServiceConversationRead(token, conversationId) {
+  return apiRequest(`/api/app/service-chats/${conversationId}/read`, {
+    body: {}, method: "POST", token,
   });
 }

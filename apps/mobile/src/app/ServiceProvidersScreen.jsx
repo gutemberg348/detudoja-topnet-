@@ -30,6 +30,7 @@ import {
 } from "../services/service-chats.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { resolveMediaUrl } from "../utils/media";
+import { formatarDinheiro } from "../utils/money";
 import { serviceIconName } from "../utils/service-icons";
 import {
   colors,
@@ -54,6 +55,7 @@ export function ServiceProvidersScreen({ navigation, route }) {
   const [sellers, setSellers] = useState([]);
   const courierPulse = useRef(new Animated.Value(0)).current;
   const isCourier = segment?.operationalType === "ENTREGA_LOCAL";
+  const isFixedPrice = segment?.mode === "PRECO_FIXO";
   const serviceName = segment?.name ?? "Servico";
   const serviceNameLower = serviceName.toLocaleLowerCase("pt-BR");
   const serviceIcon = serviceIconName(segment?.iconName, "navigate-outline");
@@ -541,13 +543,14 @@ export function ServiceProvidersScreen({ navigation, route }) {
             </View>
             <View style={styles.copy}>
               <Text style={styles.providerSectionTitle}>Escolha quem vai atender</Text>
-              <Text style={styles.providerSectionText}>Toque em um profissional para abrir a conversa.</Text>
+              <Text style={styles.providerSectionText}>{isFixedPrice ? "Compare os valores. O preco escolhido entra automaticamente no atendimento." : "Toque em um profissional para abrir a conversa."}</Text>
             </View>
           </View>
           <View style={styles.list}>
             {sellers.map((seller) => (
               <ProviderCard
                 isCourier={isCourier}
+                isFixedPrice={isFixedPrice}
                 key={seller.id}
                 loading={openingId === seller.id}
                 onPress={() => openConversation(seller)}
@@ -594,7 +597,7 @@ function WaitingStage({ active = false, done = false, icon, label, pulse }) {
   );
 }
 
-function ProviderCard({ isCourier, loading, onPress, seller }) {
+function ProviderCard({ isCourier, isFixedPrice, loading, onPress, seller }) {
   const courier = seller.courierProfile;
   const displayName = courier?.displayName ?? seller.name;
 
@@ -653,15 +656,23 @@ function ProviderCard({ isCourier, loading, onPress, seller }) {
           />
         </View>
       ) : (
-        <Text style={styles.rating}>
-          <Ionicons color={colors.warning} name="star" size={13} />{" "}
-          {seller.rating ? seller.rating.toFixed(1) : "Novo prestador"}
-        </Text>
+        <View style={styles.providerFactsRow}>
+          <Text style={styles.rating}>
+            <Ionicons color={colors.warning} name="star" size={13} />{" "}
+            {seller.rating ? seller.rating.toFixed(1) : "Novo prestador"}
+          </Text>
+          {isFixedPrice && seller.priceCents ? (
+            <View style={styles.fixedPricePill}>
+              <Text style={styles.fixedPriceLabel}>PRECO FIXO</Text>
+              <Text style={styles.fixedPriceValue}>{formatarDinheiro(seller.priceCents)}</Text>
+            </View>
+          ) : null}
+        </View>
       )}
 
       <View style={styles.cardAction}>
         <Text style={styles.cardActionText}>
-          {isCourier ? "Chamar corrida" : "Abrir conversa"}
+          {isCourier ? "Chamar corrida" : isFixedPrice && seller.priceCents ? `Contratar por ${formatarDinheiro(seller.priceCents)}` : "Abrir conversa"}
         </Text>
         {loading ? (
           <ActivityIndicator color={colors.primaryDark} size="small" />
@@ -822,6 +833,9 @@ const styles = StyleSheet.create({
     fontSize: 10,
   },
   facts: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
+  fixedPriceLabel: { color: colors.textMuted, fontFamily: fonts.extraBold, fontSize: 8 },
+  fixedPricePill: { alignItems: "flex-end", backgroundColor: colors.primarySoft, borderRadius: radius.md, gap: 1, paddingHorizontal: spacing.sm, paddingVertical: 5 },
+  fixedPriceValue: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: typography.small },
   list: { gap: spacing.sm },
   providerSection: { gap: spacing.md },
   providerSectionHeader: {
@@ -896,6 +910,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     gap: 3,
   },
+  providerFactsRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", gap: spacing.sm },
   waitingCard: {
     alignItems: "center",
     backgroundColor: colors.card,

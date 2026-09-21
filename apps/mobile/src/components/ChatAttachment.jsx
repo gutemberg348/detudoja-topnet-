@@ -294,29 +294,32 @@ function LocationAttachment({ attachment, isMine }) {
 
 export function ChatAttachment({ accessToken, attachment, isMine = false }) {
   if (!attachment?.type) return null;
-  if (attachment.type === "IMAGE") return <ImageAttachment accessToken={accessToken} attachment={attachment} />;
-  if (attachment.type === "VIDEO") return <VideoAttachment accessToken={accessToken} attachment={attachment} />;
-  if (attachment.type === "AUDIO") return <AudioAttachment accessToken={accessToken} attachment={attachment} isMine={isMine} />;
-  if (attachment.type === "LOCATION") return <LocationAttachment attachment={attachment} isMine={isMine} />;
+  let content = null;
+  if (attachment.type === "IMAGE") content = <ImageAttachment accessToken={accessToken} attachment={attachment} />;
+  if (attachment.type === "VIDEO") content = <VideoAttachment accessToken={accessToken} attachment={attachment} />;
+  if (attachment.type === "AUDIO") content = <AudioAttachment accessToken={accessToken} attachment={attachment} isMine={isMine} />;
+  if (attachment.type === "LOCATION") content = <LocationAttachment attachment={attachment} isMine={isMine} />;
+  if (content) return <View style={styles.attachment}>{content}</View>;
   return null;
 }
 
 const styles = StyleSheet.create({
-  audio: { alignItems: "center", flexDirection: "row", gap: spacing.sm, minWidth: 220, paddingVertical: 3 },
+  attachment: { alignSelf: "stretch", maxWidth: 252, minWidth: 0, width: "100%" },
+  audio: { alignItems: "center", flexDirection: "row", gap: spacing.sm, minWidth: 0, paddingVertical: 3, width: "100%" },
   audioButton: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.round, height: 42, justifyContent: "center", width: 42, ...shadowSoft },
   audioButtonMine: { backgroundColor: colors.card },
   audioCopy: { flex: 1, gap: 2 },
   audioFooter: { flexDirection: "row", justifyContent: "space-between" },
   audioLabel: { color: colors.textSecondary, fontFamily: fonts.semiBold, fontSize: 10 },
   audioTime: { color: colors.textMuted, fontFamily: fonts.medium, fontSize: 9 },
-  image: { borderRadius: radius.md, height: 210, width: 252 },
-  imageButton: { borderRadius: radius.md, overflow: "hidden", position: "relative" },
+  image: { aspectRatio: 1.2, borderRadius: radius.md, width: "100%" },
+  imageButton: { borderRadius: radius.md, overflow: "hidden", position: "relative", width: "100%" },
   imageExpand: { alignItems: "center", backgroundColor: "rgba(0,0,0,0.48)", borderRadius: radius.round, height: 30, justifyContent: "center", position: "absolute", right: 8, top: 8, width: 30 },
   mediaErrorText: { color: colors.danger, flex: 1, fontFamily: fonts.semiBold, fontSize: 10, lineHeight: 14 },
-  mediaState: { alignItems: "center", backgroundColor: colors.cardMuted, borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: spacing.sm, height: 116, justifyContent: "center", padding: spacing.md, width: 252 },
+  mediaState: { alignItems: "center", backgroundColor: colors.cardMuted, borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: spacing.sm, height: 116, justifyContent: "center", padding: spacing.md, width: "100%" },
   mediaStateCompact: { height: 54 },
   mediaStateText: { color: colors.textSecondary, fontFamily: fonts.medium, fontSize: 10 },
-  location: { backgroundColor: colors.primarySoft, borderRadius: radius.lg, gap: spacing.sm, minWidth: 252, overflow: "hidden", padding: spacing.sm },
+  location: { backgroundColor: colors.primarySoft, borderRadius: radius.lg, gap: spacing.sm, minWidth: 0, overflow: "hidden", padding: spacing.sm, width: "100%" },
   locationCopy: { gap: 2 },
   locationMine: { backgroundColor: "rgba(255,255,255,0.12)" },
   locationPulse: { backgroundColor: colors.primary, borderRadius: radius.round, height: 42, position: "absolute", width: 42 },
@@ -331,7 +334,7 @@ const styles = StyleSheet.create({
   roadOne: { backgroundColor: "rgba(255,255,255,0.88)", height: 12, position: "absolute", transform: [{ rotate: "-14deg" }], width: "125%" },
   roadTwo: { backgroundColor: "rgba(255,255,255,0.76)", height: 9, position: "absolute", transform: [{ rotate: "66deg" }], width: "75%" },
   textMine: { color: colors.card },
-  video: { borderRadius: radius.md, height: 210, overflow: "hidden", width: 252 },
+  video: { aspectRatio: 1.2, borderRadius: radius.md, overflow: "hidden", width: "100%" },
   viewer: { backgroundColor: "rgba(3,10,8,0.98)", flex: 1 },
   viewerAction: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.12)", borderRadius: radius.round, height: 42, justifyContent: "center", width: 42 },
   viewerHeader: { alignItems: "center", flexDirection: "row", gap: spacing.md, justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },

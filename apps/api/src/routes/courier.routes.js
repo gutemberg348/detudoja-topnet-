@@ -13,6 +13,7 @@ import {
   getCustomerCourierRequestStateController,
   getStoreCourierDispatchController,
   listCourierRequestsController,
+  rejectCourierRequestController,
 } from "../modules/courier/courier.controller.js";
 import {
   addStoreCourierSchema,
@@ -38,6 +39,7 @@ courierRoutes.get("/customer-requests", getCustomerCourierRequestStateController
 courierRoutes.post("/customer-requests", courierRequestCreateRateLimit, validate(createCustomerCourierRequestSchema), createCustomerCourierRequestController);
 courierRoutes.post("/requests/:requestId/accept", courierRequestAcceptRateLimit, acceptCourierRequestController);
 courierRoutes.post("/requests/:requestId/cancel", courierRequestCancelRateLimit, cancelCourierRequestController);
+courierRoutes.post("/requests/:requestId/reject", courierRequestCancelRateLimit, rejectCourierRequestController);
 courierRoutes.get("/stores/:storeId/dispatch", getStoreCourierDispatchController);
 courierRoutes.post("/stores/:storeId/requests", courierRequestCreateRateLimit, validate(createCourierRequestSchema), createCourierRequestController);
 courierRoutes.get("/stores/:storeId/team", listStoreCourierTeamController);

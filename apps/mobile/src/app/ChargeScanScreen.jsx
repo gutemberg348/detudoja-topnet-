@@ -1,6 +1,7 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
+import { useCallback, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { AppButton } from "../components/AppButton";
 import { ScreenContainer } from "../components/ScreenContainer";
@@ -15,8 +16,13 @@ function normalizeChargeCode(value) {
 
 function normalizeStoreQrToken(value) {
   const rawValue = String(value ?? "").trim();
-  const matched = rawValue.match(/DTJ:S:([A-Z0-9]{20,64})/i);
+  const matched = rawValue.match(/^DTJ:S:([A-Z0-9]{20,64})$/i);
 
+  return matched?.[1]?.toUpperCase() ?? null;
+}
+
+function scannedChargeCode(value) {
+  const matched = String(value ?? "").trim().match(/^DTJ:C:([A-Z0-9-]{8,64})$/i);
   return matched?.[1]?.toUpperCase() ?? null;
 }
 
@@ -25,21 +31,43 @@ export function ChargeScanScreen({ navigation }) {
   const [code, setCode] = useState("");
   const [hasRead, setHasRead] = useState(false);
   const [error, setError] = useState("");
+  const unlockTimerRef = useRef(null);
 
-  function openCharge(value) {
+  const resetScanner = useCallback(() => {
+    if (unlockTimerRef.current) {
+      clearTimeout(unlockTimerRef.current);
+      unlockTimerRef.current = null;
+    }
+    setHasRead(false);
+    setError("");
+  }, []);
+
+  useFocusEffect(useCallback(() => {
+    resetScanner();
+    return () => {
+      if (unlockTimerRef.current) clearTimeout(unlockTimerRef.current);
+    };
+  }, [resetScanner]));
+
+  function openCharge(value, { fromScanner = false } = {}) {
     const storeQrToken = normalizeStoreQrToken(value);
     if (storeQrToken) {
       navigation.navigate("ChargePayment", { storeQrToken });
-      return;
+      return true;
     }
-    const normalizedCode = normalizeChargeCode(value);
+    const normalizedCode = fromScanner
+      ? scannedChargeCode(value)
+      : normalizeChargeCode(value);
 
-    if (normalizedCode.length < 8) {
-      setError("Aponte a camera para um QR Brasil Cashback ou informe o codigo da cobranca.");
-      return;
+    if (!normalizedCode || normalizedCode.length < 8) {
+      setError(fromScanner
+        ? "Este QR nao pertence ao Brasil Cashback. Procure um QR com identificacao DTJ."
+        : "Informe um codigo de cobranca Brasil Cashback valido.");
+      return false;
     }
 
     navigation.navigate("ChargePayment", { code: normalizedCode });
+    return true;
   }
 
   function handleBarcodeScanned({ data }) {
@@ -48,7 +76,12 @@ export function ChargeScanScreen({ navigation }) {
     }
 
     setHasRead(true);
-    openCharge(data);
+    if (!openCharge(data, { fromScanner: true })) {
+      unlockTimerRef.current = setTimeout(() => {
+        setHasRead(false);
+        unlockTimerRef.current = null;
+      }, 1200);
+    }
   }
 
   return (
@@ -83,6 +116,15 @@ export function ChargeScanScreen({ navigation }) {
           <AppButton icon="camera-outline" onPress={requestPermission} title="Permitir camera" />
         </View>
       )}
+
+      {hasRead || error ? (
+        <AppButton
+          icon="scan-outline"
+          onPress={resetScanner}
+          title="Escanear novamente"
+          variant="outline"
+        />
+      ) : null}
 
       <View style={styles.manualCard}>
         <Text style={styles.manualTitle}>Ou informe o codigo</Text>

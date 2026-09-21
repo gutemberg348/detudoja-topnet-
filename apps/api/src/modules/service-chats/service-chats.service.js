@@ -4,6 +4,7 @@ import {
   emitServiceChatMessageCreated,
   emitServiceChatUpdated,
   emitWalletUpdated,
+  emitServiceChatTyping,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
 import { commercialTier2UserWhere } from "../../utils/commercial-access.js";
@@ -20,6 +21,7 @@ import {
   isCourierSellerBusy,
 } from "../courier/courier-availability.js";
 import { settlePaidAutonomousChargeEarnings } from "../earnings/order-earnings.service.js";
+import { sendExpoPushToUsers } from "../notifications/notifications.service.js";
 import {
   availableServiceWhere,
   isServiceAvailable,
@@ -188,7 +190,7 @@ const conversationInclude = {
   },
 };
 
-function serializeSeller(seller, { isOnline = false } = {}) {
+function serializeSeller(seller, { isOnline = false, priceCents = null } = {}) {
   return {
     courierProfile: seller.motoboy
       ? {
@@ -211,6 +213,7 @@ function serializeSeller(seller, { isOnline = false } = {}) {
     isOnline,
     name: seller.nome_publico,
     photoUrl: seller.usuario?.foto_url ?? null,
+    priceCents,
     rating: Number(seller.avaliacao_media ?? 0),
     userId: seller.usuario_id,
   };
@@ -351,6 +354,9 @@ function serializeConversation(conversation, viewerId, { includeMessages = false
           mode: conversation.servico_vendedor.tipo_servico.modo_atendimento,
           name: conversation.servico_vendedor.tipo_servico.nome,
           operationalType: conversation.servico_vendedor.tipo_servico.tipo_operacao,
+          priceCents: conversation.servico_vendedor.preco_centavos === null
+            ? null
+            : Number(conversation.servico_vendedor.preco_centavos),
           slug: conversation.servico_vendedor.tipo_servico.slug,
         }
       : null,
@@ -376,6 +382,19 @@ async function findAccessibleConversation(userId, conversationId) {
 
   if (!conversation) throw new AppError("Conversa nao encontrada", 404);
   return conversation;
+}
+
+async function findAccessibleConversationWithoutMessages(userId, conversationId) {
+  const id = parsePositiveId(conversationId, "Conversa invalida");
+  const conversation = await serviceChatsRepository.findConversation({
+    include: { ...conversationInclude, mensagens: false },
+    where: {
+      id,
+      OR: [{ cliente_usuario_id: userId }, { vendedor: { usuario_id: userId } }],
+    },
+  });
+  if (!conversation) throw new AppError("Conversa nao encontrada", 404);
+  return { ...conversation, mensagens: [] };
 }
 
 async function assertSellerCanOperateConversation(repository, conversation, userId) {
@@ -405,6 +424,21 @@ function notifyConversation(conversation, reason) {
     customerUserId: conversation.cliente_usuario_id ?? conversation.cliente?.id,
     reason,
     sellerUserId: conversation.vendedor?.usuario_id,
+  });
+}
+
+function pushServiceNotification(conversation, recipientUserId, body, reason) {
+  if (!recipientUserId) return;
+  void sendExpoPushToUsers({
+    body,
+    channelId: "messages",
+    data: {
+      conversationId: conversation.id,
+      reason,
+      screen: "ServiceConversation",
+    },
+    title: conversation.servico_vendedor?.tipo_servico?.nome ?? "Atendimento de servico",
+    userIds: [recipientUserId],
   });
 }
 
@@ -500,6 +534,7 @@ export async function listServiceTypes(userId, query = {}) {
     include: {
       servicos_vendedor: {
         select: {
+          preco_centavos: true,
           vendedor_id: true,
           vendedor: {
             select: {
@@ -524,7 +559,6 @@ export async function listServiceTypes(userId, query = {}) {
     orderBy: [{ ordem: "asc" }, { nome: "asc" }],
     where: {
       excluido_em: null,
-      modo_atendimento: "NEGOCIACAO_CHAT",
       slug: { notIn: legacyServiceTypeSlugs },
       status: "ATIVO",
       ...(["GERAL", "ENTREGA_LOCAL"].includes(operationalType)
@@ -537,6 +571,11 @@ export async function listServiceTypes(userId, query = {}) {
     types.flatMap((type) => type.servicos_vendedor.map((service) => service.vendedor_id)),
   );
   for (const type of types) {
+    if (type.modo_atendimento === "PRECO_FIXO") {
+      type.servicos_vendedor = type.servicos_vendedor.filter(
+        (service) => service.preco_centavos !== null && Number(service.preco_centavos) >= 100,
+      );
+    }
     if (type.tipo_operacao !== "ENTREGA_LOCAL") continue;
     type.servicos_vendedor = type.servicos_vendedor.filter(
       (service) => !busySellerIds.has(service.vendedor_id),
@@ -572,6 +611,9 @@ export async function listSellerServices(userId) {
       available: isOperationalServiceAvailable(byType.get(type.id), type.tipo_operacao),
       enabled: Boolean(byType.get(type.id)),
       registrationData: byType.get(type.id)?.dados_cadastro ?? null,
+      priceCents: byType.get(type.id)?.preco_centavos === null || byType.get(type.id)?.preco_centavos === undefined
+        ? null
+        : Number(byType.get(type.id).preco_centavos),
       sellerServiceId: byType.get(type.id)?.id ?? null,
     })),
   };
@@ -583,7 +625,6 @@ export async function listOnlineServiceProviders(userId, serviceTypeId, { storeI
     where: {
       excluido_em: null,
       id: typeId,
-      modo_atendimento: "NEGOCIACAO_CHAT",
       slug: { notIn: legacyServiceTypeSlugs },
       status: "ATIVO",
     },
@@ -635,6 +676,7 @@ export async function listOnlineServiceProviders(userId, serviceTypeId, { storeI
     : new Set();
   const availableServices = services
     .filter((service) => !busySellerIds.has(service.vendedor_id))
+    .filter((service) => type.modo_atendimento !== "PRECO_FIXO" || (service.preco_centavos !== null && Number(service.preco_centavos) >= 100))
     .filter((service) => (
       type.tipo_operacao !== "ENTREGA_LOCAL"
       || service.vendedor.motoboy?.aceita_chamadas_plataforma
@@ -648,7 +690,10 @@ export async function listOnlineServiceProviders(userId, serviceTypeId, { storeI
     },
     sellers: type.tipo_operacao === "ENTREGA_LOCAL" ? [] : availableServices
       .map((service) => ({
-      ...serializeSeller(service.vendedor, { isOnline: isServiceAvailable(service) }),
+      ...serializeSeller(service.vendedor, {
+        isOnline: isServiceAvailable(service),
+        priceCents: service.preco_centavos === null ? null : Number(service.preco_centavos),
+      }),
       sellerServiceId: service.id,
       })),
   };
@@ -677,11 +722,18 @@ export async function updateSellerService(userId, data) {
   const existingService = seller.servicos.find((service) => service.tipo_servico_id === type.id);
   const registration = data.registration ?? existingService?.dados_cadastro ?? null;
   if (data.available) validateServiceRegistration(type, registration, seller.motoboy);
+  const isFixedPrice = type.modo_atendimento === "PRECO_FIXO";
+  const priceCents = isFixedPrice
+    ? Number(data.priceCents ?? existingService?.preco_centavos ?? 0)
+    : null;
+  if (data.available && isFixedPrice && (!Number.isInteger(priceCents) || priceCents < 100)) {
+    throw new AppError("Informe o preco fixo deste servico antes de ficar online", 400);
+  }
 
   const availabilityUpdatedAt = data.available ? new Date() : null;
   const service = await serviceChatsRepository.upsertSellerService({
-    create: { categoria: type.nome, dados_cadastro: registration, descricao: type.descricao, disponibilidade_atualizada_em: availabilityUpdatedAt, disponivel_agora: data.available, nome: type.nome, preco_centavos: null, status: "ATIVO", tipo_servico_id: type.id, vendedor_id: seller.id },
-    update: { ...(data.registration ? { dados_cadastro: data.registration } : {}), disponibilidade_atualizada_em: availabilityUpdatedAt, disponivel_agora: data.available, status: "ATIVO" },
+    create: { categoria: type.nome, dados_cadastro: registration, descricao: type.descricao, disponibilidade_atualizada_em: availabilityUpdatedAt, disponivel_agora: data.available, nome: type.nome, preco_centavos: isFixedPrice ? BigInt(priceCents) : null, status: "ATIVO", tipo_servico_id: type.id, vendedor_id: seller.id },
+    update: { ...(data.registration ? { dados_cadastro: data.registration } : {}), ...(isFixedPrice && priceCents >= 100 ? { preco_centavos: BigInt(priceCents) } : {}), disponibilidade_atualizada_em: availabilityUpdatedAt, disponivel_agora: data.available, status: "ATIVO" },
     where: { vendedor_id_tipo_servico_id: { tipo_servico_id: type.id, vendedor_id: seller.id } },
   });
 
@@ -692,7 +744,7 @@ export async function updateSellerService(userId, data) {
     serviceTypeId: type.id,
   });
 
-  return { service: { available: service.disponivel_agora, id: service.id, serviceTypeId: type.id } };
+  return { service: { available: service.disponivel_agora, id: service.id, priceCents: service.preco_centavos === null ? null : Number(service.preco_centavos), serviceTypeId: type.id } };
 }
 
 export async function heartbeatSellerServices(userId) {
@@ -843,7 +895,7 @@ export async function createServiceConversation(userId, data) {
       excluido_em: null,
       id: sellerServiceId,
       status: "ATIVO",
-      tipo_servico: { excluido_em: null, modo_atendimento: "NEGOCIACAO_CHAT", status: "ATIVO" },
+      tipo_servico: { excluido_em: null, status: "ATIVO" },
       vendedor: {
         excluido_em: null,
         status: { in: publicSellerStatuses },
@@ -854,6 +906,13 @@ export async function createServiceConversation(userId, data) {
   });
 
   if (!sellerService?.tipo_servico) throw new AppError("Este servico nao esta disponivel agora", 409);
+  const isFixedPrice = sellerService.tipo_servico.modo_atendimento === "PRECO_FIXO";
+  const fixedPriceCents = sellerService.preco_centavos === null
+    ? 0
+    : Number(sellerService.preco_centavos);
+  if (isFixedPrice && fixedPriceCents < 100) {
+    throw new AppError("Este prestador ainda nao informou o preco fixo do servico", 409);
+  }
   if (sellerService.tipo_servico.tipo_operacao === "ENTREGA_LOCAL") {
     throw new AppError("Chame um motoboy pela central de entregas para aguardar o aceite", 409);
   }
@@ -910,6 +969,29 @@ export async function createServiceConversation(userId, data) {
           vendedor_id: sellerService.vendedor_id,
         },
       });
+      if (isFixedPrice) {
+        await repository.createProposal({
+          data: {
+            conversa_servico_id: conversation.id,
+            descricao: `Preco fixo de ${sellerService.tipo_servico.nome}`,
+            forma_pagamento: "ONLINE",
+            valor_centavos: BigInt(fixedPriceCents),
+            vendedor_id: sellerService.vendedor_id,
+          },
+        });
+        await repository.createMessage({
+          data: {
+            conversa_servico_id: conversation.id,
+            mensagem: `Preco fixo do servico: ${formatMoney(fixedPriceCents)}. O pagamento fica disponivel assim que o prestador aceitar.`,
+            origem: "SISTEMA",
+          },
+        });
+        const hydratedConversation = await repository.findConversation({
+          include: conversationInclude,
+          where: { id: conversation.id },
+        });
+        return { created: true, conversation: hydratedConversation };
+      }
       return { created: true, conversation };
     });
   } catch (error) {
@@ -926,6 +1008,12 @@ export async function createServiceConversation(userId, data) {
   if (result.created) {
     emitServiceChatCreated(serialized);
     notifyCourierAvailability(result.conversation, false);
+    pushServiceNotification(
+      result.conversation,
+      result.conversation.vendedor.usuario_id,
+      "Voce recebeu um novo chamado. Abra para aceitar ou recusar.",
+      "service-request-created",
+    );
   }
   return { conversation: serialized, reused: !result.created };
 }
@@ -984,15 +1072,18 @@ export async function listServiceConversations(userId) {
   return { conversations: conversations.map((item) => serializeConversation(item, userId)) };
 }
 
-export async function getServiceConversation(userId, conversationId) {
-  const conversation = await findAccessibleConversation(userId, conversationId);
+export async function getServiceConversation(userId, conversationId, page = {}) {
+  const conversation = await findAccessibleConversationWithoutMessages(userId, conversationId);
   const isSeller = conversation.vendedor.usuario_id === userId;
   const now = new Date();
-  const hasUnreadMessages = (conversation.mensagens ?? []).some((message) => (
-    isSeller
-      ? ["CLIENTE", "SISTEMA"].includes(message.origem) && !message.lido_vendedor_em
-      : ["VENDEDOR", "SISTEMA"].includes(message.origem) && !message.lido_cliente_em
-  ));
+  const hasUnreadMessages = await serviceChatsRepository.countMessages({
+    where: {
+      conversa_servico_id: conversation.id,
+      ...(isSeller
+        ? { origem: { in: ["CLIENTE", "SISTEMA"] }, lido_vendedor_em: null }
+        : { origem: { in: ["VENDEDOR", "SISTEMA"] }, lido_cliente_em: null }),
+    },
+  }) > 0;
   const needsSellerView = isSeller && !conversation.visualizado_vendedor_em;
 
   await serviceChatsRepository.updateCharges({
@@ -1026,11 +1117,61 @@ export async function getServiceConversation(userId, conversationId) {
     ]);
   }
 
-  const updatedConversation = await findAccessibleConversation(userId, conversation.id);
+  const updatedConversation = await findAccessibleConversationWithoutMessages(userId, conversation.id);
+  const limit = Math.min(100, Math.max(20, Number(page.limit) || 50));
+  const beforeMessageId = page.beforeMessageId
+    ? parsePositiveId(page.beforeMessageId, "Cursor de mensagem invalido")
+    : null;
+  const fetchedMessages = await serviceChatsRepository.findMessages({
+    orderBy: { criado_em: "desc" },
+    take: limit + 1,
+    where: {
+      conversa_servico_id: conversation.id,
+      ...(beforeMessageId ? { id: { lt: beforeMessageId } } : {}),
+    },
+  });
+  const hasMore = fetchedMessages.length > limit;
+  const pageMessages = fetchedMessages.slice(0, limit).reverse();
+  updatedConversation.mensagens = pageMessages;
   if (hasUnreadMessages || needsSellerView) {
     notifyConversation(updatedConversation, "read");
   }
-  return { conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
+  return {
+    conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }),
+    messagePage: {
+      hasMore,
+      nextCursor: hasMore ? pageMessages[0]?.id ?? null : null,
+    },
+  };
+}
+
+export async function setServiceConversationTyping(userId, conversationId, isTyping) {
+  if (typeof isTyping !== "boolean") throw new AppError("Estado de digitacao invalido", 400);
+  const conversation = await findAccessibleConversationWithoutMessages(userId, conversationId);
+  emitServiceChatTyping({
+    conversationId: conversation.id,
+    customerUserId: conversation.cliente_usuario_id,
+    isTyping,
+    senderUserId: userId,
+    sellerUserId: conversation.vendedor.usuario_id,
+  });
+  return { ok: true };
+}
+
+export async function markServiceConversationRead(userId, conversationId) {
+  const conversation = await findAccessibleConversationWithoutMessages(userId, conversationId);
+  const isSeller = conversation.vendedor.usuario_id === userId;
+  const count = await serviceChatsRepository.updateMessages({
+    data: isSeller ? { lido_vendedor_em: new Date() } : { lido_cliente_em: new Date() },
+    where: {
+      conversa_servico_id: conversation.id,
+      ...(isSeller
+        ? { origem: { in: ["CLIENTE", "SISTEMA"] }, lido_vendedor_em: null }
+        : { origem: { in: ["VENDEDOR", "SISTEMA"] }, lido_cliente_em: null }),
+    },
+  });
+  if (count.count > 0) notifyConversation(conversation, "read");
+  return { count: count.count };
 }
 
 export async function acceptServiceConversation(userId, conversationId) {
@@ -1057,7 +1198,9 @@ export async function acceptServiceConversation(userId, conversationId) {
         autor_usuario_id: userId,
         conversa_servico_id: conversation.id,
         lido_vendedor_em: now,
-        mensagem: "Chamado aceito. O chat foi liberado para a negociacao.",
+        mensagem: conversation.servico_vendedor?.tipo_servico?.modo_atendimento === "PRECO_FIXO"
+          ? "Chamado aceito. O chat foi liberado e o preco fixo ja esta disponivel para pagamento."
+          : "Chamado aceito. O chat foi liberado para a negociacao.",
         origem: "SISTEMA",
       },
     });
@@ -1065,6 +1208,12 @@ export async function acceptServiceConversation(userId, conversationId) {
 
   const updatedConversation = await findAccessibleConversation(userId, conversation.id);
   notifyConversation(updatedConversation, "service-request-accepted");
+  pushServiceNotification(
+    updatedConversation,
+    updatedConversation.cliente_usuario_id,
+    "O prestador aceitou seu chamado. O chat esta liberado.",
+    "service-request-accepted",
+  );
   return { conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
 }
 
@@ -1074,6 +1223,9 @@ export async function createServiceProposal(userId, conversationId, data) {
   const latestProposal = conversation.propostas?.at(-1) ?? null;
 
   if (!isSeller) throw new AppError("Somente o prestador pode enviar uma proposta", 403);
+  if (conversation.servico_vendedor?.tipo_servico?.modo_atendimento === "PRECO_FIXO") {
+    throw new AppError("Este servico usa o preco fixo cadastrado e nao aceita propostas manuais", 409);
+  }
   if (conversation.status !== "ACORDADA") {
     throw new AppError("Esta conversa nao aceita novas propostas", 409);
   }
@@ -1124,6 +1276,12 @@ export async function createServiceProposal(userId, conversationId, data) {
 
   const updatedConversation = await findAccessibleConversation(userId, conversation.id);
   notifyConversation(updatedConversation, "proposal-created");
+  pushServiceNotification(
+    updatedConversation,
+    updatedConversation.cliente_usuario_id,
+    `Nova proposta de ${formatMoney(data.amountCents)} para voce analisar.`,
+    "proposal-created",
+  );
   return {
     conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }),
     proposal: serializeProposal({ ...result, cobranca: null }),
@@ -1136,6 +1294,9 @@ export async function acceptServiceProposal(userId, conversationId, proposalId, 
   const isSeller = conversation.vendedor.usuario_id === userId;
 
   if (isSeller) throw new AppError("O cliente precisa aceitar a proposta", 403);
+  if (conversation.status !== "ACORDADA") {
+    throw new AppError("Aguarde o prestador aceitar o chamado antes de pagar", 409);
+  }
 
   const result = await serviceChatsRepository.transaction(async (database) => {
     const repository = createServiceChatsRepository(database);
@@ -1187,6 +1348,12 @@ export async function acceptServiceProposal(userId, conversationId, proposalId, 
 
   const updatedConversation = await findAccessibleConversation(userId, conversation.id);
   notifyConversation(updatedConversation, "proposal-accepted");
+  pushServiceNotification(
+    updatedConversation,
+    updatedConversation.vendedor.usuario_id,
+    "O cliente aceitou sua proposta. A cobranca esta pronta.",
+    "proposal-accepted",
+  );
   return {
     ...(await serializeChargeWithQr(result.charge)),
     conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }),
@@ -1199,6 +1366,9 @@ export async function declineServiceProposal(userId, conversationId, proposalId)
 
   if (conversation.vendedor.usuario_id === userId) {
     throw new AppError("O cliente precisa recusar a proposta", 403);
+  }
+  if (conversation.servico_vendedor?.tipo_servico?.modo_atendimento === "PRECO_FIXO") {
+    return cancelServiceConversation(userId, conversationId);
   }
 
   const result = await serviceChatsRepository.updateProposals({
@@ -1226,6 +1396,12 @@ export async function declineServiceProposal(userId, conversationId, proposalId)
   });
   const updatedConversation = await findAccessibleConversation(userId, conversation.id);
   notifyConversation(updatedConversation, "proposal-declined");
+  pushServiceNotification(
+    updatedConversation,
+    updatedConversation.vendedor.usuario_id,
+    "O cliente recusou a proposta. O chat continua aberto para negociar.",
+    "proposal-declined",
+  );
   return { conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
 }
 
@@ -1288,6 +1464,12 @@ export async function cancelServiceConversation(userId, conversationId) {
 
   const updatedConversation = await findAccessibleConversation(userId, conversation.id);
   notifyConversation(updatedConversation, "service-cancelled");
+  pushServiceNotification(
+    updatedConversation,
+    isSeller ? updatedConversation.cliente_usuario_id : updatedConversation.vendedor.usuario_id,
+    isCourierRide ? "A corrida foi cancelada." : "O atendimento foi cancelado.",
+    "service-cancelled",
+  );
   notifyCourierAvailability(
     updatedConversation,
     isOperationalServiceAvailable(updatedConversation.servico_vendedor)
@@ -1333,6 +1515,12 @@ export async function markServiceDelivered(userId, conversationId) {
   });
   const updatedConversation = await findAccessibleConversation(userId, conversation.id);
   notifyConversation(updatedConversation, "service-delivered");
+  pushServiceNotification(
+    updatedConversation,
+    updatedConversation.cliente_usuario_id,
+    "O prestador marcou o servico como realizado. Confirme o recebimento.",
+    "service-delivered",
+  );
   return { conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
 }
 
@@ -1406,6 +1594,12 @@ export async function confirmServiceCompletion(userId, conversationId) {
     userIds: result.earnings.walletUserIds,
   });
   notifyConversation(updatedConversation, "service-completed");
+  pushServiceNotification(
+    updatedConversation,
+    updatedConversation.vendedor.usuario_id,
+    "O cliente confirmou o servico. Atendimento concluido.",
+    "service-completed",
+  );
   notifyCourierAvailability(
     updatedConversation,
     isOperationalServiceAvailable(updatedConversation.servico_vendedor)
@@ -1472,7 +1666,13 @@ export async function createServiceConversationMessage(userId, conversationId, d
     });
     const serializedConversation = serializeConversation(savedConversation, userId, { includeMessages: true });
     const serializedMessage = serializeMessage(message, userId);
-    emitServiceChatMessageCreated({ conversation: serializedConversation, message: serializedMessage });
+    emitServiceChatMessageCreated({ conversation: serializedConversation, message: serializedMessage, senderUserId: userId });
+    pushServiceNotification(
+      savedConversation,
+      isSeller ? savedConversation.cliente_usuario_id : savedConversation.vendedor.usuario_id,
+      text || "Enviou um anexo",
+      "message-created",
+    );
     return { message: serializedMessage };
   } catch (error) {
     await deletePrivateChatAttachment(attachment);
@@ -1521,6 +1721,12 @@ export async function createServiceConversationLocation(userId, conversationId, 
   });
   const serializedConversation = serializeConversation(savedConversation, userId, { includeMessages: true });
   const serializedMessage = serializeMessage(message, userId);
-  emitServiceChatMessageCreated({ conversation: serializedConversation, message: serializedMessage });
+  emitServiceChatMessageCreated({ conversation: serializedConversation, message: serializedMessage, senderUserId: userId });
+  pushServiceNotification(
+    savedConversation,
+    isSeller ? savedConversation.cliente_usuario_id : savedConversation.vendedor.usuario_id,
+    "Enviou um endereco no atendimento.",
+    "location-created",
+  );
   return { message: serializedMessage };
 }

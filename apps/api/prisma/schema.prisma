@@ -1481,10 +1481,11 @@ model Motoboy {
   criado_em                  DateTime      @default(now()) @db.Timestamptz(3)
   atualizado_em              DateTime      @updatedAt @db.Timestamptz(3)
 
-  vendedor                  Vendedor             @relation(fields: [vendedor_id], references: [id], onDelete: Cascade)
+  vendedor                  Vendedor                   @relation(fields: [vendedor_id], references: [id], onDelete: Cascade)
   lojas                     MotoboyLoja[]
-  solicitacoes_direcionadas SolicitacaoMotoboy[] @relation("SolicitacaoMotoboyDirecionado")
-  solicitacoes_aceitas      SolicitacaoMotoboy[] @relation("SolicitacaoMotoboyAceite")
+  solicitacoes_direcionadas SolicitacaoMotoboy[]       @relation("SolicitacaoMotoboyDirecionado")
+  solicitacoes_aceitas      SolicitacaoMotoboy[]       @relation("SolicitacaoMotoboyAceite")
+  recusas                   RecusaSolicitacaoMotoboy[]
 
   @@index([cidade_base, estado_base, status])
   @@index([placa])
@@ -1528,13 +1529,14 @@ model SolicitacaoMotoboy {
   criado_em              DateTime                 @default(now()) @db.Timestamptz(3)
   atualizado_em          DateTime                 @updatedAt @db.Timestamptz(3)
 
-  loja                Loja?            @relation("LojaChamadasMotoboy", fields: [loja_id], references: [id], onDelete: Restrict)
-  solicitante         Usuario          @relation("UsuarioSolicitacoesMotoboy", fields: [solicitante_usuario_id], references: [id], onDelete: Restrict)
-  tipo_servico        TipoServico      @relation(fields: [tipo_servico_id], references: [id], onDelete: Restrict)
-  pedido_loja         PedidoLoja?      @relation("PedidoSolicitacoesMotoboy", fields: [pedido_loja_id], references: [id], onDelete: SetNull)
-  motoboy_direcionado Motoboy?         @relation("SolicitacaoMotoboyDirecionado", fields: [motoboy_direcionado_id], references: [id], onDelete: SetNull)
-  motoboy_aceite      Motoboy?         @relation("SolicitacaoMotoboyAceite", fields: [motoboy_aceite_id], references: [id], onDelete: SetNull)
-  conversa_servico    ConversaServico? @relation("SolicitacaoMotoboyConversa", fields: [conversa_servico_id], references: [id], onDelete: SetNull)
+  loja                Loja?                      @relation("LojaChamadasMotoboy", fields: [loja_id], references: [id], onDelete: Restrict)
+  solicitante         Usuario                    @relation("UsuarioSolicitacoesMotoboy", fields: [solicitante_usuario_id], references: [id], onDelete: Restrict)
+  tipo_servico        TipoServico                @relation(fields: [tipo_servico_id], references: [id], onDelete: Restrict)
+  pedido_loja         PedidoLoja?                @relation("PedidoSolicitacoesMotoboy", fields: [pedido_loja_id], references: [id], onDelete: SetNull)
+  motoboy_direcionado Motoboy?                   @relation("SolicitacaoMotoboyDirecionado", fields: [motoboy_direcionado_id], references: [id], onDelete: SetNull)
+  motoboy_aceite      Motoboy?                   @relation("SolicitacaoMotoboyAceite", fields: [motoboy_aceite_id], references: [id], onDelete: SetNull)
+  conversa_servico    ConversaServico?           @relation("SolicitacaoMotoboyConversa", fields: [conversa_servico_id], references: [id], onDelete: SetNull)
+  recusas             RecusaSolicitacaoMotoboy[]
 
   @@index([loja_id, status])
   @@index([solicitante_usuario_id, status])
@@ -1544,6 +1546,20 @@ model SolicitacaoMotoboy {
   @@index([pedido_loja_id])
   @@index([expira_em])
   @@map("solicitacoes_motoboy")
+}
+
+model RecusaSolicitacaoMotoboy {
+  id             Int      @id @default(autoincrement())
+  solicitacao_id Int
+  motoboy_id     Int
+  criado_em      DateTime @default(now()) @db.Timestamptz(3)
+
+  solicitacao SolicitacaoMotoboy @relation(fields: [solicitacao_id], references: [id], onDelete: Cascade)
+  motoboy     Motoboy            @relation(fields: [motoboy_id], references: [id], onDelete: Cascade)
+
+  @@unique([solicitacao_id, motoboy_id])
+  @@index([motoboy_id, criado_em])
+  @@map("recusas_solicitacao_motoboy")
 }
 
 model ConversaServicoMensagem {

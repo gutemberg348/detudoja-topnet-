@@ -71,13 +71,18 @@ export function StoreManagerPanel({
   const [activeTab, setActiveTab] = useState("orders");
   const [mediaErrors, setMediaErrors] = useState({ banner: false, logo: false });
   const [referralOpen, setReferralOpen] = useState(false);
+  const access = store?.access;
+  const isOwner = access?.isOwner !== false;
+  const canCreateCharges = isOwner || access?.permissions?.createCharges === true;
+  const canManageOrders = isOwner || access?.permissions?.manageOrders === true;
+  const canUseStoreChats = isOwner || access?.permissions?.storeChats === true;
 
   useEffect(() => {
     if (store?.id) {
-      setActiveTab("orders");
+      setActiveTab(canManageOrders ? "orders" : canCreateCharges ? "sales" : "access");
       setMediaErrors({ banner: false, logo: false });
     }
-  }, [store?.id]);
+  }, [canCreateCharges, canManageOrders, store?.id]);
 
   if (!store) {
     return null;
@@ -102,28 +107,30 @@ export function StoreManagerPanel({
       <View style={styles.workspaceTopbar}>
         <BackHeader onPress={onBack} title="Voltar" />
         <View style={styles.workspaceTopbarActions}>
-          <Pressable
-            accessibilityLabel={`Abrir conversas de ${store.name}`}
-            onPress={onOpenStoreChats}
-            style={({ pressed }) => [
-              styles.workspaceChatButton,
-              chatUnreadCount > 0 && styles.workspaceChatButtonUnread,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Ionicons
-              color={chatUnreadCount > 0 ? "#92400E" : colors.primaryDark}
-              name="chatbubbles-outline"
-              size={20}
-            />
-            {chatUnreadCount > 0 ? (
-              <View style={styles.workspaceChatBadge}>
-                <Text style={styles.workspaceChatBadgeText}>
-                  {chatUnreadCount > 9 ? "9+" : chatUnreadCount}
-                </Text>
-              </View>
-            ) : null}
-          </Pressable>
+          {canUseStoreChats ? (
+            <Pressable
+              accessibilityLabel={`Abrir conversas de ${store.name}`}
+              onPress={onOpenStoreChats}
+              style={({ pressed }) => [
+                styles.workspaceChatButton,
+                chatUnreadCount > 0 && styles.workspaceChatButtonUnread,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Ionicons
+                color={chatUnreadCount > 0 ? "#92400E" : colors.primaryDark}
+                name="chatbubbles-outline"
+                size={20}
+              />
+              {chatUnreadCount > 0 ? (
+                <View style={styles.workspaceChatBadge}>
+                  <Text style={styles.workspaceChatBadgeText}>
+                    {chatUnreadCount > 9 ? "9+" : chatUnreadCount}
+                  </Text>
+                </View>
+              ) : null}
+            </Pressable>
+          ) : null}
           <View style={[styles.workspaceStatusPill, !storeIsActive && styles.workspaceStatusPillInactive]}>
             <View style={[styles.workspaceStatusDot, !storeIsActive && styles.workspaceStatusDotInactive]} />
             <Text style={[styles.workspaceStatusText, !storeIsActive && styles.workspaceStatusTextInactive]}>
@@ -192,7 +199,7 @@ export function StoreManagerPanel({
         </View>
       </View>
 
-      <View
+      {isOwner ? <><View
         style={[
           styles.availabilityCard,
           store.openForOrders === false && styles.availabilityCardClosed,
@@ -246,7 +253,7 @@ export function StoreManagerPanel({
         </View>
         <Text style={styles.scheduleSummaryAction}>Editar</Text>
         <Ionicons color={colors.primaryDark} name="chevron-forward" size={17} />
-      </Pressable>
+      </Pressable></> : null}
 
       <View style={styles.managerMetrics}>
         <ManagerMetric
@@ -273,44 +280,44 @@ export function StoreManagerPanel({
       </View>
 
       <View style={styles.managerActionGrid}>
-        <ManagerAction
+        {canCreateCharges ? <ManagerAction
           icon="print-outline"
           label="QR permanente"
           onPress={() => onOpenPermanentQr?.(store)}
-        />
-        <ManagerAction
+        /> : null}
+        {canCreateCharges ? <ManagerAction
           icon="qr-code-outline"
           label="Nova cobranca"
           onPress={() => onCreateCharge(store)}
-        />
-        <ManagerAction
+        /> : null}
+        {isOwner ? <ManagerAction
           icon="create-outline"
           label="Editar dados"
           onPress={() => onEditStore(store)}
-        />
-        <ManagerAction
+        /> : null}
+        {isOwner ? <ManagerAction
           icon="images-outline"
           label="Identidade visual"
           onPress={() => onEditMedia(store)}
-        />
-        <ManagerAction
+        /> : null}
+        {isOwner ? <ManagerAction
           icon="add-circle-outline"
           label="Novo produto"
           onPress={() => onNewProduct(store)}
-        />
-        <ManagerAction
+        /> : null}
+        {isOwner ? <ManagerAction
           icon="share-social-outline"
           label="Indicar loja"
           onPress={() => setReferralOpen(true)}
-        />
-        <ManagerAction
+        /> : null}
+        {isOwner ? <ManagerAction
           icon="people-circle-outline"
           label="Funcionarios"
           onPress={onManageTeam}
-        />
+        /> : null}
       </View>
 
-      <View style={styles.courierHub}>
+      {isOwner ? <View style={styles.courierHub}>
         <View style={styles.courierHubHeader}>
           <View style={styles.courierActionIcon}>
             <Ionicons color={colors.card} name="bicycle-outline" size={22} />
@@ -339,35 +346,35 @@ export function StoreManagerPanel({
             <Text style={styles.courierSecondaryActionText}>Equipe</Text>
           </Pressable>
         </View>
-      </View>
+      </View> : null}
 
       {error ? <Text style={styles.modalError}>{error}</Text> : null}
 
       <View style={styles.storeManagerTabs}>
-        <StoreManagerTab
+        {canManageOrders ? <StoreManagerTab
           active={activeTab === "orders"}
           badge={activeOrdersCount}
           icon="receipt-outline"
           label="CRM"
           onPress={() => setActiveTab("orders")}
-        />
-        <StoreManagerTab
+        /> : null}
+        {isOwner ? <StoreManagerTab
           active={activeTab === "products"}
           badge={products.length}
           icon="cube-outline"
           label="Produtos"
           onPress={() => setActiveTab("products")}
-        />
-        <StoreManagerTab
+        /> : null}
+        {canCreateCharges ? <StoreManagerTab
           active={activeTab === "sales"}
           badge={store.chargesCount ?? 0}
           icon="bar-chart-outline"
           label="Financeiro"
           onPress={() => setActiveTab("sales")}
-        />
+        /> : null}
       </View>
 
-      {activeTab === "orders" ? (
+      {activeTab === "orders" && canManageOrders ? (
         <StoreCrmPanel
           accessToken={accessToken}
           isSaving={isSaving}
@@ -376,7 +383,7 @@ export function StoreManagerPanel({
           orders={orders}
           store={store}
         />
-      ) : activeTab === "products" ? (
+      ) : activeTab === "products" && isOwner ? (
         <StoreProductsPanel
           isSaving={isSaving}
           onDeleteProduct={onDeleteProduct}
@@ -386,20 +393,20 @@ export function StoreManagerPanel({
           products={products}
           store={store}
         />
-      ) : (
+      ) : activeTab === "sales" && canCreateCharges ? (
         <StoreSalesPanel
           accessToken={accessToken}
           onOpenCharge={onOpenCharge}
           store={store}
         />
-      )}
+      ) : null}
 
-      <StoreReferralModal
+      {isOwner ? <StoreReferralModal
         accessToken={accessToken}
         onClose={() => setReferralOpen(false)}
         open={referralOpen}
         store={store}
-      />
+      /> : null}
     </View>
   );
 }

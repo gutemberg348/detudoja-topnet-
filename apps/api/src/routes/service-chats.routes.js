@@ -20,6 +20,8 @@ import {
   markServiceDeliveredController,
   registerSellerServiceController,
   updateSellerServiceController,
+  setServiceConversationTypingController,
+  markServiceConversationReadController,
 } from "../modules/service-chats/service-chats.controller.js";
 import {
   acceptServiceProposalSchema,
@@ -49,6 +51,8 @@ serviceChatsRoutes.patch("/seller-services", validate(updateSellerServiceSchema)
 serviceChatsRoutes.post("/seller-services/heartbeat", serviceAvailabilityHeartbeatRateLimit, heartbeatSellerServicesController);
 serviceChatsRoutes.post("/", validate(createServiceConversationSchema), createServiceConversationController);
 serviceChatsRoutes.get("/:conversationId", getServiceConversationController);
+serviceChatsRoutes.post("/:conversationId/typing", setServiceConversationTypingController);
+serviceChatsRoutes.post("/:conversationId/read", markServiceConversationReadController);
 serviceChatsRoutes.post("/:conversationId/accept", acceptServiceConversationController);
 serviceChatsRoutes.post("/:conversationId/messages", serviceMessageRateLimit, handleUpload(uploadChatAttachment), validate(createServiceConversationMessageSchema), createServiceConversationMessageController);
 serviceChatsRoutes.post("/:conversationId/locations", serviceMessageRateLimit, validate(createServiceConversationLocationSchema), createServiceConversationLocationController);

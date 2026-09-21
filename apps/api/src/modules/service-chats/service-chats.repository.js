@@ -13,6 +13,8 @@ export function createServiceChatsRepository(database = prisma) {
     findConversation(args) { return database.conversaServico.findFirst(args); },
     findReview(args) { return database.avaliacaoServico.findUnique(args); },
     findConversations(args) { return database.conversaServico.findMany(args); },
+    countMessages(args) { return database.conversaServicoMensagem.count(args); },
+    findMessages(args) { return database.conversaServicoMensagem.findMany(args); },
     findProposal(args) { return database.propostaServico.findUnique(args); },
     findSeller(args) { return database.vendedor.findFirst(args); },
     findSellerService(args) { return database.servicoVendedor.findFirst(args); },

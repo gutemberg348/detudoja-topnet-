@@ -7,6 +7,7 @@ import { prisma } from "../../config/prisma.js";
 import { chatPrivateRoot } from "../../config/storage.js";
 import { AppError } from "../../utils/errors.js";
 import { parsePositiveId } from "../../utils/ids.js";
+import { userHasStorePermission } from "../store-staff/store-permissions.js";
 
 const attachmentKinds = new Set(["IMAGE", "VIDEO", "AUDIO", "LOCATION"]);
 const acceptedImages = new Set(["image/avif", "image/jpeg", "image/png", "image/webp"]);
@@ -136,11 +137,6 @@ export async function deletePrivateChatAttachment(metadata) {
   if (absolutePath) await rm(absolutePath, { force: true });
 }
 
-function canAccessStore(store, userId) {
-  return store?.lojista?.usuario_id === userId
-    || store?.usuarios?.some((member) => member.usuario_id === userId && member.status === "ATIVO");
-}
-
 export async function getPrivateChatMedia(userId, rawScope, rawMessageId) {
   const scope = String(rawScope ?? "").toLowerCase();
   const messageId = parsePositiveId(rawMessageId, "Arquivo invalido");
@@ -160,7 +156,8 @@ export async function getPrivateChatMedia(userId, rawScope, rawMessageId) {
       include: { conversa: { include: { loja: { include: { lojista: true, usuarios: true } } } } },
       where: { id: messageId },
     });
-    allowed = message?.conversa?.cliente_usuario_id === userId || canAccessStore(message?.conversa?.loja, userId);
+    allowed = message?.conversa?.cliente_usuario_id === userId
+      || userHasStorePermission(message?.conversa?.loja, userId, "storeChats");
     metadata = message?.conteudo_json?.attachment;
   } else if (scope === "service") {
     message = await prisma.conversaServicoMensagem.findUnique({
@@ -174,7 +171,8 @@ export async function getPrivateChatMedia(userId, rawScope, rawMessageId) {
       include: { pedido: { include: { loja: { include: { lojista: true, usuarios: true } } } } },
       where: { id: messageId },
     });
-    allowed = message?.pedido?.usuario_id === userId || canAccessStore(message?.pedido?.loja, userId);
+    allowed = message?.pedido?.usuario_id === userId
+      || userHasStorePermission(message?.pedido?.loja, userId, "manageOrders");
     metadata = message?.metadata_json?.attachment;
   } else {
     throw new AppError("Tipo de conversa invalido", 404);

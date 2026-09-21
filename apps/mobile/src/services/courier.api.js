@@ -68,3 +68,7 @@ export function acceptCourierRequest(token, requestId) {
 export function cancelCourierRequest(token, requestId) {
   return apiRequest(`/api/app/courier/requests/${requestId}/cancel`, { body: {}, method: "POST", token });
 }
+
+export function rejectCourierRequest(token, requestId) {
+  return apiRequest(`/api/app/courier/requests/${requestId}/reject`, { body: {}, method: "POST", token });
+}

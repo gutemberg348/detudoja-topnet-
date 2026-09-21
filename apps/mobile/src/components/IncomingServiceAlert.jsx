@@ -11,7 +11,7 @@ import {
   typography,
 } from "../utils/theme";
 
-export function IncomingServiceAlert({ alert, loading, onAccept, onClose, onPress }) {
+export function IncomingServiceAlert({ alert, loading, onAccept, onClose, onPress, onReject }) {
   const insets = useSafeAreaInsets();
   const pulse = useRef(new Animated.Value(0)).current;
 
@@ -86,7 +86,7 @@ export function IncomingServiceAlert({ alert, loading, onAccept, onClose, onPres
             disabled={loading}
             onPress={(event) => {
               event.stopPropagation?.();
-              onClose();
+              onReject();
             }}
             style={styles.later}
           >

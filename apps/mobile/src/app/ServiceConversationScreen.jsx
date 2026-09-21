@@ -21,11 +21,13 @@ import { ChatComposer } from "../components/ChatComposer";
 import { ChatAttachment } from "../components/ChatAttachment";
 import { ChatMessageMeta } from "../components/ChatMessageMeta";
 import { ChatScrollToLatestButton } from "../components/ChatScrollToLatestButton";
+import { ChatTypingIndicator } from "../components/ChatTypingIndicator";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { StatePanel } from "../components/StatePanel";
 import { ShareAddressModal } from "./service/ShareAddressModal";
 import { useConversationRealtime } from "../hooks/useConversationRealtime";
 import { useChatTimeline } from "../hooks/useChatTimeline";
+import { useChatTyping } from "../hooks/useChatTyping";
 import { getGeneratedChargeQr } from "../services/seller.api";
 import {
   acceptServiceConversation,
@@ -36,11 +38,13 @@ import {
   createServiceReview,
   declineServiceProposal,
   getServiceConversation,
+  markServiceConversationRead,
   markServiceDelivered,
   sendServiceConversationLocation,
   sendServiceConversationMessage,
+  setServiceConversationTyping,
 } from "../services/service-chats.api";
-import { realtimeEvents } from "../services/realtime";
+import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import { useAuthStore } from "../stores/useAuthStore";
 import { resolveMediaUrl } from "../utils/media";
 import { formatarHora } from "../utils/date";
@@ -87,9 +91,17 @@ export function ServiceConversationScreen({ navigation, route }) {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [shareAddressOpen, setShareAddressOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [messagePage, setMessagePage] = useState({ hasMore: true, nextCursor: null });
   const timeline = useChatTimeline({
-    itemCount: conversation?.messages?.length ?? 0,
+    latestMessageId: conversation?.messages?.at(-1)?.id,
+    latestMessageIsMine: conversation?.messages?.at(-1)?.isMine,
     scrollRef,
+  });
+  const typing = useChatTyping({
+    conversationId: conversation?.id,
+    draft,
+    sendTyping: (isTyping) => setServiceConversationTyping(session?.accessToken, conversation?.id, isTyping),
   });
 
   const latestProposal = useMemo(
@@ -102,13 +114,17 @@ export function ServiceConversationScreen({ navigation, route }) {
   const canCreateProposal =
     conversation?.isSeller
     && conversation?.status === "ACORDADA"
+    && conversation?.serviceType?.mode !== "PRECO_FIXO"
     && !["PAGA", "CONCLUIDA"].includes(latestProposal?.status)
     && !(
       latestProposal?.status === "ACEITA"
       && latestProposal?.charge?.status === "ATIVA"
     );
   const customerHasPendingProposal =
-    !conversation?.isSeller && latestProposal?.status === "PENDENTE";
+    !conversation?.isSeller
+    && conversation?.status === "ACORDADA"
+    && latestProposal?.status === "PENDENTE";
+  const isFixedPrice = conversation?.serviceType?.mode === "PRECO_FIXO";
   const isCourierRide = Boolean(
     conversation?.request?.store
     || conversation?.serviceType?.operationalType === "ENTREGA_LOCAL",
@@ -136,6 +152,7 @@ export function ServiceConversationScreen({ navigation, route }) {
       try {
         const response = await getServiceConversation(session.accessToken, initial.id);
         setConversation(response.conversation);
+        setMessagePage(response.messagePage ?? { hasMore: false, nextCursor: null });
       } catch (requestError) {
         if (!silent) {
           setError(requestError.message ?? "Nao foi possivel carregar a conversa.");
@@ -150,6 +167,27 @@ export function ServiceConversationScreen({ navigation, route }) {
       if (loadPromiseRef.current === request) loadPromiseRef.current = null;
     }
   }, [initial?.id, session?.accessToken]);
+
+  const loadOlder = useCallback(async () => {
+    if (!session?.accessToken || !conversation?.id || loadingOlder || !messagePage.hasMore || !messagePage.nextCursor) return;
+    setLoadingOlder(true);
+    try {
+      const response = await getServiceConversation(session.accessToken, conversation.id, {
+        beforeMessageId: messagePage.nextCursor,
+      });
+      setConversation((current) => {
+        if (!current) return response.conversation;
+        const known = new Set((current.messages ?? []).map((item) => Number(item.id)));
+        const older = (response.conversation?.messages ?? []).filter((item) => !known.has(Number(item.id)));
+        return { ...current, messages: [...older, ...(current.messages ?? [])] };
+      });
+      setMessagePage(response.messagePage ?? { hasMore: false, nextCursor: null });
+    } catch (requestError) {
+      setError(requestError.message ?? "Nao foi possivel carregar mensagens antigas.");
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [conversation?.id, loadingOlder, messagePage.hasMore, messagePage.nextCursor, session?.accessToken]);
 
   useEffect(() => {
     load();
@@ -179,12 +217,47 @@ export function ServiceConversationScreen({ navigation, route }) {
     conversationId: conversation?.id,
     events: [
       realtimeEvents.serviceChatCreated,
-      realtimeEvents.serviceChatMessageCreated,
       realtimeEvents.serviceChatUpdated,
       realtimeEvents.chargeUpdated,
     ],
+    ignoreReasons: ["read"],
     onUpdate: refreshConversation,
   });
+
+  useEffect(() => {
+    if (!session?.accessToken || !conversation?.id) return undefined;
+    const socket = getRealtimeSocket(session.accessToken);
+    const onMessage = (payload = {}) => {
+      if (Number(payload.conversationId) !== Number(conversation.id) || !payload.message) return;
+      const message = {
+        ...payload.message,
+        isMine: Number(payload.senderUserId) === Number(session.user?.id),
+      };
+      setConversation((current) => {
+        if (!current || current.messages?.some((item) => Number(item.id) === Number(message.id))) return current;
+        return { ...current, lastMessage: message, messages: [...(current.messages ?? []), message] };
+      });
+      if (!message.isMine) void markServiceConversationRead(session.accessToken, conversation.id).catch(() => {});
+    };
+    const onUpdated = (payload = {}) => {
+      if (Number(payload.conversationId) !== Number(conversation.id) || payload.reason !== "read") return;
+      const readAt = new Date().toISOString();
+      setConversation((current) => current
+        ? { ...current, messages: (current.messages ?? []).map((item) => item.isMine && !item.readAt ? { ...item, readAt } : item) }
+        : current);
+    };
+    const onTyping = (payload = {}) => {
+      if (payload.scope === "service" && Number(payload.senderUserId) !== Number(session.user?.id)) typing.receiveTyping(payload);
+    };
+    socket?.on(realtimeEvents.serviceChatMessageCreated, onMessage);
+    socket?.on(realtimeEvents.chatTyping, onTyping);
+    socket?.on(realtimeEvents.serviceChatUpdated, onUpdated);
+    return () => {
+      socket?.off(realtimeEvents.serviceChatMessageCreated, onMessage);
+      socket?.off(realtimeEvents.chatTyping, onTyping);
+      socket?.off(realtimeEvents.serviceChatUpdated, onUpdated);
+    };
+  }, [conversation?.id, session?.accessToken, session?.user?.id, typing.receiveTyping]);
 
   async function send(payload = null) {
     if ((!draft.trim() && !payload?.attachment) || sending || !session?.accessToken) return;
@@ -192,12 +265,16 @@ export function ServiceConversationScreen({ navigation, route }) {
     setError("");
 
     try {
-      await sendServiceConversationMessage(session.accessToken, conversation.id, {
+      const response = await sendServiceConversationMessage(session.accessToken, conversation.id, {
         ...(payload ?? {}),
         message: payload?.message ?? draft,
       });
       setDraft("");
-      await load({ silent: true });
+      if (response?.message) {
+        setConversation((current) => current?.messages?.some((item) => Number(item.id) === Number(response.message.id))
+          ? current
+          : { ...current, lastMessage: response.message, messages: [...(current?.messages ?? []), response.message] });
+      }
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel enviar.");
       throw requestError;
@@ -573,13 +650,18 @@ export function ServiceConversationScreen({ navigation, route }) {
           contentContainerStyle={styles.messages}
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           keyboardShouldPersistTaps="handled"
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           onContentSizeChange={timeline.onContentSizeChange}
-          onScroll={timeline.onScroll}
+          onScroll={(event) => {
+            timeline.onScroll(event);
+            if (event.nativeEvent.contentOffset.y < 60) void loadOlder();
+          }}
           ref={scrollRef}
           scrollEventThrottle={16}
           showsVerticalScrollIndicator={false}
           style={styles.messagesScroll}
         >
+          {loadingOlder ? <ActivityIndicator color={colors.primary} size="small" /> : null}
           {(conversation.messages ?? []).length ? (
             (conversation.messages ?? []).map((message) => (
               <MessageBubble accessToken={session.accessToken} key={message.id} message={message} />
@@ -595,6 +677,7 @@ export function ServiceConversationScreen({ navigation, route }) {
               </Text>
             </View>
           )}
+          <ChatTypingIndicator visible={typing.isOtherTyping} />
         </ScrollView>
         <ChatScrollToLatestButton onPress={timeline.scrollToLatest} unreadCount={timeline.unreadBelow} visible={!timeline.isAtBottom} />
       </View>
@@ -651,6 +734,7 @@ export function ServiceConversationScreen({ navigation, route }) {
       <ProposalDecisionModal
         error={error}
         isCourierRide={isCourierRide}
+        isFixedPrice={isFixedPrice}
         loading={actionLoading === "accept" || actionLoading === "decline"}
         onAccept={() => acceptProposal(latestProposal, acceptPaymentMode)}
         onDecline={() => declineProposal(latestProposal)}
@@ -810,7 +894,7 @@ function ProposalCard({
         </Text>
       ) : null}
 
-      {pending && !isSeller ? (
+      {pending && !isSeller && conversation.status === "ACORDADA" ? (
         <View style={styles.proposalActions}>
           <AppButton
             loading={actionLoading === "accept"}
@@ -822,14 +906,18 @@ function ProposalCard({
             disabled={Boolean(actionLoading)}
             onPress={() => onDecline(proposal)}
             style={[styles.proposalAction, styles.compactProposalButton]}
-            title="Recusar"
+            title={conversation.serviceType?.mode === "PRECO_FIXO" ? "Cancelar" : "Recusar"}
             variant="outline"
           />
         </View>
       ) : null}
 
       {pending && isSeller ? (
-        <Text style={styles.proposalHint}>Aguardando o cliente aceitar o valor.</Text>
+        <Text style={styles.proposalHint}>{conversation.status === "ABERTA" ? "Aceite o chamado para liberar este valor ao cliente." : "Aguardando o cliente aceitar o valor."}</Text>
+      ) : null}
+
+      {pending && !isSeller && conversation.status === "ABERTA" ? (
+        <Text style={styles.proposalHint}>O preco esta reservado. Aguarde o prestador aceitar o chamado para escolher o pagamento.</Text>
       ) : null}
 
       {activeCharge && !isSeller && proposal.paymentMode === "ONLINE" ? (
@@ -1088,6 +1176,7 @@ function CancelRideModal({ loading, onCancel, onClose, open }) {
 function ProposalDecisionModal({
   error,
   isCourierRide,
+  isFixedPrice,
   loading,
   onAccept,
   onDecline,
@@ -1110,8 +1199,8 @@ function ProposalDecisionModal({
           <View style={styles.decisionIcon}>
             <Ionicons color={colors.card} name="receipt-outline" size={25} />
           </View>
-          <Text style={styles.decisionEyebrow}>Nova proposta recebida</Text>
-          <Text style={styles.decisionTitle}>Confirme o combinado</Text>
+          <Text style={styles.decisionEyebrow}>{isFixedPrice ? "PRECO FIXO CONFIRMADO" : "Nova proposta recebida"}</Text>
+          <Text style={styles.decisionTitle}>{isFixedPrice ? "Escolha como pagar" : "Confirme o combinado"}</Text>
           <Text style={styles.decisionText}>
             Revise o valor e a forma de pagamento antes de aceitar.
           </Text>
@@ -1159,7 +1248,7 @@ function ProposalDecisionModal({
           <AppButton
             disabled={loading}
             onPress={onDecline}
-            title="Recusar e continuar negociando"
+            title={isFixedPrice ? "Cancelar este atendimento" : "Recusar e continuar negociando"}
             variant="outline"
           />
         </View>

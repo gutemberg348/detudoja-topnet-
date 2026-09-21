@@ -495,6 +495,20 @@ export function SellScreen() {
   }
 
   function openStoreDetails(store) {
+    const permissions = store.access?.permissions;
+    if (
+      store.access?.isOwner === false
+      && permissions?.storeChats
+      && !permissions?.createCharges
+      && !permissions?.manageOrders
+    ) {
+      navigation.navigate("StoreChatsInbox", {
+        scope: "seller",
+        store,
+        storeId: store.id,
+      });
+      return;
+    }
     setSelectedStore(store);
     setError("");
     setStoreDetailsOpen(true);
@@ -602,7 +616,9 @@ export function SellScreen() {
   }
 
   function openStoreCharge(store, { cpfConfirmed = false } = {}) {
-    if (!hasActivePayoutAccount) {
+    const isWorkplaceCharge = store?.access?.isOwner === false
+      && store?.access?.permissions?.createCharges === true;
+    if (!isWorkplaceCharge && !hasActivePayoutAccount) {
       openPayoutForm({ store, type: "store-charge" }, { cpfConfirmed });
       return;
     }

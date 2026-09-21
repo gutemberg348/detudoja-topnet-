@@ -7,6 +7,8 @@ import {
   listPersonalChats,
   lookupPersonalContact,
   updateFriendAlias,
+  setPersonalChatTyping,
+  markPersonalChatRead,
 } from "./personal-chats.service.js";
 
 export async function blockPersonalChatController(req, res, next) {
@@ -72,7 +74,7 @@ export async function updateFriendAliasController(req, res, next) {
 
 export async function getPersonalChatController(req, res, next) {
   try {
-    res.json(await getPersonalChat(req.auth.user.id, req.params.conversationId));
+    res.json(await getPersonalChat(req.auth.user.id, req.params.conversationId, req.query));
   } catch (error) {
     next(error);
   }
@@ -86,6 +88,22 @@ export async function createPersonalMessageController(req, res, next) {
       req.body,
       req.file ?? null,
     ));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function setPersonalChatTypingController(req, res, next) {
+  try {
+    res.json(await setPersonalChatTyping(req.auth.user.id, req.params.conversationId, req.body?.isTyping));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function markPersonalChatReadController(req, res, next) {
+  try {
+    res.json(await markPersonalChatRead(req.auth.user.id, req.params.conversationId));
   } catch (error) {
     next(error);
   }

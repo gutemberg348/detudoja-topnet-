@@ -24,7 +24,9 @@ import { getCurrentUserAddresses, updateCurrentUser } from "../services/users.ap
 import { serviceIconName } from "../utils/service-icons";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
 import { CourierRegistrationModal } from "./service/CourierRegistrationModal";
+import { FixedServicePriceModal } from "./service/FixedServicePriceModal";
 import { RegisterServiceModal } from "./service/RegisterServiceModal";
+import { formatarDinheiro } from "../utils/money";
 
 function serviceIcon(iconName) {
   return serviceIconName(iconName);
@@ -56,6 +58,8 @@ export function ServiceDeskScreen({ navigation }) {
   const [registerServiceError, setRegisterServiceError] = useState("");
   const [registerServiceOpen, setRegisterServiceOpen] = useState(false);
   const [pendingCourierService, setPendingCourierService] = useState(null);
+  const [fixedPriceService, setFixedPriceService] = useState(null);
+  const [fixedPriceError, setFixedPriceError] = useState("");
   const [savingServiceId, setSavingServiceId] = useState(null);
   const [acceptingRequestId, setAcceptingRequestId] = useState(null);
   const [services, setServices] = useState([]);
@@ -180,6 +184,11 @@ export function ServiceDeskScreen({ navigation }) {
 
   async function toggleService(service) {
     if (!session?.accessToken || savingServiceId) return;
+    if (!service.available && service.mode === "PRECO_FIXO" && !service.priceCents) {
+      setFixedPriceError("");
+      setFixedPriceService(service);
+      return;
+    }
     if (!service.available && service.requiresCourierProfile && !courierProfile) {
       setPendingCourierService(service);
       setCourierError("");
@@ -206,6 +215,11 @@ export function ServiceDeskScreen({ navigation }) {
 
   async function startService(service) {
     if (!session?.accessToken || savingServiceId) return;
+    if (service.mode === "PRECO_FIXO") {
+      setFixedPriceError("");
+      setFixedPriceService(service);
+      return;
+    }
     const requirements = service.registrationRequirements ?? {};
     if (service.requiresCourierProfile || requirements.requiresVehicle || requirements.requiresDriverLicense || requirements.requiresPlate) {
       setPendingCourierService(service);
@@ -221,6 +235,26 @@ export function ServiceDeskScreen({ navigation }) {
       await load({ silent: true });
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel cadastrar este servico.");
+    } finally {
+      setSavingServiceId(null);
+    }
+  }
+
+  async function saveFixedServicePrice(priceCents) {
+    if (!session?.accessToken || !fixedPriceService || savingServiceId) return;
+    const service = fixedPriceService;
+    setSavingServiceId(service.id);
+    setFixedPriceError("");
+    try {
+      await updateSellerService(session.accessToken, {
+        available: service.available || !service.enabled,
+        priceCents,
+        serviceTypeId: service.id,
+      });
+      setFixedPriceService(null);
+      await load({ silent: true });
+    } catch (requestError) {
+      setFixedPriceError(requestError.message ?? "Nao foi possivel salvar o preco do servico.");
     } finally {
       setSavingServiceId(null);
     }
@@ -465,6 +499,7 @@ export function ServiceDeskScreen({ navigation }) {
           {(courierProfile ? courierRegisteredServices : registeredServices).length ? (
             <ServiceAvailabilityList
               courierProfile={courierProfile}
+              onEditPrice={(service) => { setFixedPriceError(""); setFixedPriceService(service); }}
               onToggle={toggleService}
               savingServiceId={savingServiceId}
               services={courierProfile ? courierRegisteredServices : registeredServices}
@@ -482,6 +517,7 @@ export function ServiceDeskScreen({ navigation }) {
                   />
                   <ServiceAvailabilityList
                     courierProfile={courierProfile}
+                    onEditPrice={(service) => { setFixedPriceError(""); setFixedPriceService(service); }}
                     onToggle={toggleService}
                     savingServiceId={savingServiceId}
                     services={otherRegisteredServices}
@@ -540,6 +576,18 @@ export function ServiceDeskScreen({ navigation }) {
         onSubmit={submitServiceRegistration}
         open={registerServiceOpen}
       />
+      <FixedServicePriceModal
+        error={fixedPriceError}
+        loading={Boolean(fixedPriceService && savingServiceId === fixedPriceService.id)}
+        onClose={() => {
+          if (savingServiceId) return;
+          setFixedPriceService(null);
+          setFixedPriceError("");
+        }}
+        onSubmit={saveFixedServicePrice}
+        open={Boolean(fixedPriceService)}
+        service={fixedPriceService}
+      />
     </ScreenContainer>
   );
 }
@@ -549,7 +597,7 @@ function StatusPill({ activeCount, courierStatus }) {
   return <View style={[styles.statusPill, activeCount && styles.statusPillActive]}><View style={[styles.statusDot, activeCount && styles.statusDotActive]} /><Text style={[styles.statusText, activeCount && styles.statusTextActive]}>{isBusy ? "Em corrida" : activeCount ? `${activeCount} ativo${activeCount === 1 ? "" : "s"}` : "Offline"}</Text></View>;
 }
 
-function ServiceAvailabilityList({ courierProfile, onToggle, savingServiceId, services }) {
+function ServiceAvailabilityList({ courierProfile, onEditPrice, onToggle, savingServiceId, services }) {
   return (
     <View style={styles.serviceList}>
       {services.map((service) => (
@@ -574,6 +622,13 @@ function ServiceAvailabilityList({ courierProfile, onToggle, savingServiceId, se
                   ? "Cadastre seu veiculo para ativar"
                   : "Offline para novos chamados"}
             </Text>
+            {service.mode === "PRECO_FIXO" ? (
+              <Pressable hitSlop={6} onPress={() => onEditPrice(service)}>
+                <Text style={styles.fixedPriceLink}>
+                  {service.priceCents ? `${formatarDinheiro(service.priceCents)} - editar preco` : "Definir preco fixo"}
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
           {savingServiceId === service.id ? (
             <ActivityIndicator color={colors.primaryDark} />
@@ -619,6 +674,7 @@ function ServiceCatalog({ loadingServiceId, onStart, services, subtitle, title }
               ) : null}
               {service.registrationRequirements?.requiresDriverLicense ? <Text style={styles.requirementPill}>CNH</Text> : null}
               {service.registrationRequirements?.requiresPlate ? <Text style={styles.requirementPill}>Placa</Text> : null}
+              {service.mode === "PRECO_FIXO" ? <Text style={styles.requirementPill}>Defina o preco fixo</Text> : null}
               {!service.registrationRequirements?.requiresVehicle
                 && !service.registrationRequirements?.requiresDriverLicense
                 && !service.registrationRequirements?.requiresPlate ? (
@@ -923,6 +979,7 @@ const styles = StyleSheet.create({
   serviceCopy: { flex: 1, gap: 3, minWidth: 0 },
   serviceIcon: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.primaryLight, borderRadius: radius.round, borderWidth: 1, height: 42, justifyContent: "center", width: 42 },
   serviceList: { gap: spacing.sm },
+  fixedPriceLink: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 11, marginTop: 2 },
   serviceMeta: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption },
   serviceName: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small },
   serviceNameLine: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },

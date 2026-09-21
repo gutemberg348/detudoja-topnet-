@@ -49,9 +49,13 @@ export function getStoreConversations(
   return apiRequest(`/api/app/store-chats?${query.toString()}`, { token });
 }
 
-export async function getStoreConversation(token, conversationId) {
+export async function getStoreConversation(token, conversationId, page = {}) {
+  const query = new URLSearchParams();
+  if (page.beforeMessageId) query.set("beforeMessageId", String(page.beforeMessageId));
+  if (page.limit) query.set("limit", String(page.limit));
+  const suffix = query.toString() ? `?${query}` : "";
   const response = await apiRequest(
-    `/api/app/store-chats/${conversationId}`,
+    `/api/app/store-chats/${conversationId}${suffix}`,
     { token },
   );
 
@@ -72,5 +76,17 @@ export function trackStoreConversationActivity(token, conversationId, data) {
     body: data,
     method: "POST",
     token,
+  });
+}
+
+export function setStoreConversationTyping(token, conversationId, isTyping) {
+  return apiRequest(`/api/app/store-chats/${conversationId}/typing`, {
+    body: { isTyping }, method: "POST", token,
+  });
+}
+
+export function markStoreConversationRead(token, conversationId) {
+  return apiRequest(`/api/app/store-chats/${conversationId}/read`, {
+    body: {}, method: "POST", token,
   });
 }

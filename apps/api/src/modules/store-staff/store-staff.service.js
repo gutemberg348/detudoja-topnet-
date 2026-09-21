@@ -5,6 +5,7 @@ import {
   createStoreStaffRepository,
   storeStaffRepository,
 } from "./store-staff.repository.js";
+import { normalizeStorePermissions } from "./store-permissions.js";
 
 const inviteDurationMs = 7 * 24 * 60 * 60 * 1000;
 
@@ -61,9 +62,7 @@ function serializeInvite(invite) {
 }
 
 function serializeMembership(member) {
-  const savedPermissions = member.permissoes && typeof member.permissoes === "object"
-    ? member.permissoes
-    : {};
+  const savedPermissions = normalizeStorePermissions(member.permissoes);
   const isOwner = member.cargo === "DONO";
   return {
     id: member.id,

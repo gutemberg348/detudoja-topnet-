@@ -14,6 +14,7 @@ import {
 } from "./socket.rooms.js";
 
 export const realtimeEvents = {
+  chatTyping: "chat.typing",
   chargeUpdated: "charge.updated",
   courierTeamUpdated: "courier.team.updated",
   courierRequestCreated: "courier.request.created",
@@ -422,10 +423,10 @@ export function emitServiceChatCreated(conversation) {
   );
 }
 
-export function emitServiceChatMessageCreated({ conversation, message }) {
+export function emitServiceChatMessageCreated({ conversation, message, senderUserId }) {
   emitToServiceChatUsers(
     realtimeEvents.serviceChatMessageCreated,
-    { conversation, conversationId: conversation?.id, message },
+    { conversation, conversationId: conversation?.id, message, senderUserId },
     conversation,
   );
 }
@@ -498,6 +499,7 @@ export function emitStoreChatMessageCreated({
   conversationId,
   customerUserId,
   message,
+  senderUserId,
   storeId,
 }) {
   if (!conversationId || !message) {
@@ -506,7 +508,7 @@ export function emitStoreChatMessageCreated({
 
   emitToStoreChatUsers(
     realtimeEvents.storeChatMessageCreated,
-    { conversationId, message, storeId },
+    { conversationId, message, senderUserId, storeId },
     { customerUserId, storeId },
   );
 }
@@ -559,12 +561,13 @@ export function emitPersonalChatCreated({ conversationId, userIds }) {
 export function emitPersonalChatMessageCreated({
   conversationId,
   message,
+  senderUserId,
   userIds,
 }) {
   if (!conversationId || !message) return;
   emitToPersonalChatUsers(
     realtimeEvents.personalChatMessageCreated,
-    { conversationId, message },
+    { conversationId, message, senderUserId },
     userIds,
   );
 }
@@ -576,6 +579,35 @@ export function emitPersonalChatUpdated({ conversationId, reason, userIds }) {
     { conversationId, reason: reason ?? "updated" },
     userIds,
   );
+}
+
+export function emitPersonalChatTyping({ conversationId, isTyping, senderUserId, userIds }) {
+  emitToPersonalChatUsers(
+    realtimeEvents.chatTyping,
+    { conversationId, isTyping, scope: "personal", senderUserId },
+    userIds,
+  );
+}
+
+export function emitStoreChatTyping({ conversationId, customerUserId, isTyping, senderUserId, storeId }) {
+  emitToStoreChatUsers(
+    realtimeEvents.chatTyping,
+    { conversationId, isTyping, scope: "store", senderUserId },
+    { customerUserId, storeId },
+  );
+}
+
+export function emitServiceChatTyping({ conversationId, customerUserId, isTyping, senderUserId, sellerUserId }) {
+  if (!io) return;
+  let target = io.to(adminRoom());
+  if (customerUserId) target = target.to(userRoom(customerUserId));
+  if (sellerUserId) target = target.to(userRoom(sellerUserId));
+  target.emit(realtimeEvents.chatTyping, {
+    conversationId,
+    isTyping,
+    scope: "service",
+    senderUserId,
+  });
 }
 
 export function emitServiceAvailabilityUpdated({

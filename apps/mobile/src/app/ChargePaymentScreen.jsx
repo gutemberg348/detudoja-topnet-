@@ -1,6 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Image, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Image, Modal, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { AppButton } from "../components/AppButton";
 import { CpfRequirementModal } from "../components/CpfRequirementModal";
 import { LocalRewardNotice } from "../components/LocalRewardNotice";
@@ -39,6 +39,7 @@ export function ChargePaymentScreen({ navigation, route }) {
   const [isPaying, setIsPaying] = useState(false);
   const [paymentFeedback, setPaymentFeedback] = useState(null);
   const [cpfModalOpen, setCpfModalOpen] = useState(false);
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
   const idempotencyKey = useRef(newIdempotencyKey());
   const code = route.params?.code;
   const storeQrToken = route.params?.storeQrToken;
@@ -114,6 +115,12 @@ export function ChargePaymentScreen({ navigation, route }) {
       idempotencyKey.current = newIdempotencyKey();
     } catch (requestError) {
       const message = requestError.message ?? "Nao foi possivel iniciar o pagamento.";
+      if (
+        requestError.data?.details?.code === "PAYMENT_ATTEMPT_FINAL_FAILURE"
+        && requestError.data.details.retryWithNewKey === true
+      ) {
+        idempotencyKey.current = newIdempotencyKey();
+      }
       setError(message);
       setPaymentFeedback({ message, status: "error" });
     } finally {
@@ -141,6 +148,15 @@ export function ChargePaymentScreen({ navigation, route }) {
   const merchantLogo = resolveMediaUrl(merchant.logoUrl);
   const paid = charge?.status === "PAGA";
   const canPay = !paid && amountCents >= 100 && (isPermanentQr || charge?.status === "ATIVA");
+
+  function requestPaymentConfirmation() {
+    if (!canPay || isPaying) return;
+    if (isPermanentQr) {
+      setConfirmationOpen(true);
+      return;
+    }
+    confirmPayment();
+  }
 
   return (
     <ScreenContainer contentContainerStyle={styles.content} edges={["left", "right"]}>
@@ -175,7 +191,7 @@ export function ChargePaymentScreen({ navigation, route }) {
             <TextInput
               autoFocus
               keyboardType="decimal-pad"
-              onChangeText={(value) => { setAmount(moneyInput(value)); setError(""); }}
+              onChangeText={(value) => { setAmount(moneyInput(value)); setError(""); setConfirmationOpen(false); }}
               placeholder="0,00"
               placeholderTextColor="#83AD9E"
               style={styles.amountInput}
@@ -231,7 +247,7 @@ export function ChargePaymentScreen({ navigation, route }) {
           disabled={!canPay || isPaying}
           icon={pixCents > 0 ? "qr-code-outline" : "lock-closed-outline"}
           loading={isPaying}
-          onPress={() => confirmPayment()}
+          onPress={requestPaymentConfirmation}
           style={styles.payButton}
           title={pixCents > 0 ? `Gerar Pix de ${formatarDinheiro(pixCents)}` : `Pagar ${formatarDinheiro(amountCents)}`}
         />
@@ -243,6 +259,40 @@ export function ChargePaymentScreen({ navigation, route }) {
         open={cpfModalOpen}
         reason="purchase"
       />
+      <Modal
+        animationType="fade"
+        onRequestClose={() => setConfirmationOpen(false)}
+        transparent
+        visible={confirmationOpen}
+      >
+        <View style={styles.confirmOverlay}>
+          <Pressable onPress={() => setConfirmationOpen(false)} style={StyleSheet.absoluteFill} />
+          <View accessibilityViewIsModal style={styles.confirmCard}>
+            <View style={styles.confirmIcon}>
+              <Ionicons color={colors.primaryDark} name="shield-checkmark-outline" size={27} />
+            </View>
+            <Text style={styles.confirmKicker}>CONFIRME COM A LOJA</Text>
+            <Text style={styles.confirmTitle}>{merchant.name}</Text>
+            <Text style={styles.confirmAmount}>{formatarDinheiro(amountCents)}</Text>
+            <Text style={styles.confirmText}>
+              Confira o valor no caixa. Depois de confirmar, o saldo sera reservado e o Pix sera criado somente para o restante.
+            </Text>
+            <View style={styles.confirmBreakdown}>
+              <PaymentLine label="Saldo utilizado" value={walletCents} />
+              <PaymentLine label="Pix a gerar" value={pixCents} />
+            </View>
+            <AppButton
+              icon={pixCents > 0 ? "qr-code-outline" : "lock-closed-outline"}
+              onPress={() => {
+                setConfirmationOpen(false);
+                confirmPayment();
+              }}
+              title={`Confirmar pagamento de ${formatarDinheiro(amountCents)}`}
+            />
+            <AppButton onPress={() => setConfirmationOpen(false)} title="Corrigir valor" variant="outline" />
+          </View>
+        </View>
+      </Modal>
       <PaymentFeedbackOverlay
         amountCents={amountCents}
         counterparty={merchant.name}
@@ -284,6 +334,14 @@ const styles = StyleSheet.create({
   balanceTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small, fontWeight: "700" },
   breakdownCard: { backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, gap: spacing.sm, padding: spacing.lg },
   content: { gap: spacing.lg, paddingBottom: spacing.xxxl },
+  confirmAmount: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: 34, textAlign: "center" },
+  confirmBreakdown: { alignSelf: "stretch", backgroundColor: colors.cardMuted, borderRadius: radius.md, gap: spacing.sm, padding: spacing.md },
+  confirmCard: { alignItems: "stretch", backgroundColor: colors.card, borderRadius: radius.xl, gap: spacing.md, maxWidth: 420, padding: spacing.xl, width: "92%", ...shadow },
+  confirmIcon: { alignItems: "center", alignSelf: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 58, justifyContent: "center", width: 58 },
+  confirmKicker: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: typography.caption, textAlign: "center" },
+  confirmOverlay: { alignItems: "center", backgroundColor: "rgba(8, 24, 18, 0.58)", flex: 1, justifyContent: "center", padding: spacing.lg },
+  confirmText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.small, lineHeight: 20, textAlign: "center" },
+  confirmTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.h2, textAlign: "center" },
   currency: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: typography.h2, fontWeight: "700" },
   divider: { backgroundColor: colors.border, height: 1, marginVertical: spacing.xs },
   errorInline: { color: colors.danger, fontFamily: fonts.medium, fontSize: typography.small, textAlign: "center" },

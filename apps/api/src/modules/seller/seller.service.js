@@ -23,6 +23,11 @@ import {
   serializeOrderProposal,
 } from "../orders/orders.serializer.js";
 import { releaseReservedOrderStock } from "../orders/order-stock.service.js";
+import {
+  serializeStoreAccess,
+  storePermissionAccessWhere,
+} from "../store-staff/store-permissions.js";
+import { sendExpoPushToUsers } from "../notifications/notifications.service.js";
 
 const individualMerchantMonthlyLimitCents = 500000n;
 const sellerOrderInclude = {
@@ -56,6 +61,39 @@ const sellerOrderInclude = {
   pagamento: true,
   propostas: {
     orderBy: { criado_em: "asc" },
+  },
+};
+
+function pushOrderToCustomer(order, { body, reason, title }) {
+  void sendExpoPushToUsers({
+    body,
+    channelId: "orders",
+    data: { orderId: order.id, reason, screen: "CustomerOrderDetails" },
+    title,
+    userIds: [order.usuario_id],
+  });
+}
+
+const sellerStoreInclude = {
+  _count: {
+    select: {
+      cobrancas: true,
+      produtos: { where: { excluido_em: null } },
+    },
+  },
+  categoria: { include: { segmento_venda: true } },
+  endereco: true,
+  segmento_venda: true,
+  lojista: { include: { usuario: { include: { kyc: true } } } },
+  pedidos: {
+    include: sellerOrderInclude,
+    orderBy: { criado_em: "desc" },
+    take: 20,
+  },
+  produtos: {
+    orderBy: [{ destaque: "desc" }, { ordem: "asc" }, { criado_em: "desc" }],
+    take: 50,
+    where: { excluido_em: null },
   },
 };
 
@@ -281,9 +319,15 @@ function serializeStoreMerchant(merchant) {
   };
 }
 
-function serializeStore(store, merchant = store.lojista ?? null) {
+function serializeStore(
+  store,
+  merchant = store.lojista ?? null,
+  access = serializeStoreAccess(null, { isOwner: true }),
+) {
   const products = store.produtos ?? [];
   const segment = store.segmento_venda ?? store.categoria?.segmento_venda ?? null;
+  const canManageOrders = access.permissions.manageOrders;
+  const isOwner = access.isOwner;
 
   return {
     address: store.endereco
@@ -300,7 +344,8 @@ function serializeStore(store, merchant = store.lojista ?? null) {
       : null,
     category: store.categoria ? serializeStoreCategory(store.categoria) : null,
     bannerUrl: store.banner_url,
-    chargesCount: store._count?.cobrancas ?? 0,
+    access,
+    chargesCount: access.permissions.createCharges ? store._count?.cobrancas ?? 0 : 0,
     createdAt: store.criado_em.toISOString(),
     description: store.descricao,
     deliveryFeeCents: cents(store.taxa_entrega_centavos),
@@ -314,10 +359,12 @@ function serializeStore(store, merchant = store.lojista ?? null) {
       ? "CHAT_NEGOTIATION"
       : "DIRECT_CHECKOUT",
     openingHours: store.horarios_funcionamento,
-    orders: (store.pedidos ?? []).map((order) => serializeOrder(order, { audience: "store" })),
+    orders: canManageOrders
+      ? (store.pedidos ?? []).map((order) => serializeOrder(order, { audience: "store" }))
+      : [],
     phone: store.telefone,
-    products: products.map(serializeStoreProduct),
-    productsCount: store._count?.produtos ?? products.length,
+    products: isOwner ? products.map(serializeStoreProduct) : [],
+    productsCount: isOwner ? store._count?.produtos ?? products.length : 0,
     segment: segment ? serializeSegment(segment) : null,
     slug: store.slug,
     status: store.status,
@@ -517,7 +564,7 @@ export async function listSellerStoreCategories() {
 }
 
 export async function getSellerProfile(userId) {
-  const [seller, merchant] = await Promise.all([
+  const [seller, merchant, memberships] = await Promise.all([
     sellerRepository.findFirstSeller({
       include: { segmento_venda: true },
       where: { excluido_em: null, usuario_id: userId },
@@ -525,32 +572,21 @@ export async function getSellerProfile(userId) {
     sellerRepository.findFirstMerchant({
       include: {
         lojas: {
-          include: {
-            _count: {
-              select: {
-                cobrancas: true,
-                produtos: { where: { excluido_em: null } },
-              },
-            },
-            categoria: { include: { segmento_venda: true } },
-            endereco: true,
-            segmento_venda: true,
-            pedidos: {
-              include: sellerOrderInclude,
-              orderBy: { criado_em: "desc" },
-              take: 20,
-            },
-            produtos: {
-              orderBy: [{ destaque: "desc" }, { ordem: "asc" }, { criado_em: "desc" }],
-              take: 50,
-              where: { excluido_em: null },
-            },
-          },
+          include: sellerStoreInclude,
           orderBy: { criado_em: "desc" },
           where: { excluido_em: null },
         },
       },
       where: { excluido_em: null, usuario_id: userId },
+    }),
+    sellerRepository.findStoreMemberships({
+      include: { loja: { include: sellerStoreInclude } },
+      orderBy: { atualizado_em: "desc" },
+      where: {
+        status: "ATIVO",
+        usuario_id: userId,
+        loja: { excluido_em: null },
+      },
     }),
   ]);
 
@@ -563,10 +599,27 @@ export async function getSellerProfile(userId) {
       })
     : [];
 
+  const ownerStores = (merchant?.lojas ?? []).map((store) => (
+    serializeStore(store, merchant, serializeStoreAccess(null, { isOwner: true }))
+  ));
+  const ownerStoreIds = new Set(ownerStores.map((store) => store.id));
+  const workplaceStores = memberships
+    .filter((membership) => !ownerStoreIds.has(membership.loja_id))
+    .map((membership) => ({
+      access: serializeStoreAccess(membership),
+      membership,
+    }))
+    .filter(({ access }) => Object.values(access.permissions).some(Boolean))
+    .map(({ access, membership }) => serializeStore(
+      membership.loja,
+      membership.loja.lojista,
+      access,
+    ));
+
   return {
     profile: serializeSellerProfile(seller),
     sales: sales.map(serializeSale),
-    stores: (merchant?.lojas ?? []).map((store) => serializeStore(store, merchant)),
+    stores: [...ownerStores, ...workplaceStores],
   };
 }
 
@@ -714,7 +767,7 @@ export async function createAutonomousSale(userId, data) {
   };
 }
 
-async function findStoreForUser(userId, storeId) {
+async function findStoreForUser(userId, storeId, { permission = null } = {}) {
   const parsedStoreId = parsePositiveId(storeId, "Loja invalida");
   const store = await sellerRepository.findFirstStore({
     include: {
@@ -741,7 +794,9 @@ async function findStoreForUser(userId, storeId) {
     where: {
       excluido_em: null,
       id: parsedStoreId,
-      lojista: { usuario_id: userId },
+      ...(permission
+        ? storePermissionAccessWhere(userId, permission)
+        : { lojista: { usuario_id: userId } }),
     },
   });
 
@@ -1150,8 +1205,7 @@ export async function deleteStoreProduct(userId, storeId, productId) {
 }
 
 export async function updateStoreOrderStatus(userId, storeId, orderId, status) {
-  await sellerRepository.requireCommercialTier2(userId);
-  const store = await findStoreForUser(userId, storeId);
+  const store = await findStoreForUser(userId, storeId, { permission: "manageOrders" });
   assertStoreMerchantTier2(store);
   const parsedOrderId = parsePositiveId(orderId, "Pedido invalido");
 
@@ -1265,12 +1319,17 @@ export async function updateStoreOrderStatus(userId, storeId, orderId, status) {
   const serializedOrder = serializeOrder(order, { audience: "store" });
 
   emitOrderStatusUpdated(serializedOrder);
+  pushOrderToCustomer(order, {
+    body: statusMessageCopy[status]?.message ?? `O pedido ${order.codigo} foi atualizado.`,
+    reason: "order-status-updated",
+    title: store.nome,
+  });
 
   return { order: serializedOrder };
 }
 
 async function findStoreOrderForUser(userId, storeId, orderId) {
-  const store = await findStoreForUser(userId, storeId);
+  const store = await findStoreForUser(userId, storeId, { permission: "manageOrders" });
   const parsedOrderId = parsePositiveId(orderId, "Pedido invalido");
 
   const order = await sellerRepository.findFirstOrder({
@@ -1350,13 +1409,17 @@ export async function createStoreOrderMessage(userId, storeId, orderId, data, at
     orderId: order.id,
     storeId: order.loja_id,
   });
+  pushOrderToCustomer(order, {
+    body: data.message || "A loja enviou um anexo no pedido.",
+    reason: "order-message-created",
+    title: "Nova mensagem da loja",
+  });
 
   return { message: serializedMessage };
 }
 
 export async function createStoreOrderProposal(userId, storeId, orderId, data) {
-  await sellerRepository.requireCommercialTier2(userId);
-  const store = await findStoreForUser(userId, storeId);
+  const store = await findStoreForUser(userId, storeId, { permission: "manageOrders" });
   assertStoreMerchantTier2(store);
   const parsedOrderId = parsePositiveId(orderId, "Pedido invalido");
   const currentOrder = await sellerRepository.findFirstOrder({
@@ -1437,6 +1500,11 @@ export async function createStoreOrderProposal(userId, storeId, orderId, data) {
     storeId: currentOrder.loja_id,
   });
   emitOrderStatusUpdated(serializedOrder);
+  pushOrderToCustomer(result.order, {
+    body: `A loja enviou uma proposta de ${new Intl.NumberFormat("pt-BR", { currency: "BRL", style: "currency" }).format(Number(data.amountCents) / 100)}.`,
+    reason: "order-proposal-created",
+    title: "Nova proposta para seu pedido",
+  });
 
   return {
     message: serializedMessage,

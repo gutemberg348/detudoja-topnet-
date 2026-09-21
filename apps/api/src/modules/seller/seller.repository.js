@@ -34,6 +34,7 @@ export function createSellerRepository(database = prisma) {
     findOrderMessages(args) { return database.pedidoLojaMensagem.findMany(args); },
     findSales(args) { return database.vendaAutonoma.findMany(args); },
     findSegments(args) { return database.segmentoVenda.findMany(args); },
+    findStoreMemberships(args) { return database.usuarioLoja.findMany(args); },
     findUniqueOrder(args) { return database.pedidoLoja.findUnique(args); },
     findUniqueUser(args) { return database.usuario.findUnique(args); },
     getUserBaseAddress(userId) { return requireUserBaseAddress(database, userId); },

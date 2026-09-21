@@ -19,16 +19,20 @@ import { ChatComposer } from "../components/ChatComposer";
 import { ChatAttachment } from "../components/ChatAttachment";
 import { ChatMessageMeta } from "../components/ChatMessageMeta";
 import { ChatScrollToLatestButton } from "../components/ChatScrollToLatestButton";
+import { ChatTypingIndicator } from "../components/ChatTypingIndicator";
 import { BackHeader } from "../components/BackHeader";
 import { CartAddButton } from "../components/CartAddButton";
 import { useConversationRealtime } from "../hooks/useConversationRealtime";
 import { useChatTimeline } from "../hooks/useChatTimeline";
+import { useChatTyping } from "../hooks/useChatTyping";
 import { getMarketplaceStore } from "../services/marketplace.api";
-import { realtimeEvents } from "../services/realtime";
+import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import {
   getStoreConversation,
+  markStoreConversationRead,
   openStoreConversation,
   sendStoreConversationMessage,
+  setStoreConversationTyping,
   trackStoreConversationActivity,
 } from "../services/store-chats.api";
 import { useAuthStore } from "../stores/useAuthStore";
@@ -61,6 +65,8 @@ export function StoreConversationScreen({ navigation, route }) {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(!initialConversation?.messages);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [messagePage, setMessagePage] = useState({ hasMore: true, nextCursor: null });
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [openingContent, setOpeningContent] = useState("");
   const [sending, setSending] = useState(false);
@@ -80,8 +86,14 @@ export function StoreConversationScreen({ navigation, route }) {
     ?? initialStore?.id
     ?? route.params?.storeId;
   const timeline = useChatTimeline({
-    itemCount: conversation?.messages?.length ?? 0,
+    latestMessageId: conversation?.messages?.at(-1)?.id,
+    latestMessageIsMine: conversation?.messages?.at(-1)?.isMine,
     scrollRef,
+  });
+  const typing = useChatTyping({
+    conversationId,
+    draft,
+    sendTyping: (isTyping) => setStoreConversationTyping(session?.accessToken, conversationId, isTyping),
   });
 
   const load = useCallback(async ({ silent = false } = {}) => {
@@ -100,6 +112,7 @@ export function StoreConversationScreen({ navigation, route }) {
         : await openStoreConversation(session.accessToken, storeId);
 
       setConversation(response.conversation);
+      setMessagePage(response.messagePage ?? { hasMore: false, nextCursor: null });
       if (!response.conversation?.isStore && response.conversation?.store?.id) {
         try {
           const storeResponse = await getMarketplaceStore(
@@ -125,6 +138,27 @@ export function StoreConversationScreen({ navigation, route }) {
     }
   }, [conversationId, session?.accessToken, storeId]);
 
+  const loadOlder = useCallback(async () => {
+    if (!session?.accessToken || !conversation?.id || loadingOlder || !messagePage.hasMore || !messagePage.nextCursor) return;
+    setLoadingOlder(true);
+    try {
+      const response = await getStoreConversation(session.accessToken, conversation.id, {
+        beforeMessageId: messagePage.nextCursor,
+      });
+      setConversation((current) => {
+        if (!current) return response.conversation;
+        const known = new Set((current.messages ?? []).map((item) => Number(item.id)));
+        const older = (response.conversation?.messages ?? []).filter((item) => !known.has(Number(item.id)));
+        return { ...current, messages: [...older, ...(current.messages ?? [])] };
+      });
+      setMessagePage(response.messagePage ?? { hasMore: false, nextCursor: null });
+    } catch (requestError) {
+      setError(requestError.message ?? "Nao foi possivel carregar mensagens antigas.");
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [conversation?.id, loadingOlder, messagePage.hasMore, messagePage.nextCursor, session?.accessToken]);
+
   useEffect(() => {
     load();
   }, [load]);
@@ -143,11 +177,46 @@ export function StoreConversationScreen({ navigation, route }) {
     accessToken: session?.accessToken,
     conversationId: conversation?.id,
     events: [
-      realtimeEvents.storeChatMessageCreated,
       realtimeEvents.storeChatUpdated,
     ],
+    ignoreReasons: ["read"],
     onUpdate: refreshConversation,
   });
+
+  useEffect(() => {
+    if (!session?.accessToken || !conversation?.id) return undefined;
+    const socket = getRealtimeSocket(session.accessToken);
+    const onMessage = (payload = {}) => {
+      if (Number(payload.conversationId) !== Number(conversation.id) || !payload.message) return;
+      const message = {
+        ...payload.message,
+        isMine: Number(payload.senderUserId) === Number(session.user?.id),
+      };
+      setConversation((current) => {
+        if (!current || current.messages?.some((item) => Number(item.id) === Number(message.id))) return current;
+        return { ...current, lastMessage: message, messages: [...(current.messages ?? []), message] };
+      });
+      if (!message.isMine) void markStoreConversationRead(session.accessToken, conversation.id).catch(() => {});
+    };
+    const onUpdated = (payload = {}) => {
+      if (Number(payload.conversationId) !== Number(conversation.id) || payload.reason !== "read") return;
+      const readAt = new Date().toISOString();
+      setConversation((current) => current
+        ? { ...current, messages: (current.messages ?? []).map((item) => item.isMine && !item.readAt ? { ...item, readAt } : item) }
+        : current);
+    };
+    const onTyping = (payload = {}) => {
+      if (payload.scope === "store" && Number(payload.senderUserId) !== Number(session.user?.id)) typing.receiveTyping(payload);
+    };
+    socket?.on(realtimeEvents.storeChatMessageCreated, onMessage);
+    socket?.on(realtimeEvents.chatTyping, onTyping);
+    socket?.on(realtimeEvents.storeChatUpdated, onUpdated);
+    return () => {
+      socket?.off(realtimeEvents.storeChatMessageCreated, onMessage);
+      socket?.off(realtimeEvents.chatTyping, onTyping);
+      socket?.off(realtimeEvents.storeChatUpdated, onUpdated);
+    };
+  }, [conversation?.id, session?.accessToken, session?.user?.id, typing.receiveTyping]);
 
   async function send(payload = null) {
     const isCommercial = payload?.type && payload.type !== "TEXTO";
@@ -192,11 +261,14 @@ export function StoreConversationScreen({ navigation, route }) {
       );
 
       if (sendsSupport) setSupportMode(false);
-      setConversation(response.conversation);
+      setConversation((current) => {
+        if (!current) return response.conversation;
+        const messages = [...(current.messages ?? [])];
+        if (response.message && !messages.some((item) => Number(item.id) === Number(response.message.id))) messages.push(response.message);
+        return { ...current, ...response.conversation, messages };
+      });
       if (searchesCatalog) {
-        const searchMessage = [...(response.conversation?.messages ?? [])]
-          .reverse()
-          .find((item) => item.isMine && item.content?.kind === "SEARCH");
+        const searchMessage = response.message?.content?.kind === "SEARCH" ? response.message : null;
         setSearchPendingMessageId(searchMessage?.id ?? null);
         const remainingDelay = Math.max(350, 2000 - (Date.now() - searchStartedAt));
         searchRevealTimerRef.current = setTimeout(() => {
@@ -469,9 +541,13 @@ export function StoreConversationScreen({ navigation, route }) {
           contentContainerStyle={[styles.messages, conversation?.isStore && styles.messagesBottom]}
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           keyboardShouldPersistTaps="handled"
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           onContentSizeChange={timeline.onContentSizeChange}
           onLayout={timeline.onLayout}
-          onScroll={timeline.onScroll}
+          onScroll={(event) => {
+            timeline.onScroll(event);
+            if (event.nativeEvent.contentOffset.y < 60) void loadOlder();
+          }}
           ref={scrollRef}
           scrollEventThrottle={16}
           showsVerticalScrollIndicator={false}
@@ -488,6 +564,7 @@ export function StoreConversationScreen({ navigation, route }) {
             <StoreJourneyStatus />
           )}
 
+          {loadingOlder ? <ActivityIndicator color={colors.primary} size="small" /> : null}
           {(conversation?.messages ?? []).length ? (
             conversation.messages.map((message) => (
               <MessageBubble
@@ -515,6 +592,7 @@ export function StoreConversationScreen({ navigation, route }) {
             </View>
           )}
           {searchThinking ? <StoreTypingIndicator /> : null}
+          <ChatTypingIndicator visible={typing.isOtherTyping} />
         </ScrollView>
         <ChatScrollToLatestButton onPress={timeline.scrollToLatest} unreadCount={timeline.unreadBelow} visible={!timeline.isAtBottom} />
       </View>

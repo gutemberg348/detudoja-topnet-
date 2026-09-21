@@ -13,6 +13,7 @@ export function createChargeRepository(database = prisma) {
     findCharges(args) { return database.cobranca.findMany(args); },
     findSeller(args) { return database.vendedor.findUnique(args); },
     findStore(args) { return database.loja.findFirst(args); },
+    findStoreMember(args) { return database.usuarioLoja.findFirst(args); },
     findUniqueCharge(args) { return database.cobranca.findUnique(args); },
     findPayment(args) { return database.pagamento.findUnique(args); },
     findWallets(args) { return database.carteira.findMany(args); },

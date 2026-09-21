@@ -56,8 +56,10 @@ export function CheckoutPaymentScreen({ navigation, route }) {
         .reduce((total, wallet) => total + Number(wallet.availableCents ?? 0), 0),
     [wallets],
   );
-  const canPayFullyWithBalance = availableBalanceCents >= totals.totalCents;
-  const balanceUsedCents = useBalance && canPayFullyWithBalance ? totals.totalCents : 0;
+  const hasAvailableBalance = availableBalanceCents > 0;
+  const balanceUsedCents = useBalance
+    ? Math.min(availableBalanceCents, totals.totalCents)
+    : 0;
   const pixComplementCents = Math.max(totals.totalCents - balanceUsedCents, 0);
 
   function continueToNextStore() {
@@ -200,18 +202,18 @@ export function CheckoutPaymentScreen({ navigation, route }) {
 
       <View style={styles.panel}>
         <PaymentOption
-          active={useBalance && canPayFullyWithBalance}
+          active={useBalance && hasAvailableBalance}
           icon="wallet-outline"
           label="Usar saldo/carteiras"
           onPress={() => {
-            if (canPayFullyWithBalance) {
+            if (hasAvailableBalance) {
               setUseBalance((current) => !current);
             }
           }}
           value={
-            canPayFullyWithBalance
-              ? `Disponivel: ${formatarDinheiro(availableBalanceCents)}`
-              : `Disponivel: ${formatarDinheiro(availableBalanceCents)} - use Pix para este pedido`
+            hasAvailableBalance
+              ? `Disponivel: ${formatarDinheiro(availableBalanceCents)}${availableBalanceCents < totals.totalCents ? " - o restante vai no Pix" : ""}`
+              : "Sem saldo disponivel - pague pelo Pix"
           }
         />
         <PaymentOption

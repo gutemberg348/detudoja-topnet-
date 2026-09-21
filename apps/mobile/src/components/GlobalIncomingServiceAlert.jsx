@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Platform, Vibration } from "react-native";
-import { acceptCourierRequest, getCourierRequests } from "../services/courier.api";
+import { acceptCourierRequest, getCourierRequests, rejectCourierRequest } from "../services/courier.api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import {
   acceptServiceConversation,
+  cancelServiceConversation,
   getServiceConversations,
 } from "../services/service-chats.api";
 import { useAuthStore } from "../stores/useAuthStore";
@@ -196,6 +197,26 @@ export function GlobalIncomingServiceAlert({ navigationRef }) {
     }
   }
 
+  async function reject() {
+    if (!alert || !session?.accessToken || loading) return;
+    setLoading(true);
+    try {
+      if (alert.kind === "courier") {
+        await rejectCourierRequest(session.accessToken, alert.id);
+      } else {
+        await cancelServiceConversation(session.accessToken, alert.id);
+      }
+      dismissedRef.current.add(alertKey(alert));
+      setAlert(null);
+      refresh();
+    } catch {
+      setAlert(null);
+      refresh();
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <IncomingServiceAlert
       alert={alert}
@@ -203,6 +224,7 @@ export function GlobalIncomingServiceAlert({ navigationRef }) {
       onAccept={accept}
       onClose={dismiss}
       onPress={openDesk}
+      onReject={reject}
     />
   );
 }

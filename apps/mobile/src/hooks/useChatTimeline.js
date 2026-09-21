@@ -2,14 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const BOTTOM_THRESHOLD = 84;
 
-export function useChatTimeline({ itemCount, scrollRef }) {
+export function useChatTimeline({ latestMessageId, latestMessageIsMine, scrollRef }) {
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [unreadBelow, setUnreadBelow] = useState(0);
   const atBottomRef = useRef(true);
   const contentHeightRef = useRef(0);
   const initializedRef = useRef(false);
   const layoutHeightRef = useRef(0);
-  const previousCountRef = useRef(itemCount ?? 0);
+  const previousLatestIdRef = useRef(latestMessageId ?? null);
 
   const scrollToLatest = useCallback((animated = true) => {
     atBottomRef.current = true;
@@ -43,19 +43,17 @@ export function useChatTimeline({ itemCount, scrollRef }) {
   }, []);
 
   useEffect(() => {
-    const currentCount = itemCount ?? 0;
-    const added = Math.max(0, currentCount - previousCountRef.current);
-    previousCountRef.current = currentCount;
-
-    if (!initializedRef.current && currentCount > 0) {
+    const previousLatestId = previousLatestIdRef.current;
+    previousLatestIdRef.current = latestMessageId ?? null;
+    if (!initializedRef.current && latestMessageId) {
       initializedRef.current = true;
       scrollToLatest(false);
       return;
     }
-    if (!added) return;
+    if (!latestMessageId || latestMessageId === previousLatestId) return;
     if (atBottomRef.current) scrollToLatest(true);
-    else setUnreadBelow((current) => current + added);
-  }, [itemCount, scrollToLatest]);
+    else if (!latestMessageIsMine) setUnreadBelow((current) => current + 1);
+  }, [latestMessageId, latestMessageIsMine, scrollToLatest]);
 
   return {
     isAtBottom,

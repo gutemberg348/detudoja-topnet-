@@ -14,6 +14,12 @@ export const createServiceConversationSchema = z.object({
 
 export const updateSellerServiceSchema = z.object({
   available: z.coerce.boolean(),
+  priceCents: z.coerce
+    .number()
+    .int()
+    .min(100, "Informe um valor minimo de R$ 1,00")
+    .max(999999999, "Valor acima do limite")
+    .optional(),
   registration: z.object({
     color: z.string().trim().max(60).optional().or(z.literal("")),
     driverLicense: z.string().trim().max(20).optional().or(z.literal("")),
