@@ -6,6 +6,7 @@ import { getPagination } from "../../utils/pagination.js";
 import { serializeAdminUser } from "./admin.serializer.js";
 import { adjustUserWallet } from "../wallet/wallet.service.js";
 import { adminUsersRepository } from "./admin-users.repository.js";
+import { userSearchConditions } from "./admin-users.search.js";
 
 const validStatuses = new Set(["ATIVO", "INATIVO", "BLOQUEADO", "PENDENTE"]);
 const validKycStatuses = new Set([
@@ -67,12 +68,7 @@ function buildUserWhere(query) {
       : {}),
     ...(search
       ? {
-          OR: [
-            { nome: { contains: search, mode: "insensitive" } },
-            { email: { contains: search, mode: "insensitive" } },
-            { telefone: { contains: search.replace(/\D/g, "") } },
-            { cpf: { contains: search.replace(/\D/g, "") } },
-          ],
+          OR: userSearchConditions(search),
         }
       : {}),
   };
@@ -83,7 +79,7 @@ export async function listAdminUsers(query) {
   const where = buildUserWhere(query);
   const [total, users] = await Promise.all([
     adminUsersRepository.count(where),
-    adminUsersRepository.list({ page, perPage, where }),
+    adminUsersRepository.list({ page, perPage, where, search: String(query.search ?? "").trim() }),
   ]);
 
   return {

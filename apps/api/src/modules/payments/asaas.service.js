@@ -843,7 +843,19 @@ export async function refreshPendingAsaasOrderPayment(userId, orderId) {
     currentOrder.status !== "AGUARDANDO_PAGAMENTO"
     || !["AGUARDANDO_PAGAMENTO", "EM_RECONCILIACAO"].includes(currentOrder.pagamento?.status)
   ) {
-    throw new AppError("Este pedido nao esta aguardando pagamento", 409);
+    // The webhook can settle this payment between the screen rendering and
+    // this request reaching the API. Returning the current state is idempotent.
+    const currentFullOrder = await asaasRepository.findUniqueOrder({
+      include: orderInclude,
+      where: { id: currentOrder.id },
+    });
+    return {
+      alreadyProcessed: true,
+      checkedAt: new Date().toISOString(),
+      gatewayStatus: currentFullOrder.pagamento?.status ?? "UNKNOWN",
+      order: serializeOrder(currentFullOrder),
+      paymentConfirmed: ["PAGO", "LIQUIDADO"].includes(currentFullOrder.pagamento?.status),
+    };
   }
 
   if (

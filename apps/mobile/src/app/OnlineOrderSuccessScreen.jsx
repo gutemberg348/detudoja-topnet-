@@ -20,18 +20,19 @@ function resetToTab(navigation, screen) {
   });
 }
 
-function resetToOrderChat(navigation, order) {
+function resetToOrderChat(navigation, order, conversationId) {
   navigation.reset({
     index: 1,
     routes: [
       { name: "Main" },
-      { name: "CustomerOrderDetails", params: { order } },
+      { name: "CustomerOrderDetails", params: { conversationId, order } },
     ],
   });
 }
 
 export function OnlineOrderSuccessScreen({ navigation, route }) {
   const order = route.params?.order ?? null;
+  const conversationId = route.params?.conversationId ?? null;
   const store = order?.store ?? route.params?.store;
   const payment = order?.payment ?? route.params?.payment ?? {};
 
@@ -72,7 +73,7 @@ export function OnlineOrderSuccessScreen({ navigation, route }) {
       <View style={styles.actions}>
         <AppButton
           icon="chatbubbles-outline"
-          onPress={() => resetToOrderChat(navigation, order)}
+          onPress={() => resetToOrderChat(navigation, order, conversationId)}
           title="Voltar para o chat"
         />
         <AppButton

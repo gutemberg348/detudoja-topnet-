@@ -6,12 +6,14 @@ import { getRealtimeSocket, realtimeEvents } from "../../services/realtime";
 import { getSellerServices, getServiceConversations, heartbeatSellerServices } from "../../services/service-chats.api";
 import { getStoreConversations } from "../../services/store-chats.api";
 
+const finalOrderStatuses = new Set(["CANCELADO", "CONCLUIDO"]);
+
 function serializeOrderConversation(order) {
   return {
     date: order.updatedAt ?? order.createdAt,
     id: `order-${order.id}`,
     imageUrl: order.store?.logoUrl ?? null,
-    kind: "order",
+    kind: "store-order",
     order,
     subtitle: `Pedido ${order.code ?? order.id}`,
     title: order.store?.name ?? "Loja",
@@ -19,16 +21,25 @@ function serializeOrderConversation(order) {
   };
 }
 
-function serializeStoreConversation(conversation) {
+function serializeStoreConversation(conversation, order = null) {
+  const orderDate = order?.updatedAt ?? order?.createdAt;
+  const conversationDate = conversation.updatedAt ?? conversation.createdAt;
+
   return {
     conversation,
-    date: conversation.updatedAt ?? conversation.createdAt,
+    date: new Date(orderDate ?? 0) > new Date(conversationDate ?? 0)
+      ? orderDate
+      : conversationDate,
     id: `store-${conversation.id}`,
     imageUrl: conversation.store?.logoUrl ?? conversation.otherPerson?.photoUrl ?? null,
-    kind: "store",
-    subtitle: conversation.lastMessage?.text ?? "Conversa com a loja",
+    kind: order ? "store-order" : "store",
+    order,
+    subtitle: order
+      ? `Pedido ${order.code ?? order.id} - ${order.status ?? "em acompanhamento"}`
+      : conversation.lastMessage?.text ?? "Conversa com a loja",
     title: conversation.store?.name ?? "Loja",
-    unreadCount: Number(conversation.unreadCount ?? 0),
+    unreadCount: Number(conversation.unreadCount ?? 0)
+      + Number(order?.unreadCustomerMessages ?? order?.unreadMessagesCount ?? 0),
   };
 }
 
@@ -166,16 +177,40 @@ export function useHomeConversations(accessToken) {
     };
   }, [accessToken, isFocused, load]);
 
-  const searchableConversations = useMemo(
-    () => [
-      ...orders.map(serializeOrderConversation),
+  const searchableConversations = useMemo(() => {
+    const latestOrderByStore = new Map();
+
+    orders.forEach((order) => {
+      if (finalOrderStatuses.has(order.status)) return;
+
+      const storeId = Number(order.storeId ?? order.store?.id);
+      if (!storeId) return;
+
+      const current = latestOrderByStore.get(storeId);
+      const currentDate = current?.updatedAt ?? current?.createdAt ?? 0;
+      const orderDate = order.updatedAt ?? order.createdAt ?? 0;
+      if (!current || new Date(orderDate) > new Date(currentDate)) {
+        latestOrderByStore.set(storeId, order);
+      }
+    });
+
+    const representedStores = new Set();
+    const stores = storeConversations.map((conversation) => {
+      const storeId = Number(conversation.store?.id);
+      if (storeId) representedStores.add(storeId);
+      return serializeStoreConversation(conversation, latestOrderByStore.get(storeId) ?? null);
+    });
+    const ordersWithoutConversation = [...latestOrderByStore.entries()]
+      .filter(([storeId]) => !representedStores.has(storeId))
+      .map(([, order]) => serializeOrderConversation(order));
+
+    return [
+      ...ordersWithoutConversation,
       ...personalChats.map(serializePersonalConversation),
-      ...storeConversations.map(serializeStoreConversation),
+      ...stores,
       ...serviceConversations.map(serializeServiceConversation),
-    ]
-      .sort((first, second) => new Date(second.date ?? 0) - new Date(first.date ?? 0)),
-    [orders, personalChats, serviceConversations, storeConversations],
-  );
+    ].sort((first, second) => new Date(second.date ?? 0) - new Date(first.date ?? 0));
+  }, [orders, personalChats, serviceConversations, storeConversations]);
   // A Home e a lista principal de conversas. Nao limitamos a tres itens:
   // o ScreenContainer ja oferece rolagem e assim nenhuma conversa ativa fica
   // escondida ate a pessoa abrir outra tela.

@@ -1,4 +1,5 @@
 import { prisma } from "../../config/prisma.js";
+import { userSearchConditions } from "./admin-users.search.js";
 
 const userInclude = {
   auditorias_administrativas: {
@@ -60,10 +61,40 @@ export const adminUsersRepository = {
     });
   },
 
-  list({ page, perPage, where }) {
+  async list({ page, perPage, where, search = "" }) {
+    if (search) {
+      const exact = { OR: userSearchConditions(search, "equals") };
+      const prefix = { OR: userSearchConditions(search, "startsWith") };
+      // Rank before pagination, without loading the entire participant base.
+      const groups = [
+        { AND: [where, exact] },
+        { AND: [where, prefix, { NOT: exact }] },
+        { AND: [where, { NOT: prefix }] },
+      ];
+      return prisma.$transaction(async (database) => {
+        let skip = (page - 1) * perPage;
+        const result = [];
+        for (const group of groups) {
+          if (result.length === perPage) break;
+          if (skip > 0) {
+            const count = await database.usuario.count({ where: group });
+            if (skip >= count) { skip -= count; continue; }
+          }
+          result.push(...await database.usuario.findMany({
+            include: userInclude,
+            orderBy: [{ nome: "asc" }, { id: "asc" }],
+            skip,
+            take: perPage - result.length,
+            where: group,
+          }));
+          skip = 0;
+        }
+        return result;
+      }, { isolationLevel: "RepeatableRead" });
+    }
     return prisma.usuario.findMany({
       include: userInclude,
-      orderBy: { criado_em: "desc" },
+      orderBy: [{ criado_em: "desc" }, { id: "desc" }],
       skip: (page - 1) * perPage,
       take: perPage,
       where,

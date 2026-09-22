@@ -110,7 +110,7 @@ export function HomeScreen({ navigation }) {
       return;
     }
 
-    if (conversation.kind === "order") {
+    if (conversation.kind === "store-order" && conversation.order) {
       navigation.navigate("CustomerOrderDetails", { order: conversation.order });
       return;
     }

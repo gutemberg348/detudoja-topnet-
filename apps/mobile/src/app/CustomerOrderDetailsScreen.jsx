@@ -1,7 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppButton } from "../components/AppButton";
 import { ChatAttachment } from "../components/ChatAttachment";
@@ -20,6 +20,12 @@ import {
   refreshCustomerOrderPayment,
   sendCustomerOrderMessage,
 } from "../services/orders.api";
+import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
+import {
+  getStoreConversation,
+  getStoreConversations,
+  markStoreConversationRead,
+} from "../services/store-chats.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { formatarDataHora } from "../utils/date";
 import { formatarDinheiro } from "../utils/money";
@@ -54,7 +60,7 @@ function formatDateTime(value) {
   return formatarDataHora(value) || "Agora";
 }
 
-function buildOrderMessages(order, persistedMessages = []) {
+function buildOrderMessages(order, persistedMessages = [], storeMessages = []) {
   if (!order) {
     return [];
   }
@@ -64,8 +70,9 @@ function buildOrderMessages(order, persistedMessages = []) {
   );
 
   return [
+    ...storeMessages.map(normalizeStoreConversationMessage),
     {
-      id: "summary",
+      id: `order-${order.id}-summary`,
       kind: "store",
       order,
       time: order.createdAt,
@@ -73,7 +80,7 @@ function buildOrderMessages(order, persistedMessages = []) {
       type: "summary",
     },
     {
-      id: "items",
+      id: `order-${order.id}-items`,
       kind: "store",
       order,
       time: order.createdAt,
@@ -82,7 +89,13 @@ function buildOrderMessages(order, persistedMessages = []) {
     },
     ...(hasPersistedTimeline ? [] : buildStatusMessages(order)),
     ...persistedMessages.map(normalizeOrderMessage),
-  ];
+  ]
+    .map((message, index) => ({ ...message, timelineIndex: index }))
+    .sort((left, right) => {
+      const leftTime = Date.parse(left.time ?? "") || 0;
+      const rightTime = Date.parse(right.time ?? "") || 0;
+      return leftTime - rightTime || left.timelineIndex - right.timelineIndex;
+    });
 }
 
 function normalizeOrderMessage(message) {
@@ -93,13 +106,35 @@ function normalizeOrderMessage(message) {
       : "store";
 
   return {
-    id: message.id,
+    id: `order-message-${message.id}`,
     attachment: message.attachment,
     kind,
     readAt: message.readAt,
     text: message.text,
     time: message.time ?? message.createdAt,
     title: message.title ?? (kind === "customer" ? "Voce" : "Loja"),
+  };
+}
+
+function normalizeStoreConversationMessage(message) {
+  const kind = message.author === "system"
+    ? "system"
+    : message.isMine || message.author === "customer"
+      ? "customer"
+      : "store";
+
+  return {
+    id: `store-message-${message.id}`,
+    attachment: message.attachment,
+    kind,
+    readAt: message.readAt,
+    text: message.text,
+    time: message.createdAt,
+    title: kind === "customer"
+      ? "Voce"
+      : kind === "system"
+        ? "Atualizacao"
+        : message.sentBy?.name ?? "Loja",
   };
 }
 
@@ -218,9 +253,14 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const { session } = useAuthStore();
   const chatScrollRef = useRef(null);
+  const skipNextAutomaticScrollRef = useRef(false);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const [chatMessages, setChatMessages] = useState([]);
+  const [storeConversation, setStoreConversation] = useState(null);
+  const [storeMessagePage, setStoreMessagePage] = useState({ hasMore: false, nextCursor: null });
+  const [historyError, setHistoryError] = useState("");
+  const [loadingOlderHistory, setLoadingOlderHistory] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
   const [proposalAction, setProposalAction] = useState("");
@@ -228,7 +268,43 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
   const [isSending, setIsSending] = useState(false);
   const [order, setOrder] = useState(route.params?.order ?? null);
   const [paymentCheckMessage, setPaymentCheckMessage] = useState("");
+  const [supportOpen, setSupportOpen] = useState(false);
   const lastAutomaticPaymentCheckAt = useRef(0);
+  const routeConversationId = route.params?.conversationId ?? null;
+  const orderStoreId = order?.storeId ?? order?.store?.id ?? null;
+
+  useEffect(() => {
+    if (!session?.accessToken || !orderStoreId) return undefined;
+    let active = true;
+
+    async function loadStoreHistory() {
+      setHistoryError("");
+      try {
+        let conversationId = routeConversationId;
+        if (!conversationId) {
+          const listResponse = await getStoreConversations(session.accessToken, {
+            storeId: orderStoreId,
+          });
+          conversationId = listResponse.conversations?.[0]?.id ?? null;
+        }
+
+        if (!conversationId) return;
+        const response = await getStoreConversation(session.accessToken, conversationId);
+        if (!active) return;
+        setStoreConversation(response.conversation ?? null);
+        setStoreMessagePage(response.messagePage ?? { hasMore: false, nextCursor: null });
+      } catch (requestError) {
+        if (active) {
+          setHistoryError(requestError.message ?? "Nao foi possivel carregar o historico anterior.");
+        }
+      }
+    }
+
+    loadStoreHistory();
+    return () => {
+      active = false;
+    };
+  }, [orderStoreId, routeConversationId, session?.accessToken]);
 
   const loadOrder = useCallback(async ({ automaticPaymentCheck = false, checkPayment = false, silent = false } = {}) => {
     if (!session?.accessToken || !order?.id) {
@@ -271,8 +347,10 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
         );
       }
 
-      const messagesResponse = await getCustomerOrderMessages(session.accessToken, order.id);
-      const ordersResponse = await getCustomerOrders(session.accessToken);
+      const [messagesResponse, ordersResponse] = await Promise.all([
+        getCustomerOrderMessages(session.accessToken, order.id),
+        getCustomerOrders(session.accessToken),
+      ]);
       const updatedOrder = (ordersResponse.orders ?? []).find((item) => item.id === order.id);
 
       if (updatedOrder) {
@@ -312,10 +390,73 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
     orderId: order?.id,
   });
 
+  useEffect(() => {
+    if (!session?.accessToken || !storeConversation?.id) return undefined;
+    const socket = getRealtimeSocket(session.accessToken);
+    const onMessage = (payload = {}) => {
+      if (
+        Number(payload.conversationId) !== Number(storeConversation.id)
+        || !payload.message
+      ) return;
+      const message = {
+        ...payload.message,
+        isMine: Number(payload.senderUserId) === Number(session.user?.id),
+      };
+      setStoreConversation((current) => {
+        if (
+          !current
+          || current.messages?.some((item) => Number(item.id) === Number(message.id))
+        ) return current;
+        return { ...current, messages: [...(current.messages ?? []), message] };
+      });
+      if (!message.isMine) {
+        void markStoreConversationRead(session.accessToken, storeConversation.id).catch(() => {});
+      }
+    };
+    socket?.on(realtimeEvents.storeChatMessageCreated, onMessage);
+    return () => socket?.off(realtimeEvents.storeChatMessageCreated, onMessage);
+  }, [session?.accessToken, session?.user?.id, storeConversation?.id]);
+
   const messages = useMemo(
-    () => buildOrderMessages(order, chatMessages),
-    [chatMessages, order],
+    () => buildOrderMessages(order, chatMessages, storeConversation?.messages ?? []),
+    [chatMessages, order, storeConversation?.messages],
   );
+
+  async function loadOlderStoreHistory() {
+    if (
+      !session?.accessToken
+      || !storeConversation?.id
+      || !storeMessagePage.hasMore
+      || !storeMessagePage.nextCursor
+      || loadingOlderHistory
+    ) return;
+
+    setLoadingOlderHistory(true);
+    setHistoryError("");
+    try {
+      const response = await getStoreConversation(
+        session.accessToken,
+        storeConversation.id,
+        { beforeMessageId: storeMessagePage.nextCursor },
+      );
+      setStoreConversation((current) => {
+        if (!current) return response.conversation ?? null;
+        const knownIds = new Set((current.messages ?? []).map((item) => Number(item.id)));
+        const olderMessages = (response.conversation?.messages ?? []).filter(
+          (item) => !knownIds.has(Number(item.id)),
+        );
+        if (olderMessages.length) {
+          skipNextAutomaticScrollRef.current = true;
+        }
+        return { ...current, messages: [...olderMessages, ...(current.messages ?? [])] };
+      });
+      setStoreMessagePage(response.messagePage ?? { hasMore: false, nextCursor: null });
+    } catch (requestError) {
+      setHistoryError(requestError.message ?? "Nao foi possivel carregar o historico anterior.");
+    } finally {
+      setLoadingOlderHistory(false);
+    }
+  }
 
   const scrollToLatest = useCallback(() => {
     requestAnimationFrame(() => {
@@ -325,6 +466,10 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
 
   useEffect(() => {
     if (messages.length) {
+      if (skipNextAutomaticScrollRef.current) {
+        skipNextAutomaticScrollRef.current = false;
+        return;
+      }
       scrollToLatest();
     }
   }, [messages.length, scrollToLatest]);
@@ -353,6 +498,7 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
     }
 
     navigation.navigate("CheckoutPayment", {
+      conversationId: storeConversation?.id ?? routeConversationId,
       mode: "order-proposal",
       order: nextOrder,
       proposal,
@@ -577,29 +723,22 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
           </View>
         ) : null}
 
-        {order.status !== "CANCELADO" ? (
-          <View style={styles.cancellationCard}>
-            <View style={styles.cancellationCopy}>
-              <Text style={styles.cancellationTitle}>
-                {canCancelDirectly ? "Nao vai continuar?" : "Precisa cancelar?"}
-              </Text>
-              <Text style={styles.cancellationText}>
-                {canCancelDirectly
-                  ? "Antes do pagamento, o cancelamento e imediato."
-                  : "Pedidos pagos ou em atendimento sao analisados pelo suporte. Se a loja nao iniciar o atendimento no prazo, o sistema cancela e estorna automaticamente."}
-              </Text>
-            </View>
-            <AppButton
-              icon={canCancelDirectly ? "close-circle-outline" : "headset-outline"}
-              loading={isCanceling}
-              onPress={requestCancellation}
-              title={canCancelDirectly ? "Cancelar pedido" : "Solicitar cancelamento"}
-              variant="outline"
-            />
-          </View>
-        ) : null}
-
         <View style={styles.messages}>
+          {storeMessagePage.hasMore ? (
+            <Pressable
+              disabled={loadingOlderHistory}
+              onPress={loadOlderStoreHistory}
+              style={({ pressed }) => [styles.historyButton, pressed && styles.pressed]}
+            >
+              {loadingOlderHistory ? (
+                <ActivityIndicator color={colors.primaryDark} size="small" />
+              ) : (
+                <Ionicons color={colors.primaryDark} name="time-outline" size={18} />
+              )}
+              <Text style={styles.historyButtonText}>Carregar conversas anteriores</Text>
+            </Pressable>
+          ) : null}
+          {historyError ? <Text style={styles.historyError}>{historyError}</Text> : null}
           {messages.map((message) => (
             <MessageBubble accessToken={session.accessToken} key={message.id} message={message} />
           ))}
@@ -614,8 +753,54 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
           onSendAttachment={sendQuestion}
           placeholder="Escreva uma duvida para a loja"
           sending={isSending}
-          style={{ paddingBottom: Math.max(spacing.sm, insets.bottom + spacing.xs) }}
+          style={{ paddingBottom: spacing.sm }}
         />
+
+        {order.status !== "CANCELADO" ? (
+          <View style={styles.supportSection}>
+            <Pressable
+              accessibilityLabel={supportOpen ? "Fechar ajuda e suporte" : "Abrir ajuda e suporte"}
+              accessibilityState={{ expanded: supportOpen }}
+              onPress={() => setSupportOpen((current) => !current)}
+              style={({ pressed }) => [styles.supportToggle, pressed && styles.pressed]}
+            >
+              <View style={styles.supportIcon}>
+                <Ionicons color={colors.primaryDark} name="headset-outline" size={19} />
+              </View>
+              <View style={styles.supportCopy}>
+                <Text style={styles.supportTitle}>Ajuda e suporte</Text>
+                <Text style={styles.supportSubtitle}>Duvidas, problemas ou cancelamento</Text>
+              </View>
+              <Ionicons
+                color={colors.textMuted}
+                name={supportOpen ? "chevron-up" : "chevron-down"}
+                size={19}
+              />
+            </Pressable>
+
+            {supportOpen ? (
+              <View style={styles.cancellationCard}>
+                <View style={styles.cancellationCopy}>
+                  <Text style={styles.cancellationTitle}>
+                    {canCancelDirectly ? "Cancelar este pedido" : "Solicitar cancelamento"}
+                  </Text>
+                  <Text style={styles.cancellationText}>
+                    {canCancelDirectly
+                      ? "Como o pagamento ainda nao foi confirmado, o cancelamento e imediato."
+                      : "Pedidos pagos ou em atendimento sao analisados pelo suporte. Se a loja nao iniciar no prazo, o sistema cancela e estorna automaticamente."}
+                  </Text>
+                </View>
+                <AppButton
+                  icon={canCancelDirectly ? "close-circle-outline" : "headset-outline"}
+                  loading={isCanceling}
+                  onPress={requestCancellation}
+                  title={canCancelDirectly ? "Cancelar pedido" : "Falar com o suporte"}
+                  variant="outline"
+                />
+              </View>
+            ) : null}
+          </View>
+        ) : null}
 
       </View>
 
@@ -744,7 +929,7 @@ function MessageBubble({ accessToken, message }) {
 
   return (
     <View style={[styles.messageRow, isCustomer && styles.messageRowCustomer]}>
-      {!isCustomer ? (
+      {!isCustomer && !isRichMessage ? (
         <View style={styles.messageAvatar}>
           <Ionicons color={colors.primaryDark} name="storefront-outline" size={16} />
         </View>
@@ -785,29 +970,112 @@ function OrderSummaryMessage({ order }) {
         </View>
         <Text style={styles.summaryStatusText}>{statusCopy[order.status] ?? order.status}</Text>
       </View>
+      <OrderProgress order={order} />
       <BubbleDetail label="Total" value={formatarDinheiro(order.totalCents)} />
       <BubbleDetail label="Entrega" value={deliveryText(order)} />
-      {order.payment ? (
-        <PaymentBreakdown payment={order.payment} />
-      ) : null}
+      <PaymentBreakdown order={order} />
     </View>
   );
 }
 
-function PaymentBreakdown({ payment }) {
+function OrderProgress({ order }) {
+  const { width, fontScale } = useWindowDimensions();
+  const vertical = width < 360 || fontScale > 1.2;
+  const pickup = order.deliveryMode === "RETIRADA";
+  const steps = [
+    { status: "RECEBIDO", label: "Recebido", icon: "receipt-outline" },
+    { status: "ACEITO", label: "Aceito", icon: "checkmark-circle-outline" },
+    { status: "PREPARANDO", label: "Em preparo", icon: "cube-outline" },
+    { status: pickup ? "PRONTO_RETIRADA" : "SAIU_ENTREGA", label: pickup ? "Retirada" : "A caminho", icon: pickup ? "storefront-outline" : "bicycle-outline" },
+    { status: "CONCLUIDO", label: pickup ? "Retirado" : "Entregue", icon: "bag-check-outline" },
+  ];
+  const currentIndex = steps.findIndex((step) => step.status === order.status);
+  const canceled = order.status === "CANCELADO";
+  const hints = {
+    NEGOCIANDO: "Aguardando a definição dos detalhes com a loja.",
+    AGUARDANDO_PAGAMENTO: "Aguardando a confirmação do pagamento para continuar.",
+    RECEBIDO: "Pedido recebido. Aguardando a loja aceitar.",
+    ACEITO: "A loja aceitou seu pedido. O preparo começa em breve.",
+    PREPARANDO: "A loja está preparando seu pedido.",
+    SAIU_ENTREGA: "Seu pedido saiu para entrega e está a caminho.",
+    PRONTO_RETIRADA: "Tudo pronto! Você já pode retirar na loja.",
+    CONCLUIDO: pickup ? "Retirada confirmada. Pedido concluído." : "Recebimento confirmado. Pedido concluído.",
+    CANCELADO: "Pedido cancelado. Confira abaixo a situação do pagamento.",
+  };
+
   return (
-    <View style={styles.paymentBox}>
+    <View style={styles.progressCard}>
       <View style={styles.paymentBoxHeader}>
-        <Ionicons color={colors.primaryDark} name="card-outline" size={15} />
-        <Text style={styles.paymentBoxTitle}>Como foi pago</Text>
+        <Ionicons color={canceled ? colors.danger : colors.primaryDark} name={canceled ? "close-circle-outline" : "navigate-outline"} size={17} />
+        <Text style={styles.paymentBoxTitle}>{canceled ? "Pedido cancelado" : "Acompanhe seu pedido"}</Text>
       </View>
-      <View style={styles.paymentValues}>
-        <PaymentValue label="Saldo" value={formatarDinheiro(payment.balanceCents)} />
-        <View style={styles.paymentDivider} />
-        <PaymentValue label="Pix" value={formatarDinheiro(payment.pixCents)} />
-        <View style={styles.paymentDivider} />
-        <PaymentValue label="Total" strong value={formatarDinheiro(payment.totalCents)} />
+      {!canceled ? (
+        <View style={[styles.progressSteps, vertical && styles.progressStepsVertical]}>
+          {steps.map((step, index) => {
+            const reached = index <= currentIndex;
+            const current = index === currentIndex;
+            return (
+              <View
+                accessibilityLabel={`${step.label}: ${current ? "etapa atual" : reached ? "concluído" : "aguardando"}`}
+                accessible
+                key={step.status}
+                style={[styles.progressStep, vertical && styles.progressStepVertical]}
+              >
+                {index > 0 ? <View style={[styles.progressLineBefore, vertical && styles.progressLineBeforeVertical, reached && styles.progressLineDone]} /> : null}
+                {index < steps.length - 1 ? <View style={[styles.progressLineAfter, vertical && styles.progressLineAfterVertical, index < currentIndex && styles.progressLineDone]} /> : null}
+                <View style={[styles.progressDot, reached && styles.progressDotDone, current && styles.progressDotCurrent]}>
+                  <Ionicons color={reached ? colors.card : colors.textMuted} name={step.icon} size={17} />
+                </View>
+                <Text style={[styles.progressLabel, vertical && styles.progressLabelVertical, reached && styles.progressLabelDone]}>{step.label}</Text>
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
+      <Text accessibilityLiveRegion="polite" style={styles.progressHint}>{hints[order.status] ?? statusCopy[order.status] ?? "Aguardando atualização da loja."}</Text>
+    </View>
+  );
+}
+
+function PaymentBreakdown({ order }) {
+  const payment = order.payment;
+  const confirmed = ["PAGO", "LIQUIDADO"].includes(payment?.status);
+  const statusDetails = {
+    PAGO: { label: "Pagamento confirmado", icon: "checkmark-circle", color: colors.primaryDark },
+    LIQUIDADO: { label: "Pagamento confirmado", icon: "checkmark-circle", color: colors.primaryDark },
+    PENDENTE: { label: "Pagamento pendente", icon: "time-outline", color: "#9A5B00" },
+    AGUARDANDO_PAGAMENTO: { label: "Aguardando pagamento", icon: "time-outline", color: "#9A5B00" },
+    EM_RECONCILIACAO: { label: "Conferindo pagamento", icon: "sync-outline", color: colors.info },
+    ESTORNADO: { label: "Pagamento estornado", icon: "return-down-back-outline", color: colors.info },
+    CANCELADO: { label: "Pagamento cancelado", icon: "close-circle-outline", color: colors.danger },
+    FALHOU: { label: "Pagamento não concluído", icon: "alert-circle-outline", color: colors.danger },
+    EM_DISPUTA: { label: "Pagamento em análise", icon: "shield-outline", color: "#9A5B00" },
+  };
+  const details = statusDetails[payment?.status] ?? {
+    label: payment ? "Situação do pagamento indisponível" : "Sem pagamento registrado",
+    icon: "card-outline",
+    color: colors.textSecondary,
+  };
+
+  return (
+    <View style={[styles.paymentBox, confirmed && styles.paymentBoxConfirmed]}>
+      <View style={styles.paymentBoxHeader}>
+        <Ionicons color={details.color} name={details.icon} size={21} />
+        <Text accessibilityLiveRegion="polite" style={[styles.paymentBoxTitle, { color: details.color }]}>{details.label}</Text>
       </View>
+      {confirmed && order.paidAt ? <Text style={styles.paymentLabel}>Confirmado em {formatDateTime(order.paidAt)}</Text> : null}
+      {payment ? (
+        <>
+          <Text style={styles.paymentLabel}>{confirmed ? "Como foi pago" : payment.status === "ESTORNADO" ? "Composição do pagamento estornado" : "Composição do pagamento"}</Text>
+          <View style={styles.paymentValues}>
+            <PaymentValue label="Saldo" value={formatarDinheiro(payment.balanceCents)} />
+            <View style={styles.paymentDivider} />
+            <PaymentValue label="Pix" value={formatarDinheiro(payment.pixCents)} />
+            <View style={styles.paymentDivider} />
+            <PaymentValue label="Total" strong value={formatarDinheiro(payment.totalCents)} />
+          </View>
+        </>
+      ) : null}
     </View>
   );
 }
@@ -872,6 +1140,42 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     fontSize: typography.small,
     fontWeight: "700",
+  },
+  supportCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  supportIcon: {
+    alignItems: "center",
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.round,
+    height: 38,
+    justifyContent: "center",
+    width: 38,
+  },
+  supportSection: {
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    gap: spacing.sm,
+    paddingTop: spacing.sm,
+  },
+  supportSubtitle: {
+    color: colors.textMuted,
+    fontFamily: fonts.regular,
+    fontSize: typography.caption,
+  },
+  supportTitle: {
+    color: colors.textPrimary,
+    fontFamily: fonts.bold,
+    fontSize: typography.small,
+    fontWeight: "700",
+  },
+  supportToggle: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 54,
+    paddingHorizontal: spacing.xs,
   },
   bubbleDetail: {
     alignItems: "flex-start",
@@ -1017,6 +1321,32 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: spacing.xs,
   },
+  historyButton: {
+    alignItems: "center",
+    alignSelf: "center",
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primaryLight,
+    borderRadius: radius.round,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.xs,
+    minHeight: 40,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  historyButtonText: {
+    color: colors.primaryDark,
+    fontFamily: fonts.bold,
+    fontSize: typography.caption,
+    fontWeight: "700",
+  },
+  historyError: {
+    color: colors.danger,
+    fontFamily: fonts.medium,
+    fontSize: typography.caption,
+    lineHeight: 18,
+    textAlign: "center",
+  },
   localHint: {
     color: colors.textWeak,
     fontFamily: fonts.regular,
@@ -1097,12 +1427,119 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     padding: spacing.sm,
   },
+  paymentBoxConfirmed: {
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primaryLight,
+  },
+  progressCard: {
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    gap: spacing.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+  },
+  progressSteps: {
+    flexDirection: "row",
+  },
+  progressStepsVertical: {
+    flexDirection: "column",
+  },
+  progressStep: {
+    alignItems: "center",
+    flex: 1,
+    minWidth: 0,
+    gap: 7,
+  },
+  progressStepVertical: {
+    flex: 0,
+    flexDirection: "row",
+    gap: spacing.md,
+    minHeight: 48,
+  },
+  progressDot: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.cardMuted,
+    borderColor: colors.border,
+    borderWidth: 2,
+    borderRadius: radius.round,
+    width: 30,
+    height: 30,
+  },
+  progressDotDone: {
+    backgroundColor: colors.primaryDark,
+    borderColor: colors.primaryDark,
+  },
+  progressDotCurrent: {
+    borderColor: colors.primaryLight,
+    borderWidth: 3,
+  },
+  progressLineBefore: {
+    position: "absolute",
+    backgroundColor: colors.border,
+    height: 3,
+    top: 14,
+    left: 0,
+    right: "50%",
+  },
+  progressLineAfter: {
+    position: "absolute",
+    backgroundColor: colors.border,
+    height: 3,
+    top: 14,
+    left: "50%",
+    right: 0,
+  },
+  progressLineBeforeVertical: {
+    top: 0,
+    bottom: "50%",
+    left: 14,
+    right: undefined,
+    height: "auto",
+    width: 3,
+  },
+  progressLineAfterVertical: {
+    top: "50%",
+    bottom: 0,
+    left: 14,
+    right: undefined,
+    height: "auto",
+    width: 3,
+  },
+  progressLineDone: {
+    backgroundColor: colors.primaryDark,
+  },
+  progressLabel: {
+    color: colors.textMuted,
+    fontFamily: fonts.medium,
+    fontSize: 10,
+    textAlign: "center",
+    alignSelf: "stretch",
+  },
+  progressLabelVertical: {
+    flex: 1,
+    alignSelf: "auto",
+    textAlign: "left",
+    fontSize: typography.caption,
+  },
+  progressLabelDone: {
+    color: colors.primaryDark,
+    fontFamily: fonts.bold,
+  },
+  progressHint: {
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    fontSize: typography.caption,
+  },
   paymentBoxHeader: {
     alignItems: "center",
     flexDirection: "row",
     gap: spacing.xs,
   },
   paymentBoxTitle: {
+    flex: 1,
     color: colors.primaryDark,
     fontFamily: fonts.bold,
     fontSize: typography.caption,
@@ -1120,11 +1557,13 @@ const styles = StyleSheet.create({
   },
   paymentValue: {
     flex: 1,
+    minWidth: 65,
     gap: 2,
   },
   paymentValues: {
     alignItems: "center",
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: spacing.sm,
   },
   proposalAction: {
@@ -1277,10 +1716,12 @@ const styles = StyleSheet.create({
   },
   richMessage: {
     gap: 7,
-    minWidth: 220,
+    minWidth: 0,
   },
   richMessageBubble: {
-    maxWidth: "94%",
+    flex: 1,
+    minWidth: 0,
+    maxWidth: "100%",
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.sm,
   },

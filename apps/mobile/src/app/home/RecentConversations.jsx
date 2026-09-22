@@ -91,7 +91,7 @@ export function RecentConversations({
                     ? "briefcase-outline"
                     : conversation.kind === "person"
                       ? "person-outline"
-                    : conversation.kind === "store"
+                    : ["store", "store-order"].includes(conversation.kind)
                       ? "chatbubbles-outline"
                       : "receipt-outline"
                 }

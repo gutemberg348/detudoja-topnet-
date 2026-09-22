@@ -1,9 +1,14 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useCallback, useState } from "react";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AppState, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { AppButton } from "../components/AppButton";
+import { PaymentFeedbackOverlay } from "../components/PaymentFeedbackOverlay";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { useRealtimeCharge } from "../hooks/useRealtimeCharge";
+import { useRealtimeOrders } from "../hooks/useRealtimeOrders";
+import { getCharge } from "../services/charges.api";
+import { getCustomerOrders } from "../services/orders.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { formatarDinheiro } from "../utils/money";
 import { colors, fonts, radius, shadow, spacing, typography } from "../utils/theme";
@@ -13,20 +18,85 @@ export function GatewayPixPaymentScreen({ navigation, route }) {
   const gatewayPayment = route.params?.gatewayPayment;
   const [charge, setCharge] = useState(route.params?.charge ?? null);
   const paymentBreakdown = route.params?.paymentBreakdown;
-  const order = route.params?.order;
+  const [order, setOrder] = useState(route.params?.order ?? null);
+  const [paymentFeedback, setPaymentFeedback] = useState(null);
+  const successHandledRef = useRef(false);
   const store = route.params?.store;
   const checkoutGroups = Array.isArray(route.params?.checkoutGroups)
     ? route.params.checkoutGroups
     : [];
   const checkoutIndex = Math.max(0, Number(route.params?.checkoutIndex ?? 0));
   const hasNextStore = checkoutIndex + 1 < checkoutGroups.length;
+  const conversationId = route.params?.conversationId ?? null;
+  const paymentConfirmed = charge
+    ? charge.status === "PAGA"
+    : ["PAGO", "LIQUIDADO"].includes(order?.payment?.status);
   const handleChargeUpdated = useCallback((updatedCharge) => setCharge(updatedCharge), []);
+  const handleOrderUpdated = useCallback((payload = {}) => {
+    if (payload.order) setOrder(payload.order);
+  }, []);
 
   useRealtimeCharge({
     accessToken: session?.accessToken,
     chargeId: charge?.id,
     onChargeUpdated: handleChargeUpdated,
   });
+
+  useRealtimeOrders({
+    accessToken: session?.accessToken,
+    active: Boolean(order?.id),
+    onOrderEvent: handleOrderUpdated,
+    orderId: order?.id,
+    storeId: order?.storeId ?? store?.id,
+  });
+
+  const syncPaymentStatus = useCallback(async () => {
+    if (!session?.accessToken || paymentConfirmed) return;
+    try {
+      if (charge?.code) {
+        const response = await getCharge(session.accessToken, charge.code);
+        if (response.charge) setCharge(response.charge);
+        return;
+      }
+      if (order?.id) {
+        const response = await getCustomerOrders(session.accessToken, {
+          storeId: order.storeId ?? store?.id,
+        });
+        const updatedOrder = (response.orders ?? []).find(
+          (item) => Number(item.id) === Number(order.id),
+        );
+        if (updatedOrder) setOrder(updatedOrder);
+      }
+    } catch {
+      // The socket remains active; the next lightweight check retries.
+    }
+  }, [charge?.code, order?.id, order?.storeId, paymentConfirmed, session?.accessToken, store?.id]);
+
+  useFocusEffect(useCallback(() => {
+    syncPaymentStatus();
+    if (paymentConfirmed) return undefined;
+    const interval = setInterval(syncPaymentStatus, 5000);
+    return () => clearInterval(interval);
+  }, [paymentConfirmed, syncPaymentStatus]));
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") syncPaymentStatus();
+    });
+    return () => subscription.remove();
+  }, [syncPaymentStatus]);
+
+  useEffect(() => {
+    if (!paymentConfirmed || successHandledRef.current) return;
+    successHandledRef.current = true;
+    setPaymentFeedback({
+      message: charge
+        ? `${store?.name ?? "O recebedor"} recebeu a confirmação do seu pagamento.`
+        : `${store?.name ?? "A loja"} recebeu a confirmação. Seu pedido já está em acompanhamento.`,
+      status: "success",
+      title: "Pix confirmado",
+    });
+  }, [charge, paymentConfirmed, store?.name]);
 
   function continueFlow() {
     if (charge) {
@@ -52,7 +122,7 @@ export function GatewayPixPaymentScreen({ navigation, route }) {
       return;
     }
 
-    navigation.replace("CustomerOrderDetails", { order });
+    navigation.replace("CustomerOrderDetails", { conversationId, order });
   }
 
   return (
@@ -62,8 +132,8 @@ export function GatewayPixPaymentScreen({ navigation, route }) {
           <Ionicons color={colors.primaryDark} name="qr-code-outline" size={28} />
         </View>
         <View style={styles.heroCopy}>
-          <Text style={styles.eyebrow}>{charge?.status === "PAGA" ? "PAGAMENTO CONFIRMADO" : "PAGAMENTO PIX"}</Text>
-          <Text style={styles.title}>{charge?.status === "PAGA" ? "Pagamento concluido" : "Escaneie para pagar"}</Text>
+          <Text style={styles.eyebrow}>{paymentConfirmed ? "PAGAMENTO CONFIRMADO" : "PAGAMENTO PIX"}</Text>
+          <Text style={styles.title}>{paymentConfirmed ? "Pagamento concluído" : "Escaneie para pagar"}</Text>
           <Text style={styles.subtitle}>
             {charge
               ? `${store?.name ?? "A loja"} recebe somente depois da confirmacao do Pix.`
@@ -74,7 +144,7 @@ export function GatewayPixPaymentScreen({ navigation, route }) {
 
       <View style={styles.amountCard}>
         <Text style={styles.amountLabel}>Valor do Pix</Text>
-        <Text style={styles.amount}>{formatarDinheiro(paymentBreakdown?.pixCents ?? order?.payment?.pixCents ?? order?.totalCents ?? 0)}</Text>
+        <Text style={styles.amount}>{formatarDinheiro(paymentBreakdown?.pixCents ?? order?.payment?.pixCents ?? order?.totalCents ?? charge?.amountCents ?? 0)}</Text>
         <Text style={styles.orderCode}>{charge?.code ?? order?.code ?? "Pagamento Brasil Cashback"}</Text>
         {charge && Number(paymentBreakdown?.walletCents ?? 0) > 0 ? (
           <Text style={styles.orderCode}>{formatarDinheiro(paymentBreakdown.walletCents)} reservado do seu saldo</Text>
@@ -82,22 +152,22 @@ export function GatewayPixPaymentScreen({ navigation, route }) {
       </View>
 
       <View style={styles.qrCard}>
-        {charge?.status === "PAGA" ? (
+        {paymentConfirmed ? (
           <View style={styles.paidIcon}><Ionicons color={colors.card} name="checkmark" size={42} /></View>
         ) : null}
-        {charge?.status !== "PAGA" && gatewayPayment?.qrImageDataUrl ? (
+        {!paymentConfirmed && gatewayPayment?.qrImageDataUrl ? (
           <Image source={{ uri: gatewayPayment.qrImageDataUrl }} style={styles.qrImage} />
-        ) : charge?.status !== "PAGA" ? (
+        ) : !paymentConfirmed ? (
           <View style={styles.qrUnavailable}>
             <Ionicons color={colors.warning} name="warning-outline" size={26} />
             <Text style={styles.qrUnavailableText}>Nao foi possivel carregar o QR agora.</Text>
           </View>
         ) : null}
-        <Text style={styles.qrTitle}>{charge?.status === "PAGA" ? "Recebido pela loja" : "Abra o app do seu banco e leia o QR"}</Text>
-        <Text style={styles.qrCopy}>{charge?.status === "PAGA" ? "A confirmacao chegou em tempo real." : "O pagamento e confirmado automaticamente."}</Text>
+        <Text style={styles.qrTitle}>{paymentConfirmed ? "Recebido pela loja" : "Abra o app do seu banco e leia o QR"}</Text>
+        <Text style={styles.qrCopy}>{paymentConfirmed ? "A confirmação chegou em tempo real." : "O pagamento é confirmado automaticamente."}</Text>
       </View>
 
-      {charge?.status !== "PAGA" && gatewayPayment?.pixCopyPaste ? (
+      {!paymentConfirmed && gatewayPayment?.pixCopyPaste ? (
         <View style={styles.copyCard}>
           <View style={styles.copyHeader}>
             <Ionicons color={colors.primaryDark} name="copy-outline" size={18} />
@@ -125,18 +195,28 @@ export function GatewayPixPaymentScreen({ navigation, route }) {
       <AppButton
         icon={charge ? "home-outline" : hasNextStore ? "arrow-forward" : "receipt-outline"}
         onPress={continueFlow}
-        title={charge ? charge.status === "PAGA" ? "Concluir" : "Voltar ao inicio" : hasNextStore ? "Continuar para a proxima loja" : "Acompanhar pedido"}
+        title={charge ? paymentConfirmed ? "Concluir" : "Voltar ao início" : hasNextStore ? "Continuar para a próxima loja" : "Acompanhar pedido"}
       />
       {!charge ? (
         <Pressable
           onPress={() => hasNextStore
-            ? navigation.navigate("CustomerOrderDetails", { order })
+            ? navigation.navigate("CustomerOrderDetails", { conversationId, order })
             : navigation.navigate("Main")}
           style={styles.laterButton}
         >
           <Text style={styles.laterText}>{hasNextStore ? "Acompanhar este pedido" : "Pagar depois"}</Text>
         </Pressable>
       ) : null}
+      <PaymentFeedbackOverlay
+        amountCents={paymentBreakdown?.pixCents ?? order?.payment?.pixCents ?? order?.totalCents ?? charge?.amountCents}
+        counterparty={store?.name}
+        durationMs={2400}
+        message={paymentFeedback?.message}
+        onFinished={continueFlow}
+        status={paymentFeedback?.status}
+        title={paymentFeedback?.title}
+        visible={Boolean(paymentFeedback)}
+      />
     </ScreenContainer>
   );
 }

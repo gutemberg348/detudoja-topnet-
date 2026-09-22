@@ -11,7 +11,7 @@ export class ApiError extends Error {
 
 export async function apiRequest(
   path,
-  { body, method = "GET", token } = {},
+  { body, method = "GET", token, signal } = {},
 ) {
   const headers = {};
   const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
@@ -28,6 +28,7 @@ export async function apiRequest(
     body: body ? (isFormData ? body : JSON.stringify(body)) : undefined,
     headers,
     method,
+    signal,
   });
 
   if (response.status === 204) {

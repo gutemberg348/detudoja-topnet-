@@ -247,6 +247,7 @@ export function CheckoutScreen({ navigation, route }) {
       cartItemKeys,
       checkoutGroups,
       checkoutIndex,
+      conversationId: checkoutGroup?.conversationId ?? null,
       delivery,
       deliveryMode,
       items: cart.items,

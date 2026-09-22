@@ -44,6 +44,7 @@ export function CheckoutPaymentScreen({ navigation, route }) {
   const store = route.params?.store ?? order?.store ?? null;
   const totals = route.params?.totals ?? { totalCents: 0 };
   const cartItemKeys = route.params?.cartItemKeys ?? [];
+  const conversationId = route.params?.conversationId ?? null;
   const checkoutGroups = Array.isArray(route.params?.checkoutGroups)
     ? route.params.checkoutGroups
     : [];
@@ -130,6 +131,7 @@ export function CheckoutPaymentScreen({ navigation, route }) {
         navigation.replace("GatewayPixPayment", {
           checkoutGroups,
           checkoutIndex,
+          conversationId,
           gatewayPayment: response.gatewayPayment,
           order: response.order,
           store,
@@ -138,6 +140,7 @@ export function CheckoutPaymentScreen({ navigation, route }) {
       }
 
       setCompletedPayment({
+        conversationId,
         order: response.order,
         payment: response.order?.payment ?? {
           balanceCents: balanceUsedCents,

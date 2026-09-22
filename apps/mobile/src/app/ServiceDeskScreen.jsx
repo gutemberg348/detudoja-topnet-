@@ -53,6 +53,7 @@ export function ServiceDeskScreen({ navigation }) {
   const [courierScopeSaving, setCourierScopeSaving] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [moreServicesOpen, setMoreServicesOpen] = useState(false);
   const [profile, setProfile] = useState(null);
   const [registeringService, setRegisteringService] = useState(false);
   const [registerServiceError, setRegisterServiceError] = useState("");
@@ -76,6 +77,7 @@ export function ServiceDeskScreen({ navigation }) {
     () => services.filter((service) => service.enabled),
     [services],
   );
+  const hasRegisteredServices = registeredServices.length > 0;
   const courierRegisteredServices = useMemo(
     () => registeredServices.filter((service) => service.requiresCourierProfile),
     [registeredServices],
@@ -394,7 +396,7 @@ export function ServiceDeskScreen({ navigation }) {
             </View>
           </View>
 
-          {!courierProfile ? (
+          {!hasRegisteredServices ? (
             <>
               <ServiceCatalog
                 loadingServiceId={savingServiceId}
@@ -491,20 +493,22 @@ export function ServiceDeskScreen({ navigation }) {
             </>
           ) : null}
 
-          <SectionTitle
-            icon="flash-outline"
-            subtitle={courierProfile ? "Fique online para receber corridas mesmo com o app em segundo plano" : "Ative apenas o que voce consegue atender agora"}
-            title={courierProfile ? "Disponibilidade para corridas" : "Minha disponibilidade"}
-          />
           {(courierProfile ? courierRegisteredServices : registeredServices).length ? (
-            <ServiceAvailabilityList
-              courierProfile={courierProfile}
-              onEditPrice={(service) => { setFixedPriceError(""); setFixedPriceService(service); }}
-              onToggle={toggleService}
-              savingServiceId={savingServiceId}
-              services={courierProfile ? courierRegisteredServices : registeredServices}
-            />
-          ) : <StatePanel icon="briefcase-outline" text="Escolha uma das opcoes acima para realizar seu primeiro servico." title="Nenhum servico cadastrado" />}
+            <>
+              <SectionTitle
+                icon="flash-outline"
+                subtitle={courierProfile ? "Fique online para receber corridas mesmo com o app em segundo plano" : "Ative apenas o que voce consegue atender agora"}
+                title={courierProfile ? "Disponibilidade para corridas" : "Meu painel de servicos"}
+              />
+              <ServiceAvailabilityList
+                courierProfile={courierProfile}
+                onEditPrice={(service) => { setFixedPriceError(""); setFixedPriceService(service); }}
+                onToggle={toggleService}
+                savingServiceId={savingServiceId}
+                services={courierProfile ? courierRegisteredServices : registeredServices}
+              />
+            </>
+          ) : null}
 
           {courierProfile ? (
             <>
@@ -524,14 +528,6 @@ export function ServiceDeskScreen({ navigation }) {
                   />
                 </>
               ) : null}
-              <ServiceCatalog
-                loadingServiceId={savingServiceId}
-                onStart={startService}
-                services={catalogServices}
-                subtitle="Cadastre somente se tambem quiser atender outra atividade"
-                title="Outros servicos"
-              />
-              <RegisterServicePrompt onPress={() => { setRegisterServiceError(""); setRegisterServiceOpen(true); }} />
             </>
           ) : null}
 
@@ -549,6 +545,23 @@ export function ServiceDeskScreen({ navigation }) {
           ) : (
             <StatePanel icon="chatbubble-ellipses-outline" text="Quando um cliente escolher voce na busca, o chamado chega aqui em tempo real." title="Nenhum chamado em aberto" />
           )}
+
+          {hasRegisteredServices ? (
+            <MoreServicesPanel
+              availableCount={catalogServices.length}
+              open={moreServicesOpen}
+              onToggle={() => setMoreServicesOpen((current) => !current)}
+            >
+              <ServiceCatalog
+                loadingServiceId={savingServiceId}
+                onStart={startService}
+                services={catalogServices}
+                subtitle="Cadastre somente as atividades que tambem deseja atender"
+                title="Outros servicos disponiveis"
+              />
+              <RegisterServicePrompt onPress={() => { setRegisterServiceError(""); setRegisterServiceOpen(true); }} />
+            </MoreServicesPanel>
+          ) : null}
         </>
       ) : null}
       <CourierRegistrationModal
@@ -699,6 +712,42 @@ function ServiceCatalog({ loadingServiceId, onStart, services, subtitle, title }
         ))}
       </View>
     </>
+  );
+}
+
+function MoreServicesPanel({ availableCount, children, onToggle, open }) {
+  return (
+    <View style={[styles.moreServicesPanel, open && styles.moreServicesPanelOpen]}>
+      <Pressable
+        accessibilityLabel={open ? "Ocultar outros servicos" : "Realizar mais servicos"}
+        accessibilityState={{ expanded: open }}
+        onPress={onToggle}
+        style={({ pressed }) => [styles.moreServicesToggle, pressed && styles.pressed]}
+      >
+        <View style={styles.moreServicesIcon}>
+          <Ionicons color={colors.primaryDark} name="add-circle-outline" size={24} />
+        </View>
+        <View style={styles.serviceCopy}>
+          <Text style={styles.moreServicesTitle}>Realizar mais servicos</Text>
+          <Text style={styles.moreServicesText}>
+            {open
+              ? "Escolha outra atividade ou cadastre uma opcao diferente."
+              : `${availableCount} atividade${availableCount === 1 ? "" : "s"} disponive${availableCount === 1 ? "l" : "is"}. Toque para ver.`}
+          </Text>
+        </View>
+        {availableCount ? (
+          <View style={styles.moreServicesCount}>
+            <Text style={styles.moreServicesCountText}>{availableCount}</Text>
+          </View>
+        ) : null}
+        <Ionicons
+          color={colors.primaryDark}
+          name={open ? "chevron-up" : "chevron-down"}
+          size={20}
+        />
+      </Pressable>
+      {open ? <View style={styles.moreServicesContent}>{children}</View> : null}
+    </View>
   );
 }
 
@@ -928,6 +977,15 @@ const styles = StyleSheet.create({
   deliveryCallIcon: { backgroundColor: colors.primaryDark },
   directPill: { backgroundColor: colors.warningSoft ?? "#FFF4D8", borderRadius: radius.round, paddingHorizontal: 7, paddingVertical: 3 },
   directPillText: { color: "#7A4A00", fontFamily: fonts.extraBold, fontSize: 8 },
+  moreServicesContent: { borderTopColor: colors.border, borderTopWidth: 1, gap: spacing.lg, padding: spacing.md },
+  moreServicesCount: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.round, justifyContent: "center", minHeight: 25, minWidth: 25, paddingHorizontal: 7 },
+  moreServicesCountText: { color: colors.card, fontFamily: fonts.extraBold, fontSize: 10 },
+  moreServicesIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 44, justifyContent: "center", width: 44 },
+  moreServicesPanel: { backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, overflow: "hidden", ...shadowSoft },
+  moreServicesPanelOpen: { borderColor: colors.primaryLight },
+  moreServicesText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption, lineHeight: 17 },
+  moreServicesTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.label },
+  moreServicesToggle: { alignItems: "center", flexDirection: "row", gap: spacing.md, minHeight: 78, padding: spacing.md },
   pressed: { opacity: 0.78 },
   operationMetric: { alignItems: "center", borderRightColor: colors.border, borderRightWidth: 1, flex: 1, gap: 2 },
   operationMetricLabel: { color: colors.textMuted, fontFamily: fonts.medium, fontSize: 10 },

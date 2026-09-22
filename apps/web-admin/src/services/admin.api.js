@@ -108,8 +108,8 @@ export function updateAdminNetworkEarnings(accessToken, userId, data) {
   });
 }
 
-export function getAdminUsers(accessToken, params) {
-  return apiGet(withQuery("/api/admin/users", params), accessToken);
+export function getAdminUsers(accessToken, params, { signal } = {}) {
+  return apiRequest(withQuery("/api/admin/users", params), { token: accessToken, signal });
 }
 
 export function getAdminUser(accessToken, userId) {

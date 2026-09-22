@@ -27,7 +27,10 @@ import {
 } from "../src/modules/seller/seller.service.js";
 import { refundAdminPayment } from "../src/modules/admin/admin-payments.service.js";
 import { releaseCommercialSettlement } from "../src/modules/earnings/earnings-release.service.js";
-import { processAsaasWebhook } from "../src/modules/payments/asaas.service.js";
+import {
+  processAsaasWebhook,
+  refreshPendingAsaasOrderPayment,
+} from "../src/modules/payments/asaas.service.js";
 import {
   processAsaasTransferWebhook,
   savePayoutAccount,
@@ -1162,6 +1165,15 @@ test("Asaas payment confirmation leaves the order received until the store accep
   assert.equal(order.status, "RECEBIDO");
   assert.equal(order.aceito_em, null);
   assert.match(message.mensagem, /Aguarde a loja aceitar/i);
+
+  const refreshedAfterWebhook = await refreshPendingAsaasOrderPayment(
+    state.buyer.id,
+    created.order.id,
+  );
+  assert.equal(refreshedAfterWebhook.alreadyProcessed, true);
+  assert.equal(refreshedAfterWebhook.paymentConfirmed, true);
+  assert.equal(refreshedAfterWebhook.order.status, "RECEBIDO");
+  assert.equal(refreshedAfterWebhook.order.payment.status, "PAGO");
 });
 
 test("webhook reconciles an Asaas Pix payment by external reference after a lost create response", async () => {

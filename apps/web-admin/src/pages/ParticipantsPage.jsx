@@ -1,5 +1,6 @@
-import { BriefcaseBusiness, Check, ChevronLeft, ChevronRight, KeyRound, Minus, Pencil, Plus, Search, ShieldAlert, ShieldCheck, UserRound, WalletCards, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { BriefcaseBusiness, Check, ChevronLeft, ChevronRight, KeyRound, LoaderCircle, Mail, Minus, Pencil, Plus, RefreshCw, Search, ShieldAlert, ShieldCheck, SlidersHorizontal, UserRound, UsersRound, WalletCards, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import "./participants.css";
 import {
   activateAllAdminUserServices,
   approveAdminKyc,
@@ -38,6 +39,9 @@ export function ParticipantsPage({
   const [filters, setFilters] = useState({ kycStatus: "", page: 1, search: "", status: "" });
   const [draftSearch, setDraftSearch] = useState("");
   const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const requestRef = useRef({ controller: null, id: 0 });
+  const searchTimer = useRef(null);
   const [error, setError] = useState("");
   const [selectedUser, setSelectedUser] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -51,21 +55,63 @@ export function ParticipantsPage({
   const [passwordForm, setPasswordForm] = useState({ password: "", reason: "" });
 
   const loadUsers = useCallback(async () => {
+    requestRef.current.controller?.abort();
+    const controller = new AbortController();
+    const requestId = ++requestRef.current.id;
+    requestRef.current.controller = controller;
+    setLoading(true);
     setError("");
     try {
-      setData(await getAdminUsers(accessToken, { ...filters, perPage: 12 }));
+      const response = await getAdminUsers(accessToken, { ...filters, perPage: 12 }, { signal: controller.signal });
+      if (requestId === requestRef.current.id) setData(response);
     } catch (requestError) {
-      setError(requestError.message || "Não foi possível carregar os participantes.");
+      if (requestId === requestRef.current.id && requestError.name !== "AbortError") {
+        setError(requestError.message || "Não foi possível carregar os participantes.");
+      }
+    } finally {
+      if (requestId === requestRef.current.id) setLoading(false);
     }
   }, [accessToken, filters]);
 
   useEffect(() => {
     loadUsers();
+    return () => {
+      requestRef.current.controller?.abort();
+      requestRef.current.id += 1;
+    };
   }, [loadUsers]);
+
+  useEffect(() => {
+    const search = draftSearch.trim();
+    if (search.length > 0 && search.length < 3) return undefined;
+    if (search === filters.search) return undefined;
+    searchTimer.current = setTimeout(() => {
+      setFilters((current) => ({ ...current, page: 1, search }));
+    }, search ? 450 : 0);
+    return () => clearTimeout(searchTimer.current);
+  }, [draftSearch, filters.search]);
+
+  function changeSearch(value) {
+    clearTimeout(searchTimer.current);
+    requestRef.current.controller?.abort();
+    requestRef.current.id += 1;
+    setLoading(false);
+    setError("");
+    setDraftSearch(value);
+    if (value.trim() === filters.search) setFilters((current) => ({ ...current }));
+  }
 
   function applySearch(event) {
     event.preventDefault();
-    setFilters((current) => ({ ...current, page: 1, search: draftSearch.trim() }));
+    const search = draftSearch.trim();
+    if (search && search.length < 3) return;
+    clearTimeout(searchTimer.current);
+    setFilters((current) => ({ ...current, page: 1, search }));
+  }
+
+  function clearFilters() {
+    changeSearch("");
+    setFilters({ kycStatus: "", page: 1, search: "", status: "" });
   }
 
   async function openUser(userId) {
@@ -290,58 +336,83 @@ export function ParticipantsPage({
     }
   }
 
+  const searchText = draftSearch.trim();
+  const shortSearch = searchText.length > 0 && searchText.length < 3;
+  const searching = !shortSearch && (loading || searchText !== filters.search);
+  const totalResults = data?.pagination.total ?? 0;
+  const hasFilters = Boolean(searchText || filters.status || filters.kycStatus);
+  const statusLabels = { ATIVO: "Ativos", PENDENTE: "Pendentes", BLOQUEADO: "Bloqueados", INATIVO: "Inativos" };
+  const kycLabels = { APROVADO: "Aprovado", PENDENTE: "Pendente", EM_ANALISE: "Em análise", REPROVADO: "Reprovado", BLOQUEADO: "Bloqueado" };
+
   return (
-    <div className="page-content">
-      <header className="page-heading">
-        <div><p className="eyebrow">Base de usuários</p><h1>Participantes</h1><p>Consulte cadastros, KYC, saldos e situação de acesso.</p></div>
+    <div className="page-content participants-page">
+      <header className="participants-hero">
+        <div className="participants-hero__copy">
+          <span className="participants-hero__icon"><UsersRound size={28} /></span>
+          <div><p className="eyebrow">Gestão de pessoas</p><h1>Participantes</h1><p>Encontre a pessoa certa. Consulte o cadastro, a verificação e os saldos em um só lugar.</p></div>
+        </div>
+        <button className="button participants-refresh" disabled={searching || shortSearch} onClick={loadUsers} type="button"><RefreshCw size={16} /> Atualizar</button>
       </header>
 
-      <section className="toolbar" aria-label="Filtros dos participantes">
-        <form className="search-field" onSubmit={applySearch}>
-          <Search size={18} />
-          <input onChange={(event) => setDraftSearch(event.target.value)} placeholder="Buscar por nome, e-mail, telefone ou CPF" value={draftSearch} />
-          <button aria-label="Buscar" title="Buscar" type="submit"><Search size={18} /></button>
+      <section className="participants-search-panel" aria-label="Filtros dos participantes">
+        <div className="participants-panel-heading"><div><h2>Quem você procura?</h2><p>Pesquise pelo nome, e-mail, telefone ou CPF.</p></div><span className="participants-live"><span /> Busca automática</span></div>
+        <form className="participants-search-form" onSubmit={applySearch}>
+          <div className="participants-search-input">
+            <Search size={21} aria-hidden="true" />
+            <input aria-label="Buscar participante" aria-describedby="participant-search-hint" autoComplete="off" onChange={(event) => changeSearch(event.target.value)} placeholder="Ex.: nome ou email@exemplo.com" value={draftSearch} />
+            {draftSearch ? <button aria-label="Limpar pesquisa" onClick={() => changeSearch("")} type="button"><X size={18} /></button> : null}
+          </div>
+          <button className="button button--primary" disabled={shortSearch || loading} type="submit">{searching ? <LoaderCircle className="participants-spin" size={18} /> : <Search size={18} />}{searching ? "Buscando…" : "Buscar"}</button>
         </form>
-        <select aria-label="Filtrar por status" onChange={(event) => setFilters((current) => ({ ...current, page: 1, status: event.target.value }))} value={filters.status}>
-          <option value="">Todos os status</option><option value="ATIVO">Ativos</option><option value="PENDENTE">Pendentes</option><option value="BLOQUEADO">Bloqueados</option><option value="INATIVO">Inativos</option>
-        </select>
-        <select aria-label="Filtrar por KYC" onChange={(event) => setFilters((current) => ({ ...current, kycStatus: event.target.value, page: 1 }))} value={filters.kycStatus}>
-          <option value="">Todo KYC</option><option value="APROVADO">Aprovado</option><option value="PENDENTE">Pendente</option><option value="EM_ANALISE">Em análise</option><option value="REPROVADO">Reprovado</option>
-        </select>
+        <p className="participants-search-hint" id="participant-search-hint" role="status">{shortSearch ? `Digite mais ${3 - searchText.length} ${searchText.length === 2 ? "caractere" : "caracteres"} para buscar.` : searching ? "Buscando participantes…" : "A busca começa após 3 caracteres. Você também pode pressionar Enter ou clicar em Buscar."}</p>
+        <div className="participants-filters">
+          <span className="participants-filters-label"><SlidersHorizontal size={16} /> Refine os resultados</span>
+          <label>Situação da conta<select onChange={(event) => setFilters((current) => ({ ...current, page: 1, status: event.target.value }))} value={filters.status}>
+            <option value="">Todos os status</option><option value="ATIVO">Ativos</option><option value="PENDENTE">Pendentes</option><option value="BLOQUEADO">Bloqueados</option><option value="INATIVO">Inativos</option>
+          </select></label>
+          <label>Verificação de identidade<select onChange={(event) => setFilters((current) => ({ ...current, kycStatus: event.target.value, page: 1 }))} value={filters.kycStatus}>
+            <option value="">Todos os KYC</option>{Object.entries(kycLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select></label>
+          {hasFilters ? <button className="button button--secondary" onClick={clearFilters} type="button"><X size={15} /> Limpar filtros</button> : null}
+        </div>
       </section>
 
-      {data && error ? <div className="inline-error" role="alert">{error}</div> : null}
-      {!data && !error ? <PageLoading label="Carregando participantes" /> : null}
-      {!data && error ? <PageError message={error} onRetry={loadUsers} /> : null}
-      {data ? (
-        <section className="data-section data-section--flush">
-          <div className="result-line"><strong>{data.pagination.total.toLocaleString("pt-BR")}</strong> participantes encontrados</div>
+      {error ? <PageError message={error} onRetry={loadUsers} /> : null}
+      <section className="data-section data-section--flush participants-results" aria-busy={searching}>
+          <div className="participants-results-heading">
+            <div><p className="eyebrow">{hasFilters ? "Resultado da consulta" : "Sua base de participantes"}</p><h2>{shortSearch ? "Complete sua pesquisa" : searching ? "Buscando participantes…" : error ? "Não foi possível atualizar a consulta" : `${totalResults.toLocaleString("pt-BR")} ${totalResults === 1 ? "participante encontrado" : "participantes encontrados"}`}</h2>
+              {!shortSearch && !searching ? <p>{filters.search ? <>Correspondências para <strong>“{filters.search}”</strong></> : "Cadastros mais recentes primeiro"}{filters.status ? ` · ${statusLabels[filters.status]}` : ""}{filters.kycStatus ? ` · KYC ${kycLabels[filters.kycStatus]}` : ""}</p> : null}
+            </div>
+            {filters.search && !searching && !shortSearch ? <span className="participants-sort"><Search size={14} /> Mais relevantes primeiro</span> : null}
+          </div>
+          {shortSearch ? <div className="participants-empty"><Search size={30} /><h3>Falta pouco para encontrar</h3><p>Digite pelo menos 3 caracteres no campo acima.</p></div> : searching ? <div className="participants-skeleton" aria-hidden="true">{[0, 1, 2, 3].map((item) => <div key={item}><i /><span /><span /></div>)}</div> : !error && data ? <>
           <div className="table-scroll">
             <table className="participants-table">
-              <thead><tr><th>Participante</th><th>Contato</th><th>Status</th><th>KYC</th><th>Saldo total</th><th></th></tr></thead>
+              <thead><tr><th>Participante</th><th>Contato</th><th>Situação</th><th>Identidade / KYC</th><th>Saldo total</th><th><span className="participants-sr-only">Ações</span></th></tr></thead>
               <tbody>
                 {data.users.map((user) => (
                   <tr key={user.id}>
-                    <td><div className="user-identity"><span className="avatar"><UserRound size={18} /></span><div><strong>{user.name}</strong><small>{user.accountType}</small></div></div></td>
-                    <td><strong className="table-primary">{user.email}</strong><small className="table-secondary">{user.phone || "Sem telefone"}</small></td>
-                    <td><StatusBadge status={user.status} /></td><td><StatusBadge status={user.kycStatus} /></td>
-                    <td>{moneyFormatter.format(user.balanceCents / 100)}</td>
-                    <td><button className="icon-button" onClick={() => openUser(user.id)} title="Ver cadastro" type="button"><ChevronRight size={18} /></button></td>
+                    <td><div className="user-identity"><span className="avatar">{user.name.split(/\s+/).filter(Boolean).slice(0, 2).map((name) => name[0]).join("").toUpperCase()}</span><div><strong>{user.name}</strong><small>#{user.id} · {user.accountType.replaceAll("_", " ").toLowerCase()}</small></div></div></td>
+                    <td><span className="participants-email"><Mail size={14} /><strong className="table-primary">{user.email}</strong></span><small className="table-secondary">{user.phone || "Telefone não informado"}</small></td>
+                    <td data-label="Situação"><StatusBadge status={user.status} /></td><td data-label="Identidade / KYC"><StatusBadge status={user.kycStatus} /></td>
+                    <td className="participants-balance" data-label="Saldo total">{moneyFormatter.format(user.balanceCents / 100)}</td>
+                    <td><button aria-label={`Ver cadastro de ${user.name}`} className="button participants-open" onClick={() => openUser(user.id)} type="button">Ver cadastro <ChevronRight size={16} /></button></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          {!data.users.length ? <div className="empty-state"><UserRound size={24} /><p>Nenhum cadastro corresponde aos filtros.</p></div> : null}
+          {!data.users.length ? <div className="participants-empty"><Search size={30} /><h3>Nenhum participante encontrado</h3><p>Confira o nome ou e-mail. Você também pode limpar os filtros de situação e KYC.</p><button className="button button--secondary" onClick={clearFilters} type="button">Limpar filtros e ver todos</button></div> : null}
           <div className="pagination">
-            <span>Página {data.pagination.page} de {data.pagination.pages}</span>
+            <span>{data.pagination.total ? `${(data.pagination.page - 1) * data.pagination.perPage + 1}–${Math.min(data.pagination.page * data.pagination.perPage, data.pagination.total)} de ${data.pagination.total}` : "0 resultados"}</span>
             <div>
+              <span>Página {data.pagination.page} de {data.pagination.pages}</span>
               <button className="icon-button" disabled={filters.page <= 1} onClick={() => setFilters((current) => ({ ...current, page: current.page - 1 }))} title="Página anterior" type="button"><ChevronLeft size={18} /></button>
               <button className="icon-button" disabled={filters.page >= data.pagination.pages} onClick={() => setFilters((current) => ({ ...current, page: current.page + 1 }))} title="Próxima página" type="button"><ChevronRight size={18} /></button>
             </div>
           </div>
-        </section>
-      ) : null}
+          </> : null}
+      </section>
 
       {detailLoading && !selectedUser ? <div className="drawer-backdrop"><aside className="detail-drawer"><PageLoading label="Abrindo cadastro" /></aside></div> : null}
       {selectedUser ? (
