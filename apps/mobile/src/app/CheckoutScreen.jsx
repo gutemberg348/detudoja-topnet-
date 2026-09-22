@@ -1,5 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -9,23 +9,16 @@ import {
   View,
 } from "react-native";
 import { AppButton } from "../components/AppButton";
-import { CpfRequirementModal } from "../components/CpfRequirementModal";
 import { PageHeader } from "../components/PageHeader";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { fetchCepAddress } from "../services/cep.api";
-import {
-  createOnlineOrderRequest,
-  createOrderIdempotencyKey,
-} from "../services/orders.api";
 import { getCurrentUserAddresses } from "../services/users.api";
 import { useAuthStore } from "../stores/useAuthStore";
-import { useCartStore } from "../stores/useCartStore";
 import {
   checkoutTotals,
   normalizeCart,
 } from "../utils/checkout";
 import { formatarDinheiro } from "../utils/money";
-import { storeUsesChatNegotiation } from "../utils/storeOrderFlow";
 import {
   colors,
   fonts,
@@ -69,7 +62,6 @@ function addressFromSaved(address) {
 }
 
 export function CheckoutScreen({ navigation, route }) {
-  const { removeItems } = useCartStore();
   const { session } = useAuthStore();
   const checkoutGroups = Array.isArray(route.params?.checkoutGroups)
     ? route.params.checkoutGroups
@@ -83,16 +75,12 @@ export function CheckoutScreen({ navigation, route }) {
     && cart.items.every((item) => item.product?.acceptDelivery !== false);
   const pickupAvailable = cart.items.every((item) => item.product?.acceptPickup !== false);
   const [deliveryMode, setDeliveryMode] = useState(deliveryAvailable ? "delivery" : "pickup");
-  const [cpfModalOpen, setCpfModalOpen] = useState(false);
   const [addressForm, setAddressForm] = useState(initialAddressForm);
   const [addresses, setAddresses] = useState([]);
   const [selectedAddressId, setSelectedAddressId] = useState(null);
   const [isLoadingAddresses, setIsLoadingAddresses] = useState(true);
   const [isCepLoading, setIsCepLoading] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [cepError, setCepError] = useState("");
-  const [submitError, setSubmitError] = useState("");
-  const requestIdempotencyKeyRef = useRef(null);
   const totals = useMemo(
     () => checkoutTotals(cart.items, {
       deliveryFeeCents: cart.store?.delivery?.feeCents,
@@ -106,7 +94,6 @@ export function CheckoutScreen({ navigation, route }) {
       deliveryMode,
     ],
   );
-  const negotiatesByChat = storeUsesChatNegotiation(cart.store);
   const cepDigits = addressForm.cep.replace(/\D/g, "");
   const isUsingSavedAddress = deliveryMode === "delivery" && Boolean(selectedAddressId);
   const isNewAddressFormVisible = deliveryMode === "delivery" && !selectedAddressId;
@@ -245,7 +232,7 @@ export function CheckoutScreen({ navigation, route }) {
     setCepError("");
   }
 
-  async function continueOrder({ skipCpfGate = false } = {}) {
+  function continueOrder() {
     if (!session?.accessToken || !cart.store?.id || !cart.items.length || !canContinue) {
       return;
     }
@@ -256,69 +243,27 @@ export function CheckoutScreen({ navigation, route }) {
       mode: deliveryMode,
     };
 
-    if (!negotiatesByChat) {
-      navigation.navigate("CheckoutPayment", {
-        cartItemKeys,
-        checkoutGroups,
-        checkoutIndex,
-        delivery,
-        deliveryMode,
-        items: cart.items,
-        store: cart.store,
-        totals,
-      });
-      return;
-    }
-
-    if (!skipCpfGate && session.user?.cpfRequired) {
-      setCpfModalOpen(true);
-      return;
-    }
-
-    setIsSubmitting(true);
-    setSubmitError("");
-
-    try {
-      const response = await createOnlineOrderRequest(session.accessToken, {
-        address: delivery.address,
-        addressId: delivery.addressId,
-        deliveryMode,
-        items: cart.items.map((item) => ({
-          notes: item.notes ?? "",
-          productId: item.id,
-          quantity: item.quantity,
-        })),
-        storeId: cart.store.id,
-      }, requestIdempotencyKeyRef.current ??= createOrderIdempotencyKey("request"));
-
-      removeItems(cartItemKeys);
-      if (hasNextStore) {
-        navigation.replace("Checkout", {
-          ...checkoutGroups[checkoutIndex + 1],
-          checkoutGroups,
-          checkoutIndex: checkoutIndex + 1,
-        });
-      } else {
-        navigation.replace("CustomerOrderDetails", { order: response.order });
-      }
-    } catch (requestError) {
-      setSubmitError(requestError.message ?? "Nao foi possivel enviar o pedido para a loja.");
-    } finally {
-      setIsSubmitting(false);
-    }
+    navigation.navigate("CheckoutPayment", {
+      cartItemKeys,
+      checkoutGroups,
+      checkoutIndex,
+      delivery,
+      deliveryMode,
+      items: cart.items,
+      store: cart.store,
+      totals,
+    });
   }
 
   return (
     <ScreenContainer contentContainerStyle={styles.content} edges={["left", "right"]}>
       <PageHeader
         subtitle={
-          negotiatesByChat
-            ? "Revise os itens e envie para a loja confirmar tudo pelo chat."
-            : "Confirme a entrega antes de escolher a forma de pagamento."
+          "Confirme a entrega antes de escolher a forma de pagamento."
         }
         title={checkoutGroups.length > 1
           ? `Loja ${checkoutIndex + 1} de ${checkoutGroups.length}`
-          : negotiatesByChat ? "Enviar pedido" : "Entrega e retirada"}
+          : "Entrega e retirada"}
       />
 
       {checkoutGroups.length > 1 ? (
@@ -526,42 +471,25 @@ export function CheckoutScreen({ navigation, route }) {
         <View style={styles.chatNoticeIcon}>
           <Ionicons
             color={colors.primaryDark}
-            name={negotiatesByChat ? "chatbubbles-outline" : "notifications-outline"}
+            name="notifications-outline"
             size={21}
           />
         </View>
         <View style={styles.chatNoticeCopy}>
           <Text style={styles.chatNoticeTitle}>
-            {negotiatesByChat ? "A proposta chega no chat" : "Acompanhe tudo em tempo real"}
+            Pagamento primeiro, acompanhamento depois
           </Text>
           <Text style={styles.chatNoticeText}>
-            {negotiatesByChat
-              ? "A loja confere seu pedido, envia o valor final e o pagamento aparece na mesma conversa."
-              : "Depois do pagamento, aceite, preparo, entrega e mensagens aparecem na conversa do pedido."}
+            Entrega e pagamento sao finalizados aqui. Depois que o pedido for criado, aceite, preparo, entrega e mensagens aparecem no chat do pedido.
           </Text>
         </View>
       </View>
 
-      {submitError ? <Text style={styles.submitError}>{submitError}</Text> : null}
-
       <AppButton
-        disabled={!cart.items.length || !canContinue || isSubmitting}
-        icon={negotiatesByChat ? "chatbubble-ellipses-outline" : "card-outline"}
-        loading={isSubmitting}
+        disabled={!cart.items.length || !canContinue}
+        icon="card-outline"
         onPress={() => continueOrder()}
-        title={negotiatesByChat
-          ? hasNextStore ? "Enviar e continuar" : "Enviar para a loja"
-          : hasNextStore ? "Pagar esta loja" : "Ir para pagamento"}
-      />
-
-      <CpfRequirementModal
-        onClose={() => setCpfModalOpen(false)}
-        onCompleted={() => {
-          setCpfModalOpen(false);
-          continueOrder({ skipCpfGate: true });
-        }}
-        open={cpfModalOpen}
-        reason="purchase"
+        title={hasNextStore ? "Pagar esta loja" : "Ir para pagamento"}
       />
     </ScreenContainer>
   );
@@ -939,13 +867,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     gap: spacing.md,
     padding: spacing.lg,
-  },
-  submitError: {
-    color: colors.danger,
-    fontFamily: fonts.medium,
-    fontSize: typography.small,
-    lineHeight: 19,
-    textAlign: "center",
   },
   summaryLabel: {
     color: colors.textSecondary,

@@ -18,7 +18,6 @@ import { useCartStore } from "../stores/useCartStore";
 import { buildCartItem, productPriceCents } from "../utils/checkout";
 import { resolveMediaUrl } from "../utils/media";
 import { formatarDinheiro } from "../utils/money";
-import { storeUsesChatNegotiation } from "../utils/storeOrderFlow";
 import {
   colors,
   fonts,
@@ -51,7 +50,6 @@ export function ProductDetailsScreen({ navigation, route }) {
   const storeLogoUrl = resolveMediaUrl(store.logoUrl);
   const priceCents = productPriceCents(product);
   const totalCents = priceCents * quantity;
-  const negotiatesByChat = storeUsesChatNegotiation(store);
   const item = buildCartItem(product, { notes, quantity });
   const cartParams = { conversationId, items: [item], store };
 
@@ -223,13 +221,9 @@ export function ProductDetailsScreen({ navigation, route }) {
             variant="outline"
           />
           <AppButton
-            icon={negotiatesByChat ? "chatbubble-ellipses-outline" : "card-outline"}
+            icon="card-outline"
             onPress={buyNow}
-            title={
-              negotiatesByChat
-                ? `Pedir pelo chat - ${formatarDinheiro(totalCents)}`
-                : `Comprar agora - ${formatarDinheiro(totalCents)}`
-            }
+            title={`Comprar agora - ${formatarDinheiro(totalCents)}`}
           />
         </View>
       </View>

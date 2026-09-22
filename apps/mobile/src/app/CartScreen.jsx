@@ -10,7 +10,6 @@ import { useCartStore } from "../stores/useCartStore";
 import { cartSubtotalCents, normalizeCart } from "../utils/checkout";
 import { resolveMediaUrl } from "../utils/media";
 import { formatarDinheiro } from "../utils/money";
-import { storeUsesChatNegotiation } from "../utils/storeOrderFlow";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
 
 function groupItemsByStore(items) {
@@ -187,7 +186,6 @@ function StoreCartGroup({ group, onRemove, onStoreSelected, onToggleSelected, on
   const selectedSubtotalCents = cartSubtotalCents(selected);
   const storeLogo = resolveMediaUrl(group.store?.logoUrl);
   const delivery = group.store?.delivery;
-  const negotiatesByChat = storeUsesChatNegotiation(group.store);
 
   return (
     <View style={styles.storeCard}>
@@ -214,11 +212,9 @@ function StoreCartGroup({ group, onRemove, onStoreSelected, onToggleSelected, on
         <View style={styles.storeCopy}>
           <Text numberOfLines={1} style={styles.storeName}>{group.store?.name ?? "Loja"}</Text>
           <Text style={styles.storeMeta}>
-            {negotiatesByChat
-              ? "Valor confirmado com a loja pelo chat"
-              : delivery?.available
-                ? `Entrega ${formatarDinheiro(delivery.feeCents ?? 0)}`
-                : "Retirada disponivel"}
+            {delivery?.available
+              ? `Entrega ${formatarDinheiro(delivery.feeCents ?? 0)}`
+              : "Retirada disponivel"}
           </Text>
         </View>
         <View style={styles.storeSelectedBadge}>

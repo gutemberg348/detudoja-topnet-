@@ -548,14 +548,6 @@ export async function createCheckoutOrder(userId, data, { idempotencyKey = null 
   const marketplaceLocation = await ordersRepository.requireUserMarketplaceLocation(userId);
   assertStoreMatchesLocation(store, marketplaceLocation);
 
-  const negotiatesByChat = store.segmento_venda?.negocia_pedido_por_chat
-    ?? store.categoria?.negocia_pedido_por_chat
-    ?? false;
-
-  if (negotiatesByChat) {
-    throw new AppError("Esta loja exige negociacao pelo chat antes do pagamento", 409);
-  }
-
   if (store.produtos.length !== productIds.length) {
     throw new AppError("Um ou mais produtos nao estao disponiveis", 400);
   }
