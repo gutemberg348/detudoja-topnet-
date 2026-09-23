@@ -24,7 +24,9 @@ function idempotencyKeyFromRequest(req) {
 
 export async function cancelCustomerOrderController(req, res, next) {
   try {
-    res.json(await cancelCustomerOrder(req.auth.user.id, req.params.orderId));
+    res.json(await cancelCustomerOrder(req.auth.user.id, req.params.orderId, {
+      refundDestination: req.body.refundDestination,
+    }));
   } catch (error) {
     next(error);
   }

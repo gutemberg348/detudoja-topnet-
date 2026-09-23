@@ -136,6 +136,28 @@ export async function getStoreCommissionDistribution(database, store) {
   };
 }
 
+export async function previewStoreOrderCashback(database, order) {
+  if (!order?.loja || Number(order.subtotal_centavos ?? 0) <= 0) return 0;
+
+  const storeCommission = await getStoreCommissionDistribution(database, order.loja);
+  const paymentPolicy = await getPaymentPolicy(database);
+  const commissionBaseCents = cents(order.subtotal_centavos);
+  const feeCents = percentageOf(commissionBaseCents, storeCommission.commission.feePercent);
+  const policyAllocation = calculatePaymentPolicyAllocation({
+    channel: "ONLINE",
+    commissionCents: feeCents,
+    onlineServiceFeeCents: cents(order.taxa_servico_centavos),
+    policy: paymentPolicy,
+  });
+
+  return calculateCommissionAmounts({
+    commission: storeCommission.commission,
+    consumerSponsor: null,
+    feeCents: policyAllocation.distributablePoolCents,
+    sellerSponsor: null,
+  }).cashbackCents;
+}
+
 function distributeEvenly(valueCents, userIds) {
   if (!valueCents || userIds.length === 0) {
     return [];

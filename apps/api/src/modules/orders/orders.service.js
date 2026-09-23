@@ -12,7 +12,11 @@ import { parsePositiveId } from "../../utils/ids.js";
 import { formatMoney } from "../../utils/money.js";
 import { normalizeLocation, sameCity } from "../../utils/location.js";
 import { commercialTier2UserWhere } from "../../utils/commercial-access.js";
-import { settleCompletedStoreOrderEarnings } from "../earnings/order-earnings.service.js";
+import {
+  previewStoreOrderCashback,
+  settleCompletedStoreOrderEarnings,
+} from "../earnings/order-earnings.service.js";
+import { prisma } from "../../config/prisma.js";
 import { assertStoreMonthlyCpfLimit } from "../earnings/commercial-limit.service.js";
 import {
   releaseReservedOrderStock,
@@ -40,6 +44,7 @@ import {
 } from "../earnings/order-earnings.config.js";
 import { sendExpoPushToUsers } from "../notifications/notifications.service.js";
 import { getStorePermissionUserIds } from "../store-staff/store-permissions.js";
+import { refundCustomerOrderPayment } from "../admin/admin-payments.service.js";
 
 
 const orderInclude = {
@@ -65,9 +70,11 @@ const orderInclude = {
     orderBy: { criado_em: "asc" },
   },
   loja: {
-    select: {
-      id: true,
-      nome: true,
+    include: {
+      categoria: { include: { segmento_venda: true } },
+      endereco: true,
+      lojista: { select: { usuario_id: true } },
+      segmento_venda: true,
     },
   },
   pagamento: true,
@@ -106,6 +113,11 @@ const orderMessageInclude = {
 
 function cents(value) {
   return Number(value ?? 0);
+}
+
+async function serializeOrderWithCashback(order, options = {}) {
+  const cashbackPreviewCents = await previewStoreOrderCashback(prisma, order);
+  return serializeOrder({ ...order, cashbackPreviewCents }, options);
 }
 
 function onlyDigits(value = "") {
@@ -468,7 +480,7 @@ export async function createOnlineOrderRequest(userId, data, { idempotencyKey = 
     result = { created: false, order };
   }
 
-  const serializedOrder = serializeOrder(result.order);
+  const serializedOrder = await serializeOrderWithCashback(result.order);
 
   if (result.created) {
     emitOrderCreated(serializedOrder);
@@ -777,7 +789,7 @@ export async function createCheckoutOrder(userId, data, { idempotencyKey = null 
     }
   }
 
-  const serializedOrder = serializeOrder(result.order);
+  const serializedOrder = await serializeOrderWithCashback(result.order);
 
   if (result.created) {
     emitOrderCreated(serializedOrder);
@@ -804,7 +816,7 @@ export async function listCustomerOrders(userId, { storeId } = {}) {
     },
   });
 
-  return { orders: orders.map(serializeOrder) };
+  return { orders: await Promise.all(orders.map((order) => serializeOrderWithCashback(order))) };
 }
 
 async function findCustomerOrder(userId, orderId, select = { id: true, loja_id: true, usuario_id: true }) {
@@ -841,7 +853,7 @@ export async function listCustomerOrderMessages(userId, orderId) {
       include: orderInclude,
       where: { id: order.id },
     });
-    emitOrderStatusUpdated(serializeOrder(realtimeOrder, { audience: "customer" }));
+    emitOrderStatusUpdated(await serializeOrderWithCashback(realtimeOrder, { audience: "customer" }));
   }
 
   const messages = await ordersRepository.findManyOrderMessages({
@@ -867,7 +879,7 @@ export async function completeCustomerOrder(userId, orderId) {
       where: { id: currentOrder.id },
     });
 
-    return { order: serializeOrder(order) };
+    return { order: await serializeOrderWithCashback(order) };
   }
 
   if (currentOrder.status === "CANCELADO") {
@@ -912,7 +924,7 @@ export async function completeCustomerOrder(userId, orderId) {
     return { message: createdMessage, order: updatedOrder, settlement: result };
   });
 
-  const serializedOrder = serializeOrder(order);
+  const serializedOrder = await serializeOrderWithCashback(order);
   const serializedMessage = serializeOrderMessage(message);
 
   emitOrderMessageCreated({
@@ -930,7 +942,7 @@ export async function completeCustomerOrder(userId, orderId) {
   return { order: serializedOrder };
 }
 
-export async function cancelCustomerOrder(userId, orderId) {
+export async function cancelCustomerOrder(userId, orderId, { refundDestination = null } = {}) {
   const parsedOrderId = parsePositiveId(orderId, "Pedido invalido");
   const currentOrder = await ordersRepository.findFirstOrder({
     include: { pagamento: true },
@@ -946,7 +958,7 @@ export async function cancelCustomerOrder(userId, orderId) {
       include: orderInclude,
       where: { id: currentOrder.id },
     });
-    return { order: serializeOrder(order) };
+    return { order: await serializeOrderWithCashback(order) };
   }
 
   const paid = ["PAGO", "LIQUIDADO", "EM_DISPUTA", "ESTORNADO"].includes(
@@ -959,6 +971,12 @@ export async function cancelCustomerOrder(userId, orderId) {
     "PRONTO_RETIRADA",
     "CONCLUIDO",
   ].includes(currentOrder.status);
+
+  if (paid && !started && currentOrder.status === "RECEBIDO") {
+    return refundCustomerOrderPayment(userId, currentOrder.id, {
+      destination: refundDestination ?? "ORIGINAL",
+    });
+  }
 
   if (paid || started) {
     throw new AppError(
@@ -999,7 +1017,7 @@ export async function cancelCustomerOrder(userId, orderId) {
     include: orderInclude,
     where: { id: currentOrder.id },
   });
-  const serializedOrder = serializeOrder(order);
+  const serializedOrder = await serializeOrderWithCashback(order);
   emitOrderStatusUpdated(serializedOrder);
 
   return { order: serializedOrder };
@@ -1075,7 +1093,7 @@ export async function acceptCustomerOrderProposal(userId, orderId, proposalId) {
     return { message, order: updatedOrder, proposal };
   });
 
-  const serializedOrder = serializeOrder(result.order);
+  const serializedOrder = await serializeOrderWithCashback(result.order);
   const serializedMessage = serializeOrderMessage(result.message);
 
   emitOrderMessageCreated({
@@ -1135,7 +1153,7 @@ export async function declineCustomerOrderProposal(userId, orderId, proposalId) 
     return { message, order: updatedOrder };
   });
 
-  const serializedOrder = serializeOrder(result.order);
+  const serializedOrder = await serializeOrderWithCashback(result.order);
   const serializedMessage = serializeOrderMessage(result.message);
 
   emitOrderMessageCreated({
@@ -1348,7 +1366,7 @@ export async function payCustomerOrderProposal(userId, orderId, proposalId, data
     }
   }
 
-  const serializedOrder = serializeOrder(result.order);
+  const serializedOrder = await serializeOrderWithCashback(result.order);
   const serializedMessage = serializeOrderMessage(result.message);
 
   emitOrderMessageCreated({

@@ -179,7 +179,7 @@ export function CheckoutPaymentScreen({ navigation, route }) {
             ? "A proposta foi aceita. Escolha como pagar e volte ao chat para acompanhar."
             : hasNextStore
               ? "Finalize esta loja agora. Depois, seguimos para a entrega e o pagamento da proxima."
-              : "Pague pelas carteiras ou gere um Pix seguro pelo Asaas."}
+              : "Pague pelas carteiras ou gere um Pix seguro."}
         </Text>
       </View>
 
@@ -249,7 +249,7 @@ export function CheckoutPaymentScreen({ navigation, route }) {
         <View style={styles.pixHint}>
           <Ionicons color={colors.warning} name="alert-circle-outline" size={20} />
           <Text style={styles.pixHintText}>
-            O QR Pix sera criado pelo Asaas. A loja recebe o pedido somente apos a confirmacao.
+            A loja recebe o pedido somente depois que o Pix for confirmado.
           </Text>
         </View>
       ) : null}

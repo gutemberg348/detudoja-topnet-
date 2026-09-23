@@ -88,6 +88,10 @@ export const payStoreOrderProposalSchema = z.object({
   useBalance: z.boolean().optional(),
 });
 
+export const cancelCustomerOrderSchema = z.object({
+  refundDestination: z.enum(["ORIGINAL", "BALANCE"]).optional(),
+});
+
 export const createOrderMessageSchema = z.object({
   ...chatAttachmentFields,
   message: z.string().trim().max(1200, "Mensagem muito longa").optional().or(z.literal("")),

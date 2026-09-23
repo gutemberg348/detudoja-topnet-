@@ -111,7 +111,11 @@ export function HomeScreen({ navigation }) {
     }
 
     if (conversation.kind === "store-order" && conversation.order) {
-      navigation.navigate("CustomerOrderDetails", { order: conversation.order });
+      navigation.navigate("StoreConversation", {
+        conversation: conversation.conversation,
+        openOrderId: conversation.order.id,
+        storeId: conversation.order.storeId ?? conversation.order.store?.id,
+      });
       return;
     }
 
@@ -300,12 +304,13 @@ const styles = StyleSheet.create({
     borderColor: colors.card,
     borderRadius: 999,
     borderWidth: 3,
-    bottom: spacing.xl,
+    bottom: 92,
     height: 58,
     justifyContent: "center",
     position: "absolute",
     right: spacing.xl,
     width: 58,
+    zIndex: 30,
   },
   chatFabPressed: { opacity: 0.8, transform: [{ scale: 0.97 }] },
   friendsShortcut: {

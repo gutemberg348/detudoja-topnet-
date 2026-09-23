@@ -47,8 +47,9 @@ export function completeCustomerOrder(accessToken, orderId) {
   });
 }
 
-export function cancelCustomerOrder(accessToken, orderId) {
+export function cancelCustomerOrder(accessToken, orderId, { refundDestination } = {}) {
   return apiRequest(`/api/app/orders/${orderId}/cancel`, {
+    body: refundDestination ? { refundDestination } : {},
     method: "PATCH",
     token: accessToken,
   });

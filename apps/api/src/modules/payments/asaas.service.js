@@ -28,6 +28,7 @@ import {
   listAsaasPayments,
   refundAsaasPayment,
 } from "./asaas.client.js";
+import { restorePaymentWalletCompositions } from "./payment-refund-wallet.service.js";
 
 const orderInclude = {
   _count: {
@@ -443,11 +444,28 @@ async function settleAsaasPayment(database, paymentId, event) {
     where: { pagamento_id: paymentId, tipo_origem: "PIX" },
   });
 
-  const reversal = nextStatus === "ESTORNADO"
-    ? await reverseCommercialSettlement(database, paymentId, {
-        reason: "Estorno Pix confirmado pelo Asaas.",
-      })
-    : null;
+  let reversal = null;
+  if (nextStatus === "ESTORNADO") {
+    reversal = await reverseCommercialSettlement(database, paymentId, {
+      reason: "Estorno Pix confirmado pelo Asaas.",
+    });
+    const paymentWithCompositions = await database.pagamento.findUnique({
+      include: { composicoes: true },
+      where: { id: paymentId },
+    });
+    const walletRefund = await restorePaymentWalletCompositions(
+      database,
+      paymentWithCompositions,
+      { reason: "A parte paga com saldo voltou para as carteiras de origem." },
+    );
+    reversal = {
+      ...reversal,
+      walletUserIds: [...new Set([
+        ...(reversal.walletUserIds ?? []),
+        ...walletRefund.userIds,
+      ])],
+    };
+  }
 
   const chargeSettlement = nextStatus === "PAGO"
     ? await settleConfirmedChargePayment(database, paymentId)

@@ -251,9 +251,12 @@ function serializeConversation(
   { includeMessages = false, scope = "customer" } = {},
 ) {
   const isStore = scope === "seller";
+  const visibleMessages = (conversation.mensagens ?? []).filter(
+    (message) => isStore || !isStoreOnlyJourneyMessage(message),
+  );
   const lastMessage = includeMessages
-    ? conversation.mensagens?.at(-1)
-    : conversation.mensagens?.[0];
+    ? visibleMessages.at(-1)
+    : visibleMessages[0];
 
   return {
     createdAt: conversation.criado_em.toISOString(),
@@ -268,7 +271,7 @@ function serializeConversation(
       ? serializeMessage(lastMessage, viewerId)
       : null,
     messages: includeMessages
-      ? conversation.mensagens.map((message) => serializeMessage(message, viewerId))
+      ? visibleMessages.map((message) => serializeMessage(message, viewerId))
       : undefined,
     otherPerson: isStore
       ? {
@@ -534,6 +537,16 @@ export async function getStoreConversation(userId, conversationId, page = {}) {
   };
 }
 
+function isStoreOnlyJourneyMessage(message) {
+  if (message.origem !== "SISTEMA") return false;
+  const content = message.conteudo_json ?? {};
+  if (content.audience === "STORE") return true;
+  if (["ADD_TO_CART", "OPEN_STORE", "START_CHECKOUT", "VIEW_PRODUCT"].includes(content.action)) {
+    return true;
+  }
+  return message.mensagem === "Cliente entrou na loja e iniciou a navegacao.";
+}
+
 export async function setStoreConversationTyping(userId, conversationId, isTyping) {
   ensureStoreChatPrismaClient();
   if (typeof isTyping !== "boolean") throw new AppError("Estado de digitacao invalido", 400);
@@ -648,11 +661,17 @@ export async function trackStoreConversationActivity(userId, conversationId, dat
   const content = product
     ? {
         action: data.action,
+        audience: "STORE",
         kind: "PRODUCT",
         product: serializeChatProduct(product),
         store: serializeChatStore(store),
       }
-    : { action: data.action, kind: "CHECKOUT", store: serializeChatStore(store) };
+    : {
+        action: data.action,
+        audience: "STORE",
+        kind: "CHECKOUT",
+        store: serializeChatStore(store),
+      };
 
   await storeChatsRepository.createSystemActivity(access.conversation.id, {
     content,

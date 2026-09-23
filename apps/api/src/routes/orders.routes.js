@@ -14,6 +14,7 @@ import {
   payCustomerOrderProposalController,
 } from "../modules/orders/orders.controller.js";
 import {
+  cancelCustomerOrderSchema,
   createCheckoutOrderSchema,
   createOnlineOrderRequestSchema,
   createOrderMessageSchema,
@@ -36,7 +37,11 @@ ordersRoutes.post(
   createOnlineOrderRequestController,
 );
 ordersRoutes.patch("/:orderId/complete", completeCustomerOrderController);
-ordersRoutes.patch("/:orderId/cancel", cancelCustomerOrderController);
+ordersRoutes.patch(
+  "/:orderId/cancel",
+  validate(cancelCustomerOrderSchema),
+  cancelCustomerOrderController,
+);
 ordersRoutes.patch(
   "/:orderId/proposals/:proposalId/accept",
   acceptCustomerOrderProposalController,

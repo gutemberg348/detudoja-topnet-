@@ -37,8 +37,14 @@ function openPushNotification(data, attempt = 0) {
     navigationRef.navigate("ServiceDesk", { courierRequestId: Number(data.requestId) || undefined });
   } else if (data.screen === "PersonalConversation" && conversationId) {
     navigationRef.navigate("PersonalConversation", { conversation: { id: conversationId } });
-  } else if (data.screen === "StoreConversation" && conversationId) {
-    navigationRef.navigate("StoreConversation", { conversation: { id: conversationId }, scope: data.scope });
+  } else if (data.screen === "StoreConversation" && (conversationId || Number(data.storeId))) {
+    const storeId = Number(data.storeId) || undefined;
+    navigationRef.navigate("StoreConversation", {
+      ...(conversationId ? { conversation: { id: conversationId } } : {}),
+      ...(orderId ? { openOrderId: orderId } : {}),
+      ...(storeId ? { store: { id: storeId }, storeId } : {}),
+      scope: data.scope,
+    });
   } else if (data.screen === "ServiceConversation" && conversationId) {
     navigationRef.navigate("ServiceConversation", { conversation: { id: conversationId } });
   } else if (data.screen === "CustomerOrderDetails" && orderId) {

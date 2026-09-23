@@ -6,8 +6,11 @@ import { colors, radius, shadowSoft } from "../utils/theme";
 export function CartAddButton({ direction = "down", name = "produto", onPress, size = 34, style }) {
   const flight = useRef(new Animated.Value(0)).current;
 
-  function add() {
-    onPress?.();
+  function add(event) {
+    onPress?.({
+      pageX: event?.nativeEvent?.pageX,
+      pageY: event?.nativeEvent?.pageY,
+    });
     flight.stopAnimation();
     flight.setValue(0);
     Animated.timing(flight, {

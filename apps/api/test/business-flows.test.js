@@ -468,7 +468,7 @@ test("store journey, persistent search and customer product cards share one chat
   );
 
   const opened = await openStoreConversation(state.buyer.id, state.store.id);
-  assert.equal(opened.conversation.messages[0].text, "Cliente entrou na loja e iniciou a navegacao.");
+  assert.equal(opened.conversation.messages.length, 0);
 
   const browsingBeforeSupport = await createStoreConversationMessage(
     state.buyer.id,
@@ -483,6 +483,10 @@ test("store journey, persistent search and customer product cards share one chat
 
   await createStoreConversationMessage(state.seller.id, opened.conversation.id, {
     message: "Posso ajudar com algum produto?",
+  });
+  await trackStoreConversationActivity(state.buyer.id, opened.conversation.id, {
+    action: "VIEW_PRODUCT",
+    productId: state.product.id,
   });
   await trackStoreConversationActivity(state.buyer.id, opened.conversation.id, {
     action: "VIEW_PRODUCT",
@@ -508,6 +512,9 @@ test("store journey, persistent search and customer product cards share one chat
   assert.equal(sellerView.conversation.messages.some(
     (message) => message.text === `Cliente abriu ${state.product.nome}.`,
   ), true);
+  assert.equal(sellerView.conversation.messages.filter(
+    (message) => message.text === `Cliente abriu ${state.product.nome}.`,
+  ).length, 1);
   assert.equal(sellerView.conversation.messages.at(-1).text, "Mensagem do comprador");
   assert.equal(sellerView.conversation.messages.at(-1).content.kind, "SUPPORT");
   assert.ok(sellerView.conversation.messages.at(-1).readAt);
@@ -552,6 +559,9 @@ test("store journey, persistent search and customer product cards share one chat
     message: "Resposta da loja",
   });
   const buyerView = await getStoreConversation(state.buyer.id, opened.conversation.id);
+  assert.equal(buyerView.conversation.messages.some(
+    (message) => message.text === `Cliente abriu ${state.product.nome}.`,
+  ), false);
   assert.equal(buyerView.conversation.messages.at(-1).text, "Resposta da loja");
   assert.ok(buyerView.conversation.messages.at(-1).readAt);
   assert.equal(buyerView.conversation.unreadCount, 0);
@@ -706,6 +716,8 @@ test("wallet checkout creates an order chat visible only to buyer and store", as
   const sellerMessages = await listStoreOrderMessages(state.seller.id, state.store.id, orderId);
 
   assert.equal(created.order.payment.status, "PAGO");
+  assert.ok(created.order.cashback.amountCents > 0);
+  assert.equal(created.order.cashback.status, "PREVISTO");
   assert.equal(buyerMessages.messages.at(-1).text, "Resposta no pedido");
   assert.ok(buyerMessages.messages.at(-1).readAt);
   assert.equal(sellerMessages.messages.at(-1).text, "Resposta no pedido");
@@ -716,7 +728,7 @@ test("wallet checkout creates an order chat visible only to buyer and store", as
   );
 });
 
-test("unattended paid order is canceled and refunded to the original wallet", async () => {
+test("unattended paid store order asks the customer before canceling", async () => {
   const productBefore = await prisma.produtoLoja.findUniqueOrThrow({
     select: { estoque_quantidade: true },
     where: { id: state.product.id },
@@ -739,6 +751,36 @@ test("unattended paid order is canceled and refunded to the original wallet", as
     where: { id: created.order.payment.id },
   });
   const result = await expireUnattendedStoreOrders({ now });
+  const [orderAfterPrompt, paymentAfterPrompt, productAfterPrompt, walletAfterPrompt, prompt] = await Promise.all([
+    prisma.pedidoLoja.findUniqueOrThrow({ where: { id: created.order.id } }),
+    prisma.pagamento.findUniqueOrThrow({ where: { id: created.order.payment.id } }),
+    prisma.produtoLoja.findUniqueOrThrow({
+      select: { estoque_quantidade: true },
+      where: { id: state.product.id },
+    }),
+    prisma.carteira.findFirstOrThrow({
+      where: { usuario_id: state.buyer.id, tipo_carteira: { codigo: "saldo_pix" } },
+    }),
+    prisma.pedidoLojaMensagem.findFirst({
+      orderBy: { criado_em: "desc" },
+      where: { pedido_id: created.order.id },
+    }),
+  ]);
+
+  assert.equal(result.canceled, 0);
+  assert.equal(result.prompted, 1);
+  assert.equal(orderAfterPrompt.status, "RECEBIDO");
+  assert.equal(paymentAfterPrompt.status, "PAGO");
+  assert.equal(
+    Number(productAfterPrompt.estoque_quantidade),
+    Number(productBefore.estoque_quantidade) - 1,
+  );
+  assert.equal(walletAfterPrompt.saldo_disponivel_centavos, walletBefore.saldo_disponivel_centavos);
+  assert.equal(prompt?.metadata_json?.kind, "customer-cancel-choice");
+
+  await cancelCustomerOrder(state.buyer.id, created.order.id, {
+    refundDestination: "BALANCE",
+  });
   const [order, payment, productAfter, walletAfter] = await Promise.all([
     prisma.pedidoLoja.findUniqueOrThrow({ where: { id: created.order.id } }),
     prisma.pagamento.findUniqueOrThrow({ where: { id: created.order.payment.id } }),
@@ -751,7 +793,6 @@ test("unattended paid order is canceled and refunded to the original wallet", as
     }),
   ]);
 
-  assert.equal(result.canceled, 1);
   assert.equal(order.status, "CANCELADO");
   assert.equal(payment.status, "ESTORNADO");
   assert.equal(productAfter.estoque_quantidade, productBefore.estoque_quantidade);
@@ -761,7 +802,7 @@ test("unattended paid order is canceled and refunded to the original wallet", as
   );
 });
 
-test("accepted order without preparation also expires and refunds safely", async () => {
+test("accepted store order is never auto-canceled by the service timeout rule", async () => {
   const created = await createCheckoutOrder(state.buyer.id, {
     address: null,
     addressId: null,
@@ -791,9 +832,10 @@ test("accepted order without preparation also expires and refunds safely", async
     prisma.pagamento.findUniqueOrThrow({ where: { id: created.order.payment.id } }),
   ]);
 
-  assert.equal(result.canceled, 1);
-  assert.equal(order.status, "CANCELADO");
-  assert.equal(payment.status, "ESTORNADO");
+  assert.equal(result.canceled, 0);
+  assert.equal(result.prompted, 0);
+  assert.equal(order.status, "ACEITO");
+  assert.equal(payment.status, "PAGO");
 });
 
 test("the same idempotency key creates one checkout and reserves stock once", async () => {
@@ -1061,7 +1103,7 @@ test("completed marketplace order holds merchant and rewards for 24 hours", asyn
   });
 
   await movePickupOrderToReady(created.order.id);
-  await completeCustomerOrder(state.buyer.id, created.order.id);
+  const completed = await completeCustomerOrder(state.buyer.id, created.order.id);
 
   const transaction = await prisma.transacaoComercial.findUnique({
     include: { recebiveis: true, recompensas: true },
@@ -1073,6 +1115,11 @@ test("completed marketplace order holds merchant and rewards for 24 hours", asyn
   assert.equal(Number(transaction.cashback_prioritario_centavos), 0);
   assert.equal(created.order.serviceFeeCents, 99);
   assert.equal(created.order.totalCents, created.order.subtotalCents + 99);
+  const cashbackReward = transaction.recompensas.find(
+    (reward) => reward.tipo_recompensa === "CASHBACK_COMPRADOR",
+  );
+  assert.equal(Number(cashbackReward.valor_centavos), created.order.cashback.amountCents);
+  assert.equal(completed.order.cashback.status, "CONFIRMADO_BLOQUEADO");
   assert.ok(transaction.recebiveis.every((receivable) => receivable.status === "PENDENTE"));
   assert.ok(transaction.recompensas.every((reward) => reward.status === "PENDENTE"));
 });

@@ -29,15 +29,19 @@ const chatProductSelect = {
   unidade_medida: true,
 };
 const customerSelect = { foto_url: true, id: true, nome: true };
-const conversationListInclude = {
-  cliente: { select: customerSelect },
-  loja: { select: storeSelect },
-  mensagens: {
-    include: { autor: { select: customerSelect } },
-    orderBy: { criado_em: "desc" },
-    take: 1,
-  },
-};
+function conversationListInclude({ isSeller = false } = {}) {
+  return {
+    cliente: { select: customerSelect },
+    loja: { select: storeSelect },
+    mensagens: {
+      include: { autor: { select: customerSelect } },
+      orderBy: { criado_em: "desc" },
+      // Para o cliente buscamos algumas mensagens extras porque eventos internos
+      // da jornada da loja sao removidos na serializacao.
+      take: isSeller ? 1 : 20,
+    },
+  };
+}
 const catalogStoreSelect = {
   ...storeSelect,
   _count: {
@@ -82,6 +86,11 @@ export const storeChatsRepository = {
       await transaction.conversaLojaMensagem.create({
         data: {
           conversa_loja_id: conversation.id,
+          conteudo_json: {
+            action: "OPEN_STORE",
+            audience: "STORE",
+            kind: "JOURNEY",
+          },
           lido_cliente_em: now,
           lido_loja_em: now,
           mensagem: "Cliente entrou na loja e iniciou a navegacao.",
@@ -96,6 +105,17 @@ export const storeChatsRepository = {
   async createSystemActivity(conversationId, { content = null, message, notifyStore = false }) {
     const now = new Date();
     return prisma.$transaction(async (transaction) => {
+      const recentDuplicate = await transaction.conversaLojaMensagem.findFirst({
+        select: { id: true },
+        where: {
+          conversa_loja_id: conversationId,
+          criado_em: { gte: new Date(now.getTime() - 10_000) },
+          mensagem: message,
+          origem: "SISTEMA",
+        },
+      });
+      if (recentDuplicate) return recentDuplicate;
+
       const created = await transaction.conversaLojaMensagem.create({
         data: {
           conversa_loja_id: conversationId,
@@ -223,7 +243,7 @@ export const storeChatsRepository = {
 
   list(userId, { isSeller, storeId }) {
     return prisma.conversaLoja.findMany({
-      include: conversationListInclude,
+      include: conversationListInclude({ isSeller }),
       orderBy: [{ ultima_mensagem_em: "desc" }, { atualizado_em: "desc" }],
       where: isSeller
         ? {

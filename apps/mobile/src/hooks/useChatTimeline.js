@@ -39,8 +39,16 @@ export function useChatTimeline({ latestMessageId, latestMessageIsMine, scrollRe
   }, [scrollToLatest]);
 
   const onLayout = useCallback((event) => {
+    const previousHeight = layoutHeightRef.current;
     layoutHeightRef.current = event.nativeEvent.layout.height;
-  }, []);
+    if (
+      previousHeight > 0
+      && Math.abs(previousHeight - layoutHeightRef.current) > 24
+      && atBottomRef.current
+    ) {
+      scrollToLatest(false);
+    }
+  }, [scrollToLatest]);
 
   useEffect(() => {
     const previousLatestId = previousLatestIdRef.current;

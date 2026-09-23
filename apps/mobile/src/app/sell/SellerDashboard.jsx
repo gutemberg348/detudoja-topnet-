@@ -199,7 +199,7 @@ export function SellerDashboard({
             {payoutReady
               ? `${payoutAccount.keyType} ${payoutAccount.keyMasked} · QR pago envia o valor liquido`
               : payoutAccount
-                ? "Envie novamente para validar no Asaas"
+                ? "Envie novamente para validar o pagamento"
               : "Obrigatoria para receber imediatamente nas vendas por QR"}
           </Text>
         </View>

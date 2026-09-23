@@ -421,7 +421,11 @@ export function CustomerOrdersScreen({ navigation, route }) {
             <OrderCard
               highlighted={highlightOrderId === order.id}
               key={order.id}
-              onPress={() => navigation.navigate("CustomerOrderDetails", { order })}
+              onPress={() => navigation.navigate("StoreConversation", {
+                openOrderId: order.id,
+                store: order.store,
+                storeId: order.storeId ?? order.store?.id,
+              })}
               order={order}
             />
           ))}

@@ -135,7 +135,7 @@ export function SupportScreen({ route }) {
                 <RefundRule text="Antes do pagamento, o cancelamento pode ser imediato." />
                 <RefundRule text="Pago ou em atendimento: o suporte analisa antes de cancelar." />
                 <RefundRule text="Saldo usado nas carteiras volta imediatamente apos a aprovacao." />
-                <RefundRule text="Pix externo e solicitado ao Asaas em ate 24 horas; o banco pode concluir depois." />
+                <RefundRule text="O estorno Pix e solicitado em ate 24 horas; o banco pode concluir depois." />
                 <RefundRule text="Depois da entrega, a analise inclui a reversao dos ganhos distribuidos." />
               </View>
             ) : null}

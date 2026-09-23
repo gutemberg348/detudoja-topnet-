@@ -92,6 +92,13 @@ export function createAdminPaymentsRepository(database = prisma) {
       });
     },
 
+    findPaymentByOrderId(orderId) {
+      return database.pagamento.findFirst({
+        include: paymentInclude,
+        where: { pedido_loja: { is: { id: orderId } } },
+      });
+    },
+
     list({ page, pageSize, where }) {
       return database.pagamento.findMany({
         include: paymentInclude,

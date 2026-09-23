@@ -25,7 +25,15 @@ function resetToOrderChat(navigation, order, conversationId) {
     index: 1,
     routes: [
       { name: "Main" },
-      { name: "CustomerOrderDetails", params: { conversationId, order } },
+      {
+        name: "StoreConversation",
+        params: {
+          conversationId,
+          openOrderId: order?.id,
+          store: order?.store,
+          storeId: order?.storeId ?? order?.store?.id,
+        },
+      },
     ],
   });
 }

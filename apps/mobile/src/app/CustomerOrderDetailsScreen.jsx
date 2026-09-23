@@ -263,6 +263,7 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
   const [loadingOlderHistory, setLoadingOlderHistory] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
+  const [cancellationChoiceDismissed, setCancellationChoiceDismissed] = useState(false);
   const [proposalAction, setProposalAction] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -342,7 +343,7 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
         }
         setPaymentCheckMessage(
           paymentResponse.paymentConfirmed
-            ? "Pagamento confirmado pelo Asaas."
+            ? "Pagamento confirmado."
             : "O Pix ainda esta aguardando confirmacao.",
         );
       }
@@ -486,6 +487,9 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
     "CONCLUIDO",
   ].includes(order?.status);
   const canCancelDirectly = !isFinal && !paymentConfirmed && !fulfillmentStarted;
+  const canChoosePaidCancellation = Boolean(
+    order?.customerCancellation?.available && order?.status === "RECEBIDO",
+  );
   const latestProposal = order?.latestProposal ?? order?.proposals?.at(-1) ?? null;
   const pendingProposal =
     latestProposal?.status === "PENDENTE" && order?.status === "NEGOCIANDO"
@@ -592,6 +596,46 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
     }
 
     navigation.navigate("Suporte", { order });
+  }
+
+  function confirmPaidCancellation(refundDestination) {
+    const toBalance = refundDestination === "BALANCE";
+    Alert.alert(
+      "Cancelar este pedido?",
+      toBalance
+        ? "O pedido sera cancelado e o valor total ficara disponivel no Saldo Pix do aplicativo."
+        : order.customerCancellation?.originalDestination === "PIX_ORIGEM"
+          ? "O pedido sera cancelado e o estorno sera solicitado para a conta Pix que fez o pagamento. A conclusao depende do prazo do banco."
+          : "O pedido sera cancelado e o valor voltara para as carteiras usadas no pagamento.",
+      [
+        { style: "cancel", text: "Continuar esperando" },
+        {
+          onPress: () => cancelPaidOrder(refundDestination),
+          style: "destructive",
+          text: toBalance ? "Cancelar e usar saldo" : "Cancelar e estornar",
+        },
+      ],
+    );
+  }
+
+  async function cancelPaidOrder(refundDestination) {
+    if (!session?.accessToken || !order?.id || isCanceling) return;
+    setIsCanceling(true);
+    setError("");
+    try {
+      const response = await cancelCustomerOrder(session.accessToken, order.id, {
+        refundDestination,
+      });
+      if (response.order) setOrder(response.order);
+      if (response.message) {
+        setChatMessages((current) => appendUniqueMessage(current, response.message));
+      }
+      await loadOrder({ silent: true });
+    } catch (requestError) {
+      setError(requestError.message ?? "Nao foi possivel cancelar e devolver o pagamento.");
+    } finally {
+      setIsCanceling(false);
+    }
   }
 
   async function cancelBeforePayment() {
@@ -742,6 +786,15 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
           {messages.map((message) => (
             <MessageBubble accessToken={session.accessToken} key={message.id} message={message} />
           ))}
+          {canChoosePaidCancellation && !cancellationChoiceDismissed ? (
+            <CancellationChoiceCard
+              loading={isCanceling}
+              onContinue={() => setCancellationChoiceDismissed(true)}
+              onRefundToBalance={() => confirmPaidCancellation("BALANCE")}
+              onRefundToOriginal={() => confirmPaidCancellation("ORIGINAL")}
+              originalDestination={order.customerCancellation.originalDestination}
+            />
+          ) : null}
         </View>
 
         <ChatComposer
@@ -787,14 +840,21 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
                   <Text style={styles.cancellationText}>
                     {canCancelDirectly
                       ? "Como o pagamento ainda nao foi confirmado, o cancelamento e imediato."
-                      : "Pedidos pagos ou em atendimento sao analisados pelo suporte. Se a loja nao iniciar no prazo, o sistema cancela e estorna automaticamente."}
+                      : canChoosePaidCancellation
+                        ? "A loja ainda nao aceitou. Escolha no aviso da conversa se prefere continuar esperando, estorno na origem ou credito no Saldo Pix."
+                        : "Pedidos que ja entraram em atendimento sao analisados pelo suporte. A loja nao sera cancelada automaticamente por demora."}
                   </Text>
                 </View>
                 <AppButton
-                  icon={canCancelDirectly ? "close-circle-outline" : "headset-outline"}
+                  icon={canCancelDirectly ? "close-circle-outline" : canChoosePaidCancellation ? "options-outline" : "headset-outline"}
                   loading={isCanceling}
-                  onPress={requestCancellation}
-                  title={canCancelDirectly ? "Cancelar pedido" : "Falar com o suporte"}
+                  onPress={canChoosePaidCancellation
+                    ? () => {
+                        setCancellationChoiceDismissed(false);
+                        scrollToLatest();
+                      }
+                    : requestCancellation}
+                  title={canCancelDirectly ? "Cancelar pedido" : canChoosePaidCancellation ? "Ver opcoes na conversa" : "Falar com o suporte"}
                   variant="outline"
                 />
               </View>
@@ -811,6 +871,74 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
         proposal={pendingProposal}
       />
     </ScreenContainer>
+  );
+}
+
+function CancellationChoiceCard({
+  loading,
+  onContinue,
+  onRefundToBalance,
+  onRefundToOriginal,
+  originalDestination,
+}) {
+  const originalLabel = originalDestination === "PIX_ORIGEM"
+    ? "Voltar para o Pix de origem"
+    : "Voltar para as carteiras usadas";
+
+  return (
+    <View style={styles.refundChoiceCard}>
+      <View style={styles.refundChoiceHeading}>
+        <View style={styles.refundChoiceIcon}>
+          <Ionicons color={colors.primaryDark} name="help-circle-outline" size={22} />
+        </View>
+        <View style={styles.refundChoiceCopy}>
+          <Text style={styles.refundChoiceEyebrow}>A LOJA AINDA NAO ACEITOU</Text>
+          <Text style={styles.refundChoiceTitle}>Quer continuar esperando?</Text>
+        </View>
+      </View>
+      <Text style={styles.refundChoiceText}>
+        Se preferir cancelar, escolha onde receber o valor. Nada sera cancelado sem sua confirmacao.
+      </Text>
+      <Pressable
+        disabled={loading}
+        onPress={onRefundToOriginal}
+        style={({ pressed }) => [styles.refundOption, pressed && styles.pressed]}
+      >
+        <View style={styles.refundOptionIcon}>
+          <Ionicons color={colors.primaryDark} name="return-down-back-outline" size={19} />
+        </View>
+        <View style={styles.refundOptionCopy}>
+          <Text style={styles.refundOptionTitle}>{originalLabel}</Text>
+          <Text style={styles.refundOptionText}>
+            {originalDestination === "PIX_ORIGEM"
+              ? "O estorno volta para a conta Pix de origem conforme o prazo do banco."
+              : "O saldo retorna para cada carteira utilizada."}
+          </Text>
+        </View>
+        <Ionicons color={colors.textMuted} name="chevron-forward" size={18} />
+      </Pressable>
+      <Pressable
+        disabled={loading}
+        onPress={onRefundToBalance}
+        style={({ pressed }) => [styles.refundOption, styles.refundOptionPrimary, pressed && styles.pressed]}
+      >
+        <View style={[styles.refundOptionIcon, styles.refundOptionIconPrimary]}>
+          <Ionicons color={colors.card} name="wallet-outline" size={19} />
+        </View>
+        <View style={styles.refundOptionCopy}>
+          <Text style={styles.refundOptionTitle}>Receber no Saldo Pix</Text>
+          <Text style={styles.refundOptionText}>Credito imediato para usar novamente no aplicativo.</Text>
+        </View>
+        {loading ? (
+          <ActivityIndicator color={colors.primaryDark} size="small" />
+        ) : (
+          <Ionicons color={colors.textMuted} name="chevron-forward" size={18} />
+        )}
+      </Pressable>
+      <Pressable disabled={loading} onPress={onContinue} style={styles.keepWaitingButton}>
+        <Text style={styles.keepWaitingText}>Continuar esperando a loja</Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -1049,7 +1177,7 @@ function PaymentBreakdown({ order }) {
     ESTORNADO: { label: "Pagamento estornado", icon: "return-down-back-outline", color: colors.info },
     CANCELADO: { label: "Pagamento cancelado", icon: "close-circle-outline", color: colors.danger },
     FALHOU: { label: "Pagamento não concluído", icon: "alert-circle-outline", color: colors.danger },
-    EM_DISPUTA: { label: "Pagamento em análise", icon: "shield-outline", color: "#9A5B00" },
+    EM_DISPUTA: { label: "Estorno sendo processado", icon: "sync-outline", color: "#9A5B00" },
   };
   const details = statusDetails[payment?.status] ?? {
     label: payment ? "Situação do pagamento indisponível" : "Sem pagamento registrado",
@@ -1074,6 +1202,24 @@ function PaymentBreakdown({ order }) {
             <View style={styles.paymentDivider} />
             <PaymentValue label="Total" strong value={formatarDinheiro(payment.totalCents)} />
           </View>
+          {confirmed && order.cashback ? (
+            <View style={styles.cashbackPreviewRow}>
+              <Ionicons color={colors.primaryDark} name="gift-outline" size={18} />
+              <View style={styles.cashbackPreviewCopy}>
+                <Text style={styles.cashbackPreviewTitle}>
+                  {order.cashback.status === "CONFIRMADO_BLOQUEADO"
+                    ? "Cashback confirmado"
+                    : "Cashback previsto"}
+                </Text>
+                <Text style={styles.cashbackPreviewText}>
+                  {order.cashback.status === "CONFIRMADO_BLOQUEADO"
+                    ? "Em prazo de seguranca antes da liberacao."
+                    : "Sera confirmado quando o pedido for recebido."}
+                </Text>
+              </View>
+              <Text style={styles.cashbackPreviewValue}>{formatarDinheiro(order.cashback.amountCents)}</Text>
+            </View>
+          ) : null}
         </>
       ) : null}
     </View>
@@ -1118,6 +1264,89 @@ function BubbleDetail({ label, value }) {
 }
 
 const styles = StyleSheet.create({
+  keepWaitingButton: {
+    alignItems: "center",
+    minHeight: 42,
+    justifyContent: "center",
+    paddingHorizontal: spacing.sm,
+  },
+  keepWaitingText: {
+    color: colors.textSecondary,
+    fontFamily: fonts.bold,
+    fontSize: typography.caption,
+  },
+  refundChoiceCard: {
+    alignSelf: "stretch",
+    backgroundColor: "#F0FDF4",
+    borderColor: colors.primaryLight,
+    borderRadius: 18,
+    borderWidth: 1,
+    gap: spacing.sm,
+    padding: spacing.md,
+  },
+  refundChoiceCopy: { flex: 1, gap: 2, minWidth: 0 },
+  refundChoiceEyebrow: {
+    color: colors.primaryDark,
+    fontFamily: fonts.extraBold,
+    fontSize: 9,
+  },
+  refundChoiceHeading: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  refundChoiceIcon: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderRadius: radius.round,
+    height: 42,
+    justifyContent: "center",
+    width: 42,
+  },
+  refundChoiceText: {
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    fontSize: typography.caption,
+    lineHeight: 18,
+  },
+  refundChoiceTitle: {
+    color: colors.textPrimary,
+    fontFamily: fonts.extraBold,
+    fontSize: typography.small,
+  },
+  refundOption: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 64,
+    padding: spacing.sm,
+  },
+  refundOptionCopy: { flex: 1, gap: 2, minWidth: 0 },
+  refundOptionIcon: {
+    alignItems: "center",
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.round,
+    height: 36,
+    justifyContent: "center",
+    width: 36,
+  },
+  refundOptionIconPrimary: { backgroundColor: colors.primaryDark },
+  refundOptionPrimary: { borderColor: colors.primaryLight },
+  refundOptionText: {
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    fontSize: 10,
+    lineHeight: 15,
+  },
+  refundOptionTitle: {
+    color: colors.textPrimary,
+    fontFamily: fonts.bold,
+    fontSize: typography.caption,
+  },
   cancellationCard: {
     backgroundColor: "#FFF9F2",
     borderColor: "#F4D7B0",
@@ -1431,6 +1660,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primarySoft,
     borderColor: colors.primaryLight,
   },
+  cashbackPreviewCopy: { flex: 1, gap: 2, minWidth: 0 },
+  cashbackPreviewRow: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.primaryLight, borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: spacing.sm, padding: spacing.sm },
+  cashbackPreviewText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 9 },
+  cashbackPreviewTitle: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: typography.caption },
+  cashbackPreviewValue: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: typography.body },
   progressCard: {
     backgroundColor: colors.card,
     borderColor: colors.border,

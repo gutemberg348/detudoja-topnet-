@@ -166,7 +166,7 @@ export function WalletDepositScreen({ navigation }) {
           <View style={[styles.summaryRow, styles.summaryTotal]}><Text style={styles.summaryTotalLabel}>Saldo recebido</Text><Text style={styles.summaryTotalValue}>{formatarDinheiro(netAmountCents)}</Text></View>
         </View>
       </View>
-      <View style={styles.notice}><Ionicons color={colors.primaryDark} name="shield-checkmark-outline" size={21} /><Text style={styles.noticeText}>Nao existe credito antecipado: o saldo e liberado apenas quando o Asaas confirmar o pagamento.</Text></View>
+      <View style={styles.notice}><Ionicons color={colors.primaryDark} name="shield-checkmark-outline" size={21} /><Text style={styles.noticeText}>O saldo e liberado automaticamente depois da confirmacao do Pix.</Text></View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <AppButton icon="qr-code-outline" loading={isCreating} onPress={createDeposit} title="Gerar Pix para adicionar saldo" />
     </ScreenContainer>

@@ -2,6 +2,8 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
+  Animated,
   Image,
   Keyboard,
   Modal,
@@ -9,6 +11,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from "react-native";
@@ -23,9 +26,11 @@ import { ChatTypingIndicator } from "../components/ChatTypingIndicator";
 import { BackHeader } from "../components/BackHeader";
 import { CartAddButton } from "../components/CartAddButton";
 import { useConversationRealtime } from "../hooks/useConversationRealtime";
+import { useRealtimeOrders } from "../hooks/useRealtimeOrders";
 import { useChatTimeline } from "../hooks/useChatTimeline";
 import { useChatTyping } from "../hooks/useChatTyping";
 import { getMarketplaceStore } from "../services/marketplace.api";
+import { cancelCustomerOrder, getCustomerOrders } from "../services/orders.api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import {
   getStoreConversation,
@@ -55,11 +60,15 @@ export function StoreConversationScreen({ navigation, route }) {
   const {
     addItem,
     itemCountForStore,
+    items: cartItems,
   } = useCartStore();
   const insets = useSafeAreaInsets();
   const initialConversation = route.params?.conversation ?? null;
   const initialStore = route.params?.store ?? null;
   const scrollRef = useRef(null);
+  const cartTargetRef = useRef(null);
+  const cartCountPulse = useRef(new Animated.Value(1)).current;
+  const cartFlightProgress = useRef(new Animated.Value(0)).current;
   const searchRevealTimerRef = useRef(null);
   const [conversation, setConversation] = useState(initialConversation);
   const [draft, setDraft] = useState("");
@@ -68,6 +77,11 @@ export function StoreConversationScreen({ navigation, route }) {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [messagePage, setMessagePage] = useState({ hasMore: true, nextCursor: null });
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const [cartFlight, setCartFlight] = useState(null);
+  const [customerOrders, setCustomerOrders] = useState([]);
+  const [cancelingOrderId, setCancelingOrderId] = useState(null);
+  const [expandedOrderId, setExpandedOrderId] = useState(route.params?.openOrderId ?? null);
+  const [ordersVisible, setOrdersVisible] = useState(Boolean(route.params?.openOrderId));
   const [openingContent, setOpeningContent] = useState("");
   const [sending, setSending] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -79,12 +93,13 @@ export function StoreConversationScreen({ navigation, route }) {
   const [storeCatalog, setStoreCatalog] = useState(
     initialStore?.products ? initialStore : null,
   );
-  const conversationId = conversation?.id ?? initialConversation?.id;
+  const conversationId = conversation?.id ?? initialConversation?.id ?? route.params?.conversationId;
   const storeId =
     conversation?.store?.id
     ?? initialConversation?.store?.id
     ?? initialStore?.id
     ?? route.params?.storeId;
+  const currentStoreItemCount = itemCountForStore(storeId);
   const timeline = useChatTimeline({
     latestMessageId: conversation?.messages?.at(-1)?.id,
     latestMessageIsMine: conversation?.messages?.at(-1)?.isMine,
@@ -162,6 +177,49 @@ export function StoreConversationScreen({ navigation, route }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (route.params?.openOrderId) {
+      setExpandedOrderId(route.params.openOrderId);
+      setOrdersVisible(true);
+    }
+  }, [route.params?.openOrderId]);
+
+  const loadCustomerOrders = useCallback(async () => {
+    if (!session?.accessToken || !storeId || conversation?.isStore) return;
+    try {
+      const response = await getCustomerOrders(session.accessToken, { storeId });
+      setCustomerOrders((response.orders ?? []).sort(
+        (first, second) => new Date(second.createdAt) - new Date(first.createdAt),
+      ));
+    } catch {
+      // O chat permanece disponivel mesmo se o resumo de pedidos oscilar.
+    }
+  }, [conversation?.isStore, session?.accessToken, storeId]);
+
+  useEffect(() => {
+    loadCustomerOrders();
+  }, [loadCustomerOrders]);
+
+  useEffect(() => {
+    if (conversation?.isStore || currentStoreItemCount <= 0) return;
+    cartCountPulse.stopAnimation();
+    cartCountPulse.setValue(0.76);
+    Animated.spring(cartCountPulse, {
+      friction: 4,
+      tension: 150,
+      toValue: 1,
+      useNativeDriver: true,
+    }).start();
+  }, [cartCountPulse, conversation?.isStore, currentStoreItemCount]);
+
+  useRealtimeOrders({
+    accessToken: session?.accessToken,
+    active: Boolean(storeId && !conversation?.isStore),
+    onMessageEvent: loadCustomerOrders,
+    onOrderEvent: loadCustomerOrders,
+    storeId,
+  });
 
   useEffect(() => () => {
     if (searchRevealTimerRef.current) {
@@ -260,7 +318,6 @@ export function StoreConversationScreen({ navigation, route }) {
             },
       );
 
-      if (sendsSupport) setSupportMode(false);
       setConversation((current) => {
         if (!current) return response.conversation;
         const messages = [...(current.messages ?? [])];
@@ -309,10 +366,39 @@ export function StoreConversationScreen({ navigation, route }) {
     });
   }
 
-  function addProduct(product) {
+  function animateProductToCart(product, origin) {
+    if (!origin?.pageX || !origin?.pageY || !cartTargetRef.current) return;
+    cartTargetRef.current.measureInWindow((targetX, targetY, width, height) => {
+      const targetCenterX = targetX + (width / 2);
+      const targetCenterY = targetY + (height / 2);
+      setCartFlight({
+        deltaX: targetCenterX - origin.pageX,
+        deltaY: targetCenterY - origin.pageY,
+        imageUrl: resolveMediaUrl(product.imageUrl),
+        startX: origin.pageX - 19,
+        startY: origin.pageY - insets.top - 19,
+      });
+      cartFlightProgress.stopAnimation();
+      cartFlightProgress.setValue(0);
+      requestAnimationFrame(() => {
+        Animated.timing(cartFlightProgress, {
+          duration: 620,
+          toValue: 1,
+          useNativeDriver: true,
+        }).start(() => setCartFlight(null));
+      });
+    });
+  }
+
+  function addProduct(product, origin = null) {
     if (!storeView || !product) return;
+    const alreadyInCart = cartItems.some((item) => (
+      String(item.storeId) === String(storeView.id)
+      && String(item.id) === String(product.id)
+    ));
     addItem(buildCartItem(product), storeView, conversation?.id);
-    if (conversation?.id && session?.accessToken && !conversation.isStore) {
+    animateProductToCart(product, origin);
+    if (!alreadyInCart && conversation?.id && session?.accessToken && !conversation.isStore) {
       void trackStoreConversationActivity(session.accessToken, conversation.id, {
         action: "ADD_TO_CART",
         productId: product.id,
@@ -320,11 +406,42 @@ export function StoreConversationScreen({ navigation, route }) {
     }
   }
 
-  function addSharedProduct(product) {
+  function addSharedProduct(product, origin = null) {
     const catalogProduct = (storeView?.products ?? []).find(
       (item) => String(item.id) === String(product?.id),
     );
-    addProduct(catalogProduct ?? product);
+    addProduct(catalogProduct ?? product, origin);
+  }
+
+  function requestPaidOrderCancellation(order, refundDestination) {
+    const toBalance = refundDestination === "BALANCE";
+    Alert.alert(
+      "Cancelar este pedido?",
+      toBalance
+        ? "O valor total sera creditado no Saldo Pix do aplicativo."
+        : order.customerCancellation?.originalDestination === "PIX_ORIGEM"
+          ? "O estorno sera solicitado para a conta Pix de origem e pode depender do prazo do banco."
+          : "O valor voltara para as carteiras usadas no pagamento.",
+      [
+        { style: "cancel", text: "Continuar esperando" },
+        {
+          onPress: async () => {
+            setCancelingOrderId(order.id);
+            setError("");
+            try {
+              await cancelCustomerOrder(session.accessToken, order.id, { refundDestination });
+              await loadCustomerOrders();
+            } catch (requestError) {
+              setError(requestError.message ?? "Nao foi possivel cancelar o pedido.");
+            } finally {
+              setCancelingOrderId(null);
+            }
+          },
+          style: "destructive",
+          text: toBalance ? "Cancelar e usar saldo" : "Cancelar e estornar",
+        },
+      ],
+    );
   }
 
   async function shareCommercialContent(type, productId = null) {
@@ -450,7 +567,6 @@ export function StoreConversationScreen({ navigation, route }) {
     ? conversation.customer?.photoUrl
     : conversation?.store?.logoUrl ?? initialStore?.logoUrl;
   const storeView = storeCatalog ?? initialStore ?? conversation?.store;
-  const currentStoreItemCount = itemCountForStore(storeView?.id);
   const normalizedDraft = normalizeSearchText(draft);
   const catalogProductSuggestions = !conversation?.isStore
     && catalogSearchFocused
@@ -509,10 +625,12 @@ export function StoreConversationScreen({ navigation, route }) {
             </Text>
           </View>
         </View>
-        {!conversation?.isStore && currentStoreItemCount > 0 ? (
+        {!conversation?.isStore ? (
+          <Animated.View style={{ transform: [{ scale: cartCountPulse }] }}>
           <Pressable
             accessibilityLabel={`Abrir carrinho com ${currentStoreItemCount} itens`}
             onPress={() => navigation.navigate("Cart")}
+            ref={cartTargetRef}
             style={({ pressed }) => [styles.headerCart, pressed && styles.pressed]}
           >
             <Ionicons color={colors.card} name="bag-handle" size={20} />
@@ -522,6 +640,7 @@ export function StoreConversationScreen({ navigation, route }) {
               </Text>
             </View>
           </Pressable>
+          </Animated.View>
         ) : null}
       </View>
 
@@ -537,11 +656,10 @@ export function StoreConversationScreen({ navigation, route }) {
 
       <View style={styles.timeline}>
         <ScrollView
-          automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+          automaticallyAdjustKeyboardInsets={false}
           contentContainerStyle={[styles.messages, conversation?.isStore && styles.messagesBottom]}
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           keyboardShouldPersistTaps="handled"
-          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           onContentSizeChange={timeline.onContentSizeChange}
           onLayout={timeline.onLayout}
           onScroll={(event) => {
@@ -591,6 +709,40 @@ export function StoreConversationScreen({ navigation, route }) {
               </Text>
             </View>
           )}
+          {!conversation?.isStore && customerOrders.length ? (
+            <View style={styles.ordersDrawer}>
+              <Pressable
+                accessibilityState={{ expanded: ordersVisible }}
+                onPress={() => setOrdersVisible((current) => !current)}
+                style={({ pressed }) => [styles.ordersDrawerToggle, pressed && styles.pressed]}
+              >
+                <View style={styles.orderAccordionHeadingIcon}>
+                  <Ionicons color={colors.primaryDark} name="receipt-outline" size={17} />
+                </View>
+                <View style={styles.orderAccordionHeadingCopy}>
+                  <Text style={styles.orderAccordionTitle}>Pedidos</Text>
+                  <Text style={styles.orderAccordionSubtitle}>
+                    {ordersVisible ? "Ocultar acompanhamentos" : "Puxar pedidos e acompanhar status"}
+                  </Text>
+                </View>
+                <View style={styles.orderAccordionCount}>
+                  <Text style={styles.orderAccordionCountText}>{customerOrders.length}</Text>
+                </View>
+                <Ionicons color={colors.primaryDark} name={ordersVisible ? "chevron-down" : "chevron-up"} size={20} />
+              </Pressable>
+              {ordersVisible ? (
+                <StoreOrdersAccordion
+                  cancelingOrderId={cancelingOrderId}
+                  expandedOrderId={expandedOrderId}
+                  onCancel={requestPaidOrderCancellation}
+                  onToggle={(orderId) => setExpandedOrderId((current) => (
+                    Number(current) === Number(orderId) ? null : orderId
+                  ))}
+                  orders={customerOrders}
+                />
+              ) : null}
+            </View>
+          ) : null}
           {searchThinking ? <StoreTypingIndicator /> : null}
           <ChatTypingIndicator visible={typing.isOtherTyping} />
         </ScrollView>
@@ -615,30 +767,33 @@ export function StoreConversationScreen({ navigation, route }) {
             <Text style={styles.searchComposerHintText}>Voce pode conversar e oferecer ajuda a qualquer momento</Text>
           </View>
         ) : (
-          <Pressable
-            accessibilityRole="checkbox"
-            accessibilityState={{ checked: supportMode }}
-            onPress={() => setSupportMode((current) => !current)}
-            style={({ pressed }) => [
-              styles.supportToggle,
-              supportMode && styles.supportToggleActive,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Ionicons
-              color={supportMode ? colors.primaryDark : colors.textMuted}
-              name={supportMode ? "checkbox" : "square-outline"}
-              size={21}
-            />
+          <View style={[styles.supportToggle, supportMode && styles.supportToggleActive]}>
+            <View style={[styles.supportToggleIcon, supportMode && styles.supportToggleIconActive]}>
+              <Ionicons
+                color={supportMode ? colors.card : colors.primaryDark}
+                name="headset-outline"
+                size={17}
+              />
+            </View>
             <View style={styles.supportToggleCopy}>
-              <Text style={styles.supportToggleTitle}>Enviar como suporte</Text>
+              <Text style={styles.supportToggleTitle}>Falar com uma pessoa</Text>
               <Text style={styles.supportToggleText}>
                 {supportMode
-                  ? "A loja recebera um aviso desta mensagem"
-                  : "Desmarcado: o campo pesquisa produtos sem notificar a loja"}
+                  ? "Ligado: suas mensagens vao para o atendimento real"
+                  : "Deixe ligado para falar com o suporte real da loja"}
               </Text>
             </View>
-          </Pressable>
+            <Switch
+              accessibilityLabel="Falar com o suporte real da loja"
+              accessibilityRole="switch"
+              accessibilityState={{ checked: supportMode }}
+              ios_backgroundColor={colors.border}
+              onValueChange={setSupportMode}
+              thumbColor={colors.card}
+              trackColor={{ false: colors.border, true: colors.primary }}
+              value={supportMode}
+            />
+          </View>
         )}
         draft={draft}
         onAttachmentError={setError}
@@ -658,6 +813,7 @@ export function StoreConversationScreen({ navigation, route }) {
         onBlur={() => setTimeout(() => setCatalogSearchFocused(false), 180)}
         onFocus={() => {
           setCatalogSearchFocused(true);
+          setTimeout(() => timeline.scrollToLatest(false), Platform.OS === "ios" ? 260 : 120);
         }}
         onSend={send}
         onSendAttachment={send}
@@ -687,8 +843,245 @@ export function StoreConversationScreen({ navigation, route }) {
         store={storeView}
         visible={catalogOpen}
       />
+      {cartFlight ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.cartFlight,
+            {
+              left: cartFlight.startX,
+              opacity: cartFlightProgress.interpolate({ inputRange: [0, 0.82, 1], outputRange: [1, 1, 0] }),
+              top: cartFlight.startY,
+              transform: [
+                { translateX: cartFlightProgress.interpolate({ inputRange: [0, 1], outputRange: [0, cartFlight.deltaX] }) },
+                { translateY: cartFlightProgress.interpolate({ inputRange: [0, 1], outputRange: [0, cartFlight.deltaY] }) },
+                { scale: cartFlightProgress.interpolate({ inputRange: [0, 0.7, 1], outputRange: [1, 0.72, 0.3] }) },
+              ],
+            },
+          ]}
+        >
+          {cartFlight.imageUrl ? (
+            <Image source={{ uri: cartFlight.imageUrl }} style={styles.cartFlightImage} />
+          ) : (
+            <Ionicons color={colors.card} name="cube" size={20} />
+          )}
+        </Animated.View>
+      ) : null}
     </ScreenContainer>
   );
+}
+
+const customerOrderStatusCopy = {
+  ACEITO: "Aceito pela loja",
+  AGUARDANDO_PAGAMENTO: "Aguardando pagamento",
+  CANCELADO: "Cancelado",
+  CONCLUIDO: "Concluido",
+  NEGOCIANDO: "Em negociacao",
+  PREPARANDO: "Em preparo",
+  PRONTO_RETIRADA: "Pronto para retirada",
+  RECEBIDO: "Recebido pela loja",
+  SAIU_ENTREGA: "Saiu para entrega",
+};
+
+function StoreOrdersAccordion({ cancelingOrderId, expandedOrderId, onCancel, onToggle, orders }) {
+  return (
+    <View style={styles.orderAccordionList}>
+      {orders.map((order) => {
+        const expanded = Number(expandedOrderId) === Number(order.id);
+        return (
+          <View key={order.id} style={[styles.orderAccordionCard, expanded && styles.orderAccordionCardOpen]}>
+            <Pressable
+              accessibilityState={{ expanded }}
+              onPress={() => onToggle(order.id)}
+              style={({ pressed }) => [styles.orderAccordionToggle, pressed && styles.pressed]}
+            >
+              <View style={styles.orderAccordionIcon}>
+                <Ionicons color={colors.primaryDark} name="bag-check-outline" size={19} />
+              </View>
+              <View style={styles.orderAccordionCopy}>
+                <Text numberOfLines={1} style={styles.orderAccordionCode}>
+                  Pedido {compactStoreOrderCode(order.code)}
+                </Text>
+                <Text style={styles.orderAccordionDate}>{formatStoreOrderDate(order.createdAt)}</Text>
+              </View>
+              <View style={styles.orderAccordionStatus}>
+                <Text numberOfLines={1} style={styles.orderAccordionStatusText}>
+                  {customerOrderStatusCopy[order.status] ?? order.status}
+                </Text>
+              </View>
+              <Ionicons color={colors.textMuted} name={expanded ? "chevron-up" : "chevron-down"} size={18} />
+            </Pressable>
+            {expanded ? (
+              <View style={styles.orderAccordionBody}>
+                <InlineOrderProgress order={order} />
+                <OrderFulfillmentDetails order={order} />
+                <View style={styles.orderAccordionItems}>
+                  {(order.items ?? []).map((item) => (
+                    <View key={item.id} style={styles.orderAccordionItem}>
+                      <Text style={styles.orderAccordionQuantity}>{item.quantity}x</Text>
+                      <Text numberOfLines={2} style={styles.orderAccordionItemName}>{item.name}</Text>
+                      <Text style={styles.orderAccordionItemPrice}>{formatarDinheiro(item.totalCents)}</Text>
+                    </View>
+                  ))}
+                </View>
+                <View style={styles.orderAccordionTotal}>
+                  <Text style={styles.orderAccordionTotalLabel}>Total</Text>
+                  <Text style={styles.orderAccordionTotalValue}>{formatarDinheiro(order.totalCents)}</Text>
+                </View>
+                {order.payment ? (
+                  <View style={styles.orderAccordionPayment}>
+                    <Ionicons
+                      color={["PAGO", "LIQUIDADO"].includes(order.payment.status) ? colors.primaryDark : colors.textSecondary}
+                      name={["PAGO", "LIQUIDADO"].includes(order.payment.status) ? "checkmark-circle" : order.payment.status === "EM_DISPUTA" ? "sync-outline" : "card-outline"}
+                      size={18}
+                    />
+                    <Text style={styles.orderAccordionPaymentText}>
+                      {order.payment.status === "EM_DISPUTA"
+                        ? "Estorno sendo processado"
+                        : order.payment.status === "ESTORNADO"
+                          ? "Pagamento devolvido"
+                          : ["PAGO", "LIQUIDADO"].includes(order.payment.status)
+                            ? "Pagamento confirmado"
+                            : "Pagamento pendente"}
+                    </Text>
+                  </View>
+                ) : null}
+                {order.cashback && ["PAGO", "LIQUIDADO"].includes(order.payment?.status) ? (
+                  <View style={styles.orderCashbackPreview}>
+                    <View style={styles.orderCashbackIcon}>
+                      <Ionicons color={colors.primaryDark} name="gift-outline" size={18} />
+                    </View>
+                    <View style={styles.orderCashbackCopy}>
+                      <Text style={styles.orderCashbackTitle}>
+                        {order.cashback.status === "CONFIRMADO_BLOQUEADO"
+                          ? "Cashback confirmado"
+                          : "Cashback previsto"}
+                      </Text>
+                      <Text style={styles.orderCashbackText}>
+                        {order.cashback.status === "CONFIRMADO_BLOQUEADO"
+                          ? "Valor protegido durante o prazo de seguranca."
+                          : "Sera confirmado quando voce receber o pedido."}
+                      </Text>
+                    </View>
+                    <Text style={styles.orderCashbackValue}>{formatarDinheiro(order.cashback.amountCents)}</Text>
+                  </View>
+                ) : null}
+                {order.customerCancellation?.available ? (
+                  <View style={styles.orderCancellationInline}>
+                    <Text style={styles.orderCancellationTitle}>A loja ainda nao aceitou. O que deseja fazer?</Text>
+                    <Text style={styles.orderCancellationText}>O pedido continua ativo ate voce confirmar o cancelamento.</Text>
+                    <View style={styles.orderCancellationActions}>
+                      <Pressable
+                        disabled={cancelingOrderId === order.id}
+                        onPress={() => onCancel(order, "ORIGINAL")}
+                        style={styles.orderCancellationButton}
+                      >
+                        <Text style={styles.orderCancellationButtonText}>Estornar na origem</Text>
+                      </Pressable>
+                      <Pressable
+                        disabled={cancelingOrderId === order.id}
+                        onPress={() => onCancel(order, "BALANCE")}
+                        style={[styles.orderCancellationButton, styles.orderCancellationButtonPrimary]}
+                      >
+                        {cancelingOrderId === order.id ? (
+                          <ActivityIndicator color={colors.card} size="small" />
+                        ) : (
+                          <Text style={styles.orderCancellationButtonPrimaryText}>Receber em saldo</Text>
+                        )}
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+function OrderFulfillmentDetails({ order }) {
+  const pickup = order.deliveryMode === "RETIRADA";
+  const address = pickup ? order.store?.pickupAddress : order.address;
+  const addressLine = formatOrderAddress(address);
+  const extra = [address?.complemento, address?.referencia ? `Referencia: ${address.referencia}` : null]
+    .filter(Boolean)
+    .join(" - ");
+
+  return (
+    <View style={styles.fulfillmentCard}>
+      <View style={styles.fulfillmentIcon}>
+        <Ionicons color={colors.primaryDark} name={pickup ? "storefront-outline" : "bicycle-outline"} size={19} />
+      </View>
+      <View style={styles.fulfillmentCopy}>
+        <Text style={styles.fulfillmentTitle}>{pickup ? "Retirada na loja" : "Entrega no endereco"}</Text>
+        <Text style={styles.fulfillmentAddress}>
+          {addressLine || (pickup ? order.store?.name : "Endereco informado no checkout")}
+        </Text>
+        {extra ? <Text style={styles.fulfillmentExtra}>{extra}</Text> : null}
+        <Text style={styles.fulfillmentHint}>
+          {pickup
+            ? `Aguarde o status "Pronto para retirada" e apresente o pedido ${compactStoreOrderCode(order.code)}.`
+            : Number(order.deliveryFeeCents ?? 0) > 0
+              ? `Taxa de entrega: ${formatarDinheiro(order.deliveryFeeCents)}.`
+              : "Entrega sem taxa adicional."}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function InlineOrderProgress({ order }) {
+  const pickup = order.deliveryMode === "RETIRADA";
+  const steps = [
+    { key: "RECEBIDO", icon: "receipt-outline", label: "Recebido" },
+    { key: "ACEITO", icon: "checkmark-circle-outline", label: "Aceito" },
+    { key: "PREPARANDO", icon: "cube-outline", label: "Preparo" },
+    { key: pickup ? "PRONTO_RETIRADA" : "SAIU_ENTREGA", icon: pickup ? "storefront-outline" : "bicycle-outline", label: pickup ? "Retirada" : "A caminho" },
+    { key: "CONCLUIDO", icon: "bag-check-outline", label: "Concluido" },
+  ];
+  const currentIndex = steps.findIndex((step) => step.key === order.status);
+  return (
+    <View style={styles.inlineProgress}>
+      {steps.map((step, index) => {
+        const reached = currentIndex >= 0 && index <= currentIndex;
+        return (
+          <View key={step.key} style={styles.inlineProgressStep}>
+            {index ? <View style={[styles.inlineProgressLine, reached && styles.inlineProgressLineDone]} /> : null}
+            <View style={[styles.inlineProgressDot, reached && styles.inlineProgressDotDone]}>
+              <Ionicons color={reached ? colors.card : colors.textMuted} name={step.icon} size={14} />
+            </View>
+            <Text numberOfLines={1} style={[styles.inlineProgressLabel, reached && styles.inlineProgressLabelDone]}>{step.label}</Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+function compactStoreOrderCode(code = "") {
+  const suffix = String(code).split("-").at(-1);
+  return suffix ? `#${suffix}` : code;
+}
+
+function formatStoreOrderDate(value) {
+  if (!value) return "Agora";
+  return new Date(value).toLocaleString("pt-BR", {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "2-digit",
+  });
+}
+
+function formatOrderAddress(address) {
+  if (!address) return "";
+  const street = [address.rua, address.numero].filter(Boolean).join(", ");
+  const city = [address.cidade, address.estado].filter(Boolean).join(" - ");
+  return [street, address.bairro, city, address.cep ? `CEP ${address.cep}` : null]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 function StoreWelcomeCard({ onAddProduct, onOpenCatalog, onOpenProduct, store }) {
@@ -733,7 +1126,7 @@ function StoreWelcomeCard({ onAddProduct, onOpenCatalog, onOpenProduct, store })
             {(store.products ?? []).slice(0, 4).map((product) => (
               <CompactProductCard
                 key={product.id}
-                onAdd={() => onAddProduct(product)}
+                onAdd={(origin) => onAddProduct(product, origin)}
                 onPress={() => onOpenProduct(product)}
                 product={product}
               />
@@ -813,7 +1206,7 @@ function StoreProductSuggestions({ onAdd, onOpen, products, title }) {
               <CartAddButton
                 direction="up"
                 name={product.name}
-                onPress={() => onAdd(product)}
+                onPress={(origin) => onAdd(product, origin)}
                 size={29}
               />
             </View>
@@ -904,7 +1297,7 @@ function CustomerCatalogModal({ onAddProduct, onClose, onOpenProduct, store, vis
             {products.length ? products.map((product) => (
               <CustomerProductRow
                 key={product.id}
-                onAdd={() => onAddProduct(product)}
+                onAdd={(origin) => onAddProduct(product, origin)}
                 onPress={() => onOpenProduct(product)}
                 product={product}
               />
@@ -973,7 +1366,7 @@ function MessageBubble({
         <CommercialMessageCard
           content={message.content}
           loading={loading}
-          onAdd={onAddProduct ? () => onAddProduct(message.content.product) : null}
+          onAdd={onAddProduct ? (origin) => onAddProduct(message.content.product, origin) : null}
           onPress={() => onOpenContent(message)}
           text={message.text}
           type="PRODUTO"
@@ -997,7 +1390,7 @@ function MessageBubble({
           content={message.content}
           loading={loading}
           onAdd={message.content?.kind === "PRODUCT" && onAddProduct
-            ? () => onAddProduct(message.content.product)
+            ? (origin) => onAddProduct(message.content.product, origin)
             : null}
           onPress={() => onOpenContent(message)}
           text={message.text}
@@ -1118,7 +1511,7 @@ function ChatSearchResults({ onAdd, onOpen, onOpenCatalog, products, query, sugg
                 </Pressable>
                 {!soldOut && onAdd ? (
                   <View style={styles.chatSearchAdd}>
-                    <CartAddButton direction="up" name={product.name} onPress={() => onAdd(product)} size={28} />
+                    <CartAddButton direction="up" name={product.name} onPress={(origin) => onAdd(product, origin)} size={28} />
                   </View>
                 ) : null}
               </View>
@@ -1411,6 +1804,80 @@ function getInitials(value = "") {
 }
 
 const styles = StyleSheet.create({
+  cartFlight: {
+    alignItems: "center",
+    backgroundColor: colors.primaryDark,
+    borderColor: colors.card,
+    borderRadius: radius.round,
+    borderWidth: 3,
+    height: 38,
+    justifyContent: "center",
+    overflow: "hidden",
+    position: "absolute",
+    width: 38,
+    zIndex: 200,
+    ...shadowSoft,
+  },
+  cartFlightImage: { height: "100%", width: "100%" },
+  inlineProgress: { flexDirection: "row", paddingVertical: spacing.xs },
+  inlineProgressDot: { alignItems: "center", backgroundColor: colors.cardMuted, borderColor: colors.border, borderRadius: radius.round, borderWidth: 2, height: 27, justifyContent: "center", width: 27, zIndex: 2 },
+  inlineProgressDotDone: { backgroundColor: colors.primaryDark, borderColor: colors.primaryDark },
+  inlineProgressLabel: { color: colors.textMuted, fontFamily: fonts.medium, fontSize: 8, textAlign: "center" },
+  inlineProgressLabelDone: { color: colors.primaryDark, fontFamily: fonts.bold },
+  inlineProgressLine: { backgroundColor: colors.border, height: 3, left: "-50%", position: "absolute", right: "50%", top: 13 },
+  inlineProgressLineDone: { backgroundColor: colors.primaryDark },
+  inlineProgressStep: { alignItems: "center", flex: 1, gap: 5, minWidth: 0, position: "relative" },
+  fulfillmentAddress: { color: colors.textPrimary, fontFamily: fonts.semiBold, fontSize: 10, lineHeight: 15 },
+  fulfillmentCard: { alignItems: "flex-start", backgroundColor: colors.backgroundSoft, borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: spacing.sm, padding: spacing.sm },
+  fulfillmentCopy: { flex: 1, gap: 3, minWidth: 0 },
+  fulfillmentExtra: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 9, lineHeight: 14 },
+  fulfillmentHint: { color: colors.primaryDark, fontFamily: fonts.medium, fontSize: 9, lineHeight: 14, marginTop: 2 },
+  fulfillmentIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 38, justifyContent: "center", width: 38 },
+  fulfillmentTitle: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: typography.caption },
+  orderAccordionBody: { borderTopColor: colors.border, borderTopWidth: 1, gap: spacing.sm, padding: spacing.md },
+  orderAccordionCard: { backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, overflow: "hidden" },
+  orderAccordionCardOpen: { borderColor: colors.primaryLight },
+  orderAccordionCode: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.caption },
+  orderAccordionCopy: { flex: 1, gap: 2, minWidth: 0 },
+  orderAccordionCount: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 26, justifyContent: "center", minWidth: 26, paddingHorizontal: 6 },
+  orderAccordionCountText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 10 },
+  orderAccordionDate: { color: colors.textMuted, fontFamily: fonts.medium, fontSize: 9 },
+  orderAccordionHeading: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
+  orderAccordionHeadingCopy: { flex: 1, gap: 2, minWidth: 0 },
+  orderAccordionHeadingIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 36, justifyContent: "center", width: 36 },
+  orderAccordionIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 38, justifyContent: "center", width: 38 },
+  orderAccordionItem: { alignItems: "center", flexDirection: "row", gap: spacing.sm, minHeight: 35 },
+  orderAccordionItemName: { color: colors.textPrimary, flex: 1, fontFamily: fonts.semiBold, fontSize: typography.caption },
+  orderAccordionItemPrice: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.caption },
+  orderAccordionItems: { gap: spacing.xs },
+  orderAccordionPayment: { alignItems: "center", backgroundColor: colors.backgroundSoft, borderRadius: radius.md, flexDirection: "row", gap: spacing.xs, padding: spacing.sm },
+  orderAccordionPaymentText: { color: colors.textSecondary, flex: 1, fontFamily: fonts.bold, fontSize: typography.caption },
+  orderAccordionQuantity: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: typography.caption, width: 28 },
+  orderAccordionList: { gap: spacing.sm, padding: spacing.sm },
+  orderAccordionStatus: { backgroundColor: "#EFF6FF", borderRadius: radius.round, maxWidth: 128, paddingHorizontal: spacing.sm, paddingVertical: 5 },
+  orderAccordionStatusText: { color: colors.info, fontFamily: fonts.bold, fontSize: 9 },
+  orderAccordionSubtitle: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 10 },
+  orderAccordionTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.small },
+  orderAccordionToggle: { alignItems: "center", flexDirection: "row", gap: spacing.sm, minHeight: 66, padding: spacing.sm },
+  orderAccordionTotal: { alignItems: "center", borderTopColor: colors.border, borderTopWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingTop: spacing.sm },
+  orderAccordionTotalLabel: { color: colors.textSecondary, fontFamily: fonts.medium, fontSize: typography.caption },
+  orderAccordionTotalValue: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: typography.body },
+  orderCancellationActions: { flexDirection: "row", gap: spacing.sm },
+  orderCancellationButton: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.primaryLight, borderRadius: radius.round, borderWidth: 1, flex: 1, justifyContent: "center", minHeight: 42, paddingHorizontal: spacing.sm },
+  orderCancellationButtonPrimary: { backgroundColor: colors.primaryDark, borderColor: colors.primaryDark },
+  orderCancellationButtonPrimaryText: { color: colors.card, fontFamily: fonts.bold, fontSize: 10 },
+  orderCancellationButtonText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 10, textAlign: "center" },
+  orderCancellationInline: { backgroundColor: "#FFF9F2", borderColor: "#F4D7B0", borderRadius: radius.md, borderWidth: 1, gap: spacing.sm, padding: spacing.sm },
+  orderCancellationText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 10, lineHeight: 15 },
+  orderCancellationTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.caption },
+  orderCashbackCopy: { flex: 1, gap: 2, minWidth: 0 },
+  orderCashbackIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 36, justifyContent: "center", width: 36 },
+  orderCashbackPreview: { alignItems: "center", backgroundColor: "#F0FDF4", borderColor: colors.primaryLight, borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: spacing.sm, padding: spacing.sm },
+  orderCashbackText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 9, lineHeight: 14 },
+  orderCashbackTitle: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: typography.caption },
+  orderCashbackValue: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: typography.body },
+  ordersDrawer: { backgroundColor: colors.backgroundSoft, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, overflow: "hidden" },
+  ordersDrawerToggle: { alignItems: "center", backgroundColor: colors.card, flexDirection: "row", gap: spacing.sm, minHeight: 64, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   avatar: {
     alignItems: "center",
     backgroundColor: colors.primarySoft,
@@ -1946,17 +2413,22 @@ const styles = StyleSheet.create({
     borderColor: colors.primaryDark,
     borderRadius: radius.round,
     borderWidth: 1,
-    minHeight: 18,
-    minWidth: 18,
-    paddingHorizontal: 3,
+    height: 22,
+    justifyContent: "center",
+    paddingHorizontal: 0,
     position: "absolute",
-    right: -5,
-    top: -5,
+    right: -7,
+    top: -7,
+    width: 22,
   },
   headerCartBadgeText: {
     color: colors.primaryDark,
     fontFamily: fonts.extraBold,
-    fontSize: 9,
+    fontSize: 10,
+    includeFontPadding: false,
+    lineHeight: 12,
+    textAlign: "center",
+    textAlignVertical: "center",
   },
   input: {
     color: colors.textPrimary,
@@ -2387,18 +2859,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     flexDirection: "row",
     gap: spacing.sm,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
+    minHeight: 58,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
   supportToggleActive: {
     backgroundColor: colors.primarySoft,
     borderColor: colors.primaryLight,
   },
   supportToggleCopy: { flex: 1, gap: 1 },
+  supportToggleIcon: {
+    alignItems: "center",
+    backgroundColor: colors.primarySoft,
+    borderRadius: 18,
+    height: 36,
+    justifyContent: "center",
+    width: 36,
+  },
+  supportToggleIconActive: { backgroundColor: colors.primary },
   supportToggleText: {
     color: colors.textSecondary,
     fontFamily: fonts.regular,
-    fontSize: 9,
+    fontSize: 10,
+    lineHeight: 14,
   },
   supportToggleTitle: {
     color: colors.textPrimary,

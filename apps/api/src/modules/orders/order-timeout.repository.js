@@ -18,32 +18,22 @@ export function createOrderTimeoutRepository(database = prisma) {
 
     findUnattendedPaidOrders(cutoff) {
       return database.pedidoLoja.findMany({
-        select: { pagamento_id: true },
+        select: {
+          id: true,
+          loja_id: true,
+          pagamento_id: true,
+          usuario_id: true,
+        },
         take: 25,
         where: {
-          OR: [
-            {
-              aceito_em: null,
-              pagamento: {
-                is: {
-                  pago_em: { lte: cutoff },
-                  status: { in: refundablePaymentStatuses },
-                },
-              },
-              status: "RECEBIDO",
+          aceito_em: null,
+          pagamento: {
+            is: {
+              pago_em: { lte: cutoff },
+              status: { in: refundablePaymentStatuses },
             },
-            {
-              aceito_em: { lte: cutoff },
-              preparando_em: null,
-              pagamento: {
-                is: {
-                  pago_em: { lte: cutoff },
-                  status: { in: refundablePaymentStatuses },
-                },
-              },
-              status: "ACEITO",
-            },
-          ],
+          },
+          status: "RECEBIDO",
         },
       });
     },

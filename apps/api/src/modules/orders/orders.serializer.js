@@ -1,4 +1,5 @@
 import { serializeChatAttachment } from "../chat-media/chat-media.service.js";
+import { env } from "../../config/env.js";
 
 function cents(value) {
   return Number(value ?? 0);
@@ -51,11 +52,30 @@ export function serializeOrder(order, { audience = "customer" } = {}) {
   const unreadCustomerMessages = audience === "customer" ? unreadMessages : 0;
   const unreadStoreMessages = audience === "store" ? unreadMessages : 0;
   const proposals = (order.propostas ?? []).map(serializeOrderProposal);
+  const paidAt = order.pagamento?.pago_em ?? null;
+  const cancellationAvailableAt = paidAt
+    ? new Date(paidAt.getTime() + (env.orders.unattendedTimeoutMinutes * 60 * 1_000))
+    : null;
+  const canCancelPaidOrder = Boolean(
+    audience === "customer"
+    && order.status === "RECEBIDO"
+    && !order.aceito_em
+    && !order.preparando_em
+    && ["PAGO", "LIQUIDADO"].includes(order.pagamento?.status)
+    && cancellationAvailableAt
+    && cancellationAvailableAt.getTime() <= Date.now(),
+  );
 
   return {
     acceptedAt: order.aceito_em?.toISOString() ?? null,
     address: serializeAddressSnapshot(order.endereco_entrega_snapshot_json),
     canceledAt: order.cancelado_em?.toISOString() ?? null,
+    cashback: cents(order.cashbackPreviewCents) > 0 && order.status !== "CANCELADO"
+      ? {
+          amountCents: cents(order.cashbackPreviewCents),
+          status: order.concluido_em ? "CONFIRMADO_BLOQUEADO" : "PREVISTO",
+        }
+      : null,
     code: order.codigo,
     completedAt: order.concluido_em?.toISOString() ?? null,
     createdAt: order.criado_em.toISOString(),
@@ -70,6 +90,17 @@ export function serializeOrder(order, { audience = "customer" } = {}) {
     deliveryFeeCents: cents(order.taxa_entrega_centavos),
     serviceFeeCents: cents(order.taxa_servico_centavos),
     deliveryMode: order.tipo_entrega,
+    customerCancellation: cancellationAvailableAt
+      ? {
+          available: canCancelPaidOrder,
+          availableAt: cancellationAvailableAt.toISOString(),
+          canRefundToBalance: canCancelPaidOrder,
+          canRefundToOriginal: canCancelPaidOrder,
+          originalDestination: order.pagamento?.gateway === "ASAAS"
+            ? "PIX_ORIGEM"
+            : "CARTEIRAS_ORIGEM",
+        }
+      : null,
     id: order.id,
     items: (order.itens ?? []).map(serializeOrderItem),
     notes: order.observacao_cliente,
@@ -94,6 +125,7 @@ export function serializeOrder(order, { audience = "customer" } = {}) {
       ? {
           id: order.loja.id,
           name: order.loja.nome,
+          pickupAddress: serializeAddressSnapshot(order.loja.endereco),
         }
       : null,
     storeId: order.loja_id,

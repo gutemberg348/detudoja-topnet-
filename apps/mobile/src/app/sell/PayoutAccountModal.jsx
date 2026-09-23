@@ -217,7 +217,7 @@ export function PayoutAccountModal({
               <Text style={styles.contextText}>
                 {isWithdrawal
                   ? "Cadastre somente a chave. O destino e confirmado no envio do saque e, se o Pix falhar, o valor volta ao saldo."
-                  : "Cadastre somente a chave. O repasse e enviado pelo Asaas depois da venda e, se falhar, o valor volta a carteira."}
+                  : "Cadastre somente a chave. O repasse e enviado depois da venda e, se falhar, o valor volta a carteira."}
               </Text>
             </View>
 

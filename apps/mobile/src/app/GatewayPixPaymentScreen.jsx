@@ -1,4 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import * as Clipboard from "expo-clipboard";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Image, Pressable, StyleSheet, Text, View } from "react-native";
@@ -20,6 +21,7 @@ export function GatewayPixPaymentScreen({ navigation, route }) {
   const paymentBreakdown = route.params?.paymentBreakdown;
   const [order, setOrder] = useState(route.params?.order ?? null);
   const [paymentFeedback, setPaymentFeedback] = useState(null);
+  const [copied, setCopied] = useState(false);
   const successHandledRef = useRef(false);
   const store = route.params?.store;
   const checkoutGroups = Array.isArray(route.params?.checkoutGroups)
@@ -122,7 +124,19 @@ export function GatewayPixPaymentScreen({ navigation, route }) {
       return;
     }
 
-    navigation.replace("CustomerOrderDetails", { conversationId, order });
+    navigation.replace("StoreConversation", {
+      conversationId,
+      openOrderId: order?.id,
+      store: order?.store ?? store,
+      storeId: order?.storeId ?? store?.id,
+    });
+  }
+
+  async function copyPixCode() {
+    if (!gatewayPayment?.pixCopyPaste) return;
+    await Clipboard.setStringAsync(gatewayPayment.pixCopyPaste);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
   }
 
   return (
@@ -137,7 +151,7 @@ export function GatewayPixPaymentScreen({ navigation, route }) {
           <Text style={styles.subtitle}>
             {charge
               ? `${store?.name ?? "A loja"} recebe somente depois da confirmacao do Pix.`
-              : `${store?.name ?? "Sua compra"} sera enviada quando o Asaas confirmar o pagamento.`}
+              : `${store?.name ?? "Sua compra"} sera enviada quando o Pix for confirmado.`}
           </Text>
         </View>
       </View>
@@ -168,13 +182,24 @@ export function GatewayPixPaymentScreen({ navigation, route }) {
       </View>
 
       {!paymentConfirmed && gatewayPayment?.pixCopyPaste ? (
-        <View style={styles.copyCard}>
-          <View style={styles.copyHeader}>
-            <Ionicons color={colors.primaryDark} name="copy-outline" size={18} />
+        <Pressable
+          accessibilityLabel="Copiar codigo Pix copia e cola"
+          onPress={copyPixCode}
+          style={({ pressed }) => [styles.copyCard, pressed && styles.copyCardPressed]}
+        >
+          <View style={styles.copyText}>
             <Text style={styles.copyTitle}>Pix copia e cola</Text>
+            <Text numberOfLines={1} selectable style={styles.copyValue}>
+              {gatewayPayment.pixCopyPaste}
+            </Text>
           </View>
-          <Text selectable style={styles.copyValue}>{gatewayPayment.pixCopyPaste}</Text>
-        </View>
+          <View style={[styles.copyButton, copied && styles.copyButtonDone]}>
+            <Ionicons color={copied ? colors.card : colors.primaryDark} name={copied ? "checkmark" : "copy-outline"} size={18} />
+            <Text style={[styles.copyButtonText, copied && styles.copyButtonTextDone]}>
+              {copied ? "Copiado" : "Copiar"}
+            </Text>
+          </View>
+        </Pressable>
       ) : null}
 
       <View style={styles.notice}>
@@ -200,7 +225,12 @@ export function GatewayPixPaymentScreen({ navigation, route }) {
       {!charge ? (
         <Pressable
           onPress={() => hasNextStore
-            ? navigation.navigate("CustomerOrderDetails", { conversationId, order })
+            ? navigation.navigate("StoreConversation", {
+                conversationId,
+                openOrderId: order?.id,
+                store: order?.store ?? store,
+                storeId: order?.storeId ?? store?.id,
+              })
             : navigation.navigate("Main")}
           style={styles.laterButton}
         >
@@ -246,18 +276,30 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxxl,
   },
   copyCard: {
+    alignItems: "center",
     backgroundColor: colors.card,
-    borderColor: colors.border,
+    borderColor: colors.primaryLight,
     borderRadius: radius.lg,
     borderWidth: 1,
-    gap: spacing.sm,
-    padding: spacing.lg,
-  },
-  copyHeader: {
-    alignItems: "center",
     flexDirection: "row",
     gap: spacing.sm,
+    minHeight: 66,
+    padding: spacing.md,
   },
+  copyButton: {
+    alignItems: "center",
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.round,
+    flexDirection: "row",
+    gap: spacing.xs,
+    minHeight: 40,
+    paddingHorizontal: spacing.md,
+  },
+  copyButtonDone: { backgroundColor: colors.primaryDark },
+  copyButtonText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: typography.caption },
+  copyButtonTextDone: { color: colors.card },
+  copyCardPressed: { opacity: 0.82, transform: [{ scale: 0.995 }] },
+  copyText: { flex: 1, gap: 4, minWidth: 0 },
   copyTitle: {
     color: colors.textPrimary,
     fontFamily: fonts.bold,
@@ -265,10 +307,9 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   copyValue: {
-    color: colors.textSecondary,
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    lineHeight: 17,
+    color: colors.primaryDark,
+    fontFamily: fonts.medium,
+    fontSize: typography.caption,
   },
   eyebrow: {
     color: colors.primaryDark,
