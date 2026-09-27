@@ -41,6 +41,8 @@ export const uploadAdminCategoryIcon = createUpload({ files: 1 }).single("icon")
 
 export const uploadStoreProductImage = createUpload({ files: 1 }).single("image");
 
+export const uploadUserProfilePhoto = createUpload({ fileSize: 8 * 1024 * 1024, files: 1 }).single("photo");
+
 export const uploadServiceChatImage = createUpload({ files: 1 }).single("image");
 
 export const uploadChatAttachment = createUpload(

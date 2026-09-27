@@ -1,5 +1,6 @@
 import { AppError } from "../../utils/errors.js";
 import { addressData } from "../../utils/location.js";
+import { deleteUploadedImage, saveUploadedImage } from "../uploads/image.service.js";
 import { usersRepository } from "./users.repository.js";
 
 function serializeAddress(address) {
@@ -53,6 +54,7 @@ function serializeUser(user, accountLevel) {
     name: user.nome,
     phone: user.telefone,
     phoneVerified: user.telefone_verificado,
+    photoUrl: user.foto_url,
     professionalProfileActive: user.perfil_profissional_ativo,
     publicId: user.identificador_publico,
     profiles: deriveProfiles(user),
@@ -157,6 +159,33 @@ export async function updateCurrentUser(userId, data) {
     }
 
     throw error;
+  }
+
+  return getCurrentUser(userId);
+}
+
+export async function updateCurrentUserPhoto(userId, file) {
+  if (!file) {
+    throw new AppError("Selecione uma foto para o perfil", 400);
+  }
+
+  const current = await usersRepository.findUser(userId);
+  if (!current) throw new AppError("Usuario nao encontrado", 404);
+
+  const savedPhoto = await saveUploadedImage(file, {
+    folder: ["users", String(userId), "profile"],
+    profile: "userProfile",
+  });
+
+  try {
+    await usersRepository.updateUser(userId, { foto_url: savedPhoto.url });
+  } catch (error) {
+    await deleteUploadedImage(savedPhoto.url);
+    throw error;
+  }
+
+  if (current.foto_url && current.foto_url !== savedPhoto.url) {
+    await deleteUploadedImage(current.foto_url);
   }
 
   return getCurrentUser(userId);

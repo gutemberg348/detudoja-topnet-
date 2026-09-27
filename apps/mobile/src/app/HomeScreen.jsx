@@ -43,10 +43,23 @@ export function HomeScreen({ navigation }) {
       type: "conversation",
     }));
   }, [normalizedQuery, recent.searchableConversations]);
+  const recentConversationSuggestions = useMemo(
+    () => (recent.searchableConversations ?? []).slice(0, 8).map((conversation) => ({
+      conversation,
+      description: conversation.subtitle || "Conversa recente",
+      iconUrl: conversation.imageUrl,
+      id: conversation.id,
+      label: conversation.title,
+      type: "conversation",
+    })),
+    [recent.searchableConversations],
+  );
   const combinedSuggestions = useMemo(() => {
     const marketplaceSuggestions = suggestions.slice(0, 12);
-    return [...chatSuggestions, ...marketplaceSuggestions].slice(0, 16);
-  }, [chatSuggestions, suggestions]);
+    return normalizedQuery
+      ? [...chatSuggestions, ...marketplaceSuggestions].slice(0, 16)
+      : marketplaceSuggestions;
+  }, [chatSuggestions, normalizedQuery, suggestions]);
 
   function openSearch(searchValue = query) {
     const value = searchValue.trim();
@@ -143,13 +156,14 @@ export function HomeScreen({ navigation }) {
         <View style={styles.content}>
           <SearchBar
             expandedSuggestions
-            initialSuggestionsTitle="Conversas recentes e sugestoes"
+            initialSuggestionsTitle="Sugestoes para voce"
             loading={suggestionsLoading}
             onChangeText={setQuery}
             onFocusChange={setSearchFocused}
             onSelectSuggestion={selectSuggestion}
             onSubmit={openSearch}
             placeholder="O que voce quer hoje?"
+            recentSuggestions={recentConversationSuggestions}
             showVoice
             suggestions={combinedSuggestions}
             value={query}

@@ -295,10 +295,11 @@ export function StoreOrderChatModal({
 
           <View style={styles.orderChatTimeline}>
             <ScrollView
-              automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+              automaticallyAdjustKeyboardInsets={false}
               contentContainerStyle={styles.orderChatBody}
               keyboardShouldPersistTaps="handled"
               onContentSizeChange={timeline.onContentSizeChange}
+              onLayout={timeline.onLayout}
               onScroll={timeline.onScroll}
               ref={chatScrollRef}
               scrollEventThrottle={16}

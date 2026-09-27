@@ -10,13 +10,24 @@ export function useChatTimeline({ latestMessageId, latestMessageIsMine, scrollRe
   const initializedRef = useRef(false);
   const layoutHeightRef = useRef(0);
   const previousLatestIdRef = useRef(latestMessageId ?? null);
+  const scrollTimerRef = useRef(null);
+  const smoothScrollRef = useRef(false);
+
+  useEffect(() => () => clearTimeout(scrollTimerRef.current), []);
 
   const scrollToLatest = useCallback((animated = true) => {
     atBottomRef.current = true;
     setIsAtBottom(true);
     setUnreadBelow(0);
-    if (contentHeightRef.current <= layoutHeightRef.current + 8) return;
-    setTimeout(() => scrollRef.current?.scrollToEnd({ animated }), 20);
+    clearTimeout(scrollTimerRef.current);
+    smoothScrollRef.current = smoothScrollRef.current || animated;
+    scrollTimerRef.current = setTimeout(() => {
+      if (contentHeightRef.current > layoutHeightRef.current + 8) {
+        scrollRef.current?.scrollToEnd({ animated: smoothScrollRef.current });
+      }
+      smoothScrollRef.current = false;
+      scrollTimerRef.current = null;
+    }, 20);
   }, [scrollRef]);
 
   const onScroll = useCallback((event) => {
@@ -43,7 +54,7 @@ export function useChatTimeline({ latestMessageId, latestMessageIsMine, scrollRe
     layoutHeightRef.current = event.nativeEvent.layout.height;
     if (
       previousHeight > 0
-      && Math.abs(previousHeight - layoutHeightRef.current) > 24
+      && Math.abs(previousHeight - layoutHeightRef.current) > 1
       && atBottomRef.current
     ) {
       scrollToLatest(false);

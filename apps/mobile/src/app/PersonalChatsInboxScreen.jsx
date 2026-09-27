@@ -29,6 +29,15 @@ import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import { useAuthStore } from "../stores/useAuthStore";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
 
+function formatConversationDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  const now = new Date();
+  return date.toDateString() === now.toDateString()
+    ? date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+    : date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+}
+
 export function PersonalChatsInboxScreen({ navigation, route }) {
   const { session } = useAuthStore();
   const [data, setData] = useState({ conversations: [], profile: null, requests: [] });
@@ -279,12 +288,16 @@ export function PersonalChatsInboxScreen({ navigation, route }) {
                 >
                   <ContactAvatar
                     name={conversation.displayName}
-                    photoUrl={conversation.person.photoUrl}
+                    photoUrl={conversation.person?.photoUrl}
+                    size={56}
                   />
                   <View style={styles.personCopy}>
-                    <Text numberOfLines={1} style={styles.personName}>{conversation.displayName}</Text>
+                    <View style={styles.personTopline}>
+                      <Text numberOfLines={1} style={styles.personName}>{conversation.displayName}</Text>
+                      <Text style={styles.friendDate}>{formatConversationDate(conversation.updatedAt)}</Text>
+                    </View>
                     <Text numberOfLines={1} style={styles.personMeta}>
-                      {conversation.lastMessage?.text ?? `@${conversation.person.publicId}`}
+                      {conversation.lastMessage?.text ?? `@${conversation.person?.publicId}`}
                     </Text>
                   </View>
                   {conversation.unreadCount > 0 ? (
@@ -486,8 +499,9 @@ const styles = StyleSheet.create({
   emptyText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption, textAlign: "center" },
   emptyTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small },
   error: { color: colors.danger, fontFamily: fonts.medium, fontSize: typography.caption },
-  friendMain: { alignItems: "center", flex: 1, flexDirection: "row", gap: spacing.md, minWidth: 0, paddingVertical: spacing.sm },
-  friendRow: { alignItems: "center", borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: spacing.sm, minHeight: 66 },
+  friendDate: { color: colors.textMuted, fontFamily: fonts.medium, fontSize: 10 },
+  friendMain: { alignItems: "center", flex: 1, flexDirection: "row", gap: spacing.md, minWidth: 0, paddingVertical: spacing.md },
+  friendRow: { alignItems: "center", borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: spacing.sm, minHeight: 82 },
   hero: { alignItems: "center", flexDirection: "row", gap: spacing.md },
   heroCopy: { flex: 1, gap: 2, minWidth: 0 },
   heroIcon: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.round, height: 52, justifyContent: "center", width: 52 },
@@ -505,8 +519,9 @@ const styles = StyleSheet.create({
   myIdCopy: { flex: 1, minWidth: 0 },
   notice: { color: colors.primaryDark, fontFamily: fonts.medium, fontSize: typography.caption },
   personCopy: { flex: 1, minWidth: 0 },
-  personMeta: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption, marginTop: 2 },
-  personName: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small },
+  personMeta: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.small, marginTop: 3 },
+  personName: { color: colors.textPrimary, flex: 1, fontFamily: fonts.bold, fontSize: typography.body },
+  personTopline: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
   pressed: { backgroundColor: colors.primarySoft, opacity: 0.78 },
   publicId: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small },
   qrButton: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 46, justifyContent: "center", width: 46 },

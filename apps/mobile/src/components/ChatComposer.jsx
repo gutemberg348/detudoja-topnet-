@@ -4,7 +4,8 @@ import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Image, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Animated, BackHandler, Image, Keyboard, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { useReducedMotion } from "../hooks/useReducedMotion";
 import { colors, fonts, radius, spacing, typography } from "../utils/theme";
 
 const AUDIO_CANCEL_DISTANCE = 72;
@@ -53,11 +54,16 @@ function formatRecordingTime(durationMillis) {
 
 export function ChatComposer({
   accessory = null, attachmentsEnabled = true, disabled = false, draft,
-  leadingAction = null, maxLength = 2000, onAttachmentError, onBlur,
+  extraActions = [], maxLength = 2000, onAttachmentError, onBlur,
   onChangeDraft, onFocus, onSend, onSendAttachment, placeholder, sendEnabled,
   sending = false, style, submitOnEnter = false,
 }) {
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [trayVisible, setTrayVisible] = useState(false);
+  const [trayHeight, setTrayHeight] = useState(100);
+  const [focused, setFocused] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [attachment, setAttachment] = useState(null);
   const [cancelRecording, setCancelRecording] = useState(false);
   const [preparing, setPreparing] = useState(false);
@@ -72,13 +78,60 @@ export function ChatComposer({
   const releaseBeforeStartRef = useRef(false);
   const recordingStartXRef = useRef(0);
   const pulse = useRef(new Animated.Value(1)).current;
+  const trayProgress = useRef(new Animated.Value(0)).current;
+  const actionScale = useRef(new Animated.Value(1)).current;
+  const submitInFlightRef = useRef(false);
+  const reducedMotion = useReducedMotion();
   const hasContent = Boolean(String(draft ?? "").trim());
-  const busy = sending || uploadingAudio;
-  const canAttach = attachmentsEnabled && Boolean(onSendAttachment) && !disabled && !busy && !recordingVisible;
+  const busy = sending || uploadingAudio || submitting;
+  const supportsAttachments = attachmentsEnabled && Boolean(onSendAttachment);
+  const hasActions = supportsAttachments || extraActions.length > 0;
+  const canAttach = supportsAttachments && !disabled && !busy && !preparing && !recordingVisible;
+  const canOpenActions = hasActions && !disabled && !busy && !preparing && !recordingVisible;
   const canSend = (sendEnabled ?? (hasContent || Boolean(attachment))) && !disabled && !busy && !preparing;
+  const showSendAction = !recordingVisible && (hasContent || Boolean(attachment) || busy || !supportsAttachments);
 
   useEffect(() => {
-    if (!recordingVisible) {
+    const show = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow", () => setKeyboardVisible(true));
+    const hide = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", () => setKeyboardVisible(false));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
+
+  useEffect(() => {
+    if (!canOpenActions) setActionsOpen(false);
+  }, [canOpenActions]);
+
+  useEffect(() => {
+    if (actionsOpen) setTrayVisible(true);
+    const animation = Animated.timing(trayProgress, {
+      duration: reducedMotion ? 0 : 180,
+      toValue: actionsOpen ? 1 : 0,
+      useNativeDriver: false,
+    });
+    animation.start(({ finished }) => {
+      if (finished && !actionsOpen) setTrayVisible(false);
+    });
+    return () => animation.stop();
+  }, [actionsOpen, reducedMotion, trayProgress]);
+
+  useEffect(() => {
+    if (!actionsOpen) return undefined;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      setActionsOpen(false);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [actionsOpen]);
+
+  useEffect(() => {
+    actionScale.setValue(reducedMotion ? 1 : 0.88);
+    const animation = Animated.spring(actionScale, { toValue: 1, friction: 8, tension: 150, useNativeDriver: true });
+    animation.start();
+    return () => animation.stop();
+  }, [actionScale, reducedMotion, showSendAction]);
+
+  useEffect(() => {
+    if (!recordingVisible || reducedMotion) {
       pulse.stopAnimation();
       pulse.setValue(1);
       return undefined;
@@ -90,7 +143,7 @@ export function ChatComposer({
     ]));
     animation.start();
     return () => animation.stop();
-  }, [pulse, recordingVisible]);
+  }, [pulse, recordingVisible, reducedMotion]);
 
   useEffect(() => () => {
     try {
@@ -300,56 +353,81 @@ export function ChatComposer({
   }
 
   async function submit() {
-    if (!canSend) return;
-    if (!attachment) {
-      try {
-        await onSend?.();
-      } catch {
-        // A tela do chat apresenta a falha sem gerar uma rejeicao nao tratada.
-      }
-      return;
-    }
+    if (!canSend || submitInFlightRef.current) return;
+    submitInFlightRef.current = true;
+    setSubmitting(true);
+    setActionsOpen(false);
     try {
-      await onSendAttachment?.({ attachment, message: String(draft ?? "").trim() });
-      setAttachment(null);
-      setActionsOpen(false);
+      if (!attachment) {
+        await onSend?.();
+      } else {
+        await onSendAttachment?.({ attachment, message: String(draft ?? "").trim() });
+        setAttachment(null);
+      }
     } catch {
-      // Mantem o anexo pronto para uma nova tentativa.
+      // A tela apresenta o erro; o anexo continua pronto para tentar novamente.
+    } finally {
+      submitInFlightRef.current = false;
+      setSubmitting(false);
     }
   }
 
   return (
-    <View style={[styles.composer, style]}>
+    <View style={[styles.composer, style, keyboardVisible && styles.composerWithKeyboard]}>
       {accessory}
-      {actionsOpen && canAttach ? (
-        <View style={styles.actionTrayShell}>
-          <View style={styles.actionTrayHeading}>
-            <Text style={styles.actionTrayTitle}>O que deseja enviar?</Text>
-            <Text style={styles.actionTrayHint}>GPS agora envia um ponto atual, sem acompanhar seus movimentos.</Text>
+      {trayVisible ? (
+        <Animated.View
+          accessibilityElementsHidden={!actionsOpen}
+          importantForAccessibility={actionsOpen ? "auto" : "no-hide-descendants"}
+          pointerEvents={actionsOpen && canOpenActions ? "auto" : "none"}
+          style={[styles.actionTrayShell, {
+            height: trayProgress.interpolate({ inputRange: [0, 1], outputRange: [0, trayHeight] }),
+            opacity: trayProgress,
+            transform: [{ translateY: trayProgress.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }],
+          }]}
+        >
+          <View onLayout={(event) => setTrayHeight(event.nativeEvent.layout.height)} style={styles.actionTray}>
+            {supportsAttachments ? <>
+              <AttachmentAction color="#3679B5" backgroundColor="#EDF5FC" icon="camera-outline" label="Câmera" onPress={capturePhoto} />
+              <AttachmentAction color="#8666B0" backgroundColor="#F3EFFA" icon="image-outline" label="Fotos" onPress={() => pickMedia("IMAGE")} />
+              <AttachmentAction color="#B57E2C" backgroundColor="#FCF5E9" icon="videocam-outline" label="Vídeo" onPress={() => pickMedia("VIDEO")} />
+              <AttachmentAction icon="location-outline" label="Localização" hint="Envia sua posição atual, sem acompanhar seus movimentos" onPress={selectLocation} />
+            </> : null}
+            {extraActions.map((action) => (
+              <AttachmentAction key={action.label} {...action} onPress={() => {
+                setActionsOpen(false);
+                action.onPress();
+              }} />
+            ))}
           </View>
-          <View style={styles.actionTray}>
-            <AttachmentAction icon="camera-outline" label="Camera" onPress={capturePhoto} />
-            <AttachmentAction icon="image-outline" label="Foto" onPress={() => pickMedia("IMAGE")} />
-            <AttachmentAction icon="videocam-outline" label="Video" onPress={() => pickMedia("VIDEO")} />
-            <AttachmentAction icon="navigate-circle-outline" label="GPS agora" onPress={selectLocation} />
-          </View>
-        </View>
+        </Animated.View>
       ) : null}
       {attachment ? (
         <View style={[styles.preview, attachment.retry && styles.previewError]}>
           {attachment.type === "IMAGE" ? <Image source={{ uri: attachment.uri }} style={styles.previewImage} /> : null}
           <Ionicons color={attachment.retry ? colors.danger : colors.primaryDark} name={attachment.type === "VIDEO" ? "videocam" : attachment.type === "AUDIO" ? "mic" : attachment.type === "LOCATION" ? "location" : "attach"} size={19} />
           <Text numberOfLines={1} style={[styles.previewText, attachment.retry && styles.previewErrorText]}>{attachment.retry ? "Falha no envio. Toque na seta para tentar novamente" : attachment.type === "IMAGE" ? "Foto pronta" : attachment.type === "VIDEO" ? "Video pronto" : attachment.type === "AUDIO" ? "Audio pronto" : "Ponto GPS atual pronto"}</Text>
-          <Pressable accessibilityLabel="Remover anexo" hitSlop={8} onPress={() => setAttachment(null)}><Ionicons color={colors.textMuted} name="close-circle" size={21} /></Pressable>
+          <Pressable accessibilityLabel="Remover anexo" accessibilityRole="button" disabled={busy} hitSlop={8} onPress={() => setAttachment(null)}><Ionicons color={colors.textMuted} name="close-circle" size={21} /></Pressable>
         </View>
       ) : null}
       <View style={styles.inputRow}>
-        {canAttach ? (
-          <Pressable accessibilityLabel="Adicionar foto, video ou ponto GPS atual" onPress={() => setActionsOpen((current) => !current)} style={({ pressed }) => [styles.roundAction, actionsOpen && styles.roundActionActive, pressed && styles.pressed]}>
-            <Ionicons color={colors.primaryDark} name={actionsOpen ? "close" : "add"} size={22} />
+        {hasActions && !recordingVisible ? (
+          <Pressable
+            accessibilityLabel={actionsOpen ? "Fechar anexos" : "Adicionar anexo"}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !canOpenActions, expanded: actionsOpen }}
+            disabled={!canOpenActions}
+            onPress={() => setActionsOpen((current) => !current)}
+            style={({ pressed }) => [styles.roundAction, actionsOpen && styles.roundActionActive, !canOpenActions && styles.disabled, pressed && styles.pressed]}
+          >
+            {preparing ? <ActivityIndicator color={colors.primaryDark} size="small" /> : (
+              <Animated.View style={{ transform: [{ rotate: trayProgress.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "45deg"] }) }] }}>
+                <Ionicons color={actionsOpen ? colors.primaryDark : colors.textSecondary} name="add" size={27} />
+              </Animated.View>
+            )}
           </Pressable>
         ) : null}
-        {!recordingVisible ? leadingAction : null}
+        <View style={[styles.inputShell, focused && styles.inputShellFocused, recordingVisible && styles.inputShellRecording]}>
         {recordingVisible ? (
           <View style={styles.recordingStatus}>
             <Animated.View style={[styles.recordingDot, { opacity: pulse }]} />
@@ -358,39 +436,89 @@ export function ChatComposer({
             <Text numberOfLines={1} style={[styles.recordingHint, cancelRecording && styles.recordingHintCancel]}>{preparing ? "Preparando microfone..." : cancelRecording ? "Solte para excluir" : "Deslize para cancelar"}</Text>
           </View>
         ) : (
-          <TextInput editable={!disabled} maxLength={maxLength} multiline onBlur={onBlur} onChangeText={onChangeDraft} onFocus={onFocus} onSubmitEditing={submitOnEnter ? submit : undefined} placeholder={placeholder} placeholderTextColor={colors.textMuted} style={styles.input} value={draft} />
+          <TextInput
+            accessibilityLabel={placeholder || "Mensagem"}
+            editable={!disabled}
+            maxLength={maxLength}
+            multiline
+            onBlur={(event) => { setFocused(false); onBlur?.(event); }}
+            onChangeText={onChangeDraft}
+            onFocus={(event) => { setFocused(true); setActionsOpen(false); onFocus?.(event); }}
+            onSubmitEditing={submitOnEnter ? submit : undefined}
+            placeholder={placeholder}
+            placeholderTextColor={colors.textMuted}
+            returnKeyType={submitOnEnter ? "send" : "default"}
+            selectionColor={colors.primaryDark}
+            submitBehavior={submitOnEnter ? "submit" : "newline"}
+            style={styles.input}
+            value={draft}
+          />
         )}
-        {attachmentsEnabled && Boolean(onSendAttachment) && !hasContent && !attachment ? (
+        <Animated.View style={[styles.trailingAction, { transform: [{ scale: actionScale }] }]}>
+        {!showSendAction ? (
           <Pressable
             accessibilityHint="Segure para gravar, solte para enviar ou arraste para a esquerda para apagar"
             accessibilityLabel={recordingVisible ? "Gravando audio" : "Segure para gravar audio"}
-            disabled={disabled || busy}
+            disabled={disabled || busy || (preparing && !recordingVisible)}
             onPressIn={startRecording}
             onPressOut={releaseRecording}
             onTouchMove={moveRecording}
             pressRetentionOffset={{ bottom: 120, left: 180, right: 50, top: 80 }}
-            style={({ pressed }) => [styles.roundAction, styles.micAction, recordingVisible && styles.recording, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.micAction, disabled && styles.disabled, recordingVisible && styles.recording, pressed && styles.pressed]}
           >
             {uploadingAudio ? <ActivityIndicator color={colors.primaryDark} size="small" /> : <Ionicons color={recordingVisible ? colors.card : colors.primaryDark} name={recordingVisible ? "mic" : "mic-outline"} size={21} />}
           </Pressable>
         ) : (
-          <Pressable accessibilityLabel="Enviar mensagem" disabled={!canSend} onPress={submit} style={({ pressed }) => [styles.send, !canSend && styles.sendDisabled, pressed && styles.pressed]}>
-            {sending ? <ActivityIndicator color={colors.card} size="small" /> : <Ionicons color={colors.card} name="arrow-up" size={21} />}
+          <Pressable accessibilityLabel={busy ? "Enviando mensagem" : "Enviar mensagem"} accessibilityRole="button" accessibilityState={{ busy, disabled: !canSend }} disabled={!canSend} onPress={submit} style={({ pressed }) => [styles.send, !canSend && !busy && styles.sendDisabled, pressed && styles.pressed]}>
+            {busy ? <ActivityIndicator color={colors.card} size="small" /> : <Ionicons color={colors.card} name="arrow-up" size={23} />}
           </Pressable>
         )}
+        </Animated.View>
+        </View>
       </View>
     </View>
   );
 }
 
-function AttachmentAction({ icon, label, onPress }) {
-  return <Pressable onPress={onPress} style={({ pressed }) => [styles.action, pressed && styles.pressed]}><View style={styles.actionIcon}><Ionicons color={colors.primaryDark} name={icon} size={20} /></View><Text style={styles.actionText}>{label}</Text></Pressable>;
+function AttachmentAction({ backgroundColor = colors.primarySoft, color = colors.primaryDark, hint, icon, label, onPress }) {
+  return (
+    <Pressable accessibilityHint={hint} accessibilityLabel={label} accessibilityRole="button" onPress={onPress} style={({ pressed }) => [styles.action, pressed && styles.pressed]}>
+      <View style={[styles.actionIcon, { backgroundColor }]}><Ionicons color={color} name={icon} size={23} /></View>
+      <Text style={styles.actionText}>{label}</Text>
+    </Pressable>
+  );
 }
 
 const styles = StyleSheet.create({
-  action: { alignItems: "center", flex: 1, gap: 5 }, actionIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 40, justifyContent: "center", width: 40 }, actionText: { color: colors.textSecondary, fontFamily: fonts.medium, fontSize: 11 },
-  actionTray: { flexDirection: "row", paddingHorizontal: spacing.sm, paddingVertical: spacing.sm }, actionTrayHeading: { borderBottomColor: colors.border, borderBottomWidth: 1, gap: 2, paddingHorizontal: spacing.md, paddingVertical: spacing.sm }, actionTrayHint: { color: colors.textMuted, fontFamily: fonts.regular, fontSize: 9, lineHeight: 13 }, actionTrayShell: { backgroundColor: colors.cardMuted, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, overflow: "hidden" }, actionTrayTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: 11 }, composer: { backgroundColor: colors.card, borderTopColor: colors.border, borderTopWidth: 1, gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
-  input: { color: colors.textPrimary, flex: 1, fontFamily: fonts.regular, fontSize: typography.small, maxHeight: 92, minHeight: 40, paddingHorizontal: spacing.xs, paddingVertical: spacing.xs }, inputRow: { alignItems: "flex-end", backgroundColor: colors.cardMuted, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: 3, padding: spacing.xs },
-  micAction: { alignSelf: "flex-end" }, pressed: { opacity: 0.8 }, preview: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, flexDirection: "row", gap: spacing.sm, minHeight: 44, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs }, previewError: { backgroundColor: colors.dangerSoft, borderColor: colors.danger, borderWidth: 1 }, previewErrorText: { color: colors.danger }, previewImage: { borderRadius: radius.sm, height: 34, width: 34 }, previewText: { color: colors.primaryDark, flex: 1, fontFamily: fonts.semiBold, fontSize: typography.caption }, recording: { backgroundColor: colors.danger }, recordingDot: { backgroundColor: colors.danger, borderRadius: radius.round, height: 8, width: 8 }, recordingHint: { color: colors.textMuted, flex: 1, fontFamily: fonts.medium, fontSize: 11 }, recordingHintCancel: { color: colors.danger, fontFamily: fonts.semiBold }, recordingStatus: { alignItems: "center", flex: 1, flexDirection: "row", gap: 6, minHeight: 40, paddingHorizontal: spacing.xs }, recordingTime: { color: colors.textPrimary, fontFamily: fonts.semiBold, fontSize: typography.caption, minWidth: 34 },
-  roundAction: { alignItems: "center", borderRadius: radius.round, height: 40, justifyContent: "center", width: 40 }, roundActionActive: { backgroundColor: colors.primarySoft }, send: { alignItems: "center", backgroundColor: colors.primary, borderRadius: radius.md, height: 40, justifyContent: "center", width: 40 }, sendDisabled: { backgroundColor: colors.textMuted },
+  action: { alignItems: "center", gap: 7, paddingVertical: 6, width: "25%" },
+  actionIcon: { alignItems: "center", borderRadius: 17, height: 48, justifyContent: "center", width: 48 },
+  actionText: { color: colors.textSecondary, fontFamily: fonts.medium, fontSize: 11, textAlign: "center" },
+  actionTray: { flexDirection: "row", flexWrap: "wrap", left: 0, padding: spacing.sm, position: "absolute", right: 0, rowGap: spacing.sm, top: 0 },
+  actionTrayShell: { backgroundColor: colors.cardMuted, borderRadius: 24, overflow: "hidden" },
+  composer: { backgroundColor: colors.card, borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth, gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, zIndex: 30 },
+  composerWithKeyboard: { paddingBottom: spacing.sm },
+  disabled: { opacity: 0.4 },
+  input: { color: colors.textPrimary, flex: 1, fontFamily: fonts.regular, fontSize: typography.body, lineHeight: 21, maxHeight: 120, minHeight: 40, paddingHorizontal: spacing.md, paddingVertical: 9, textAlignVertical: "center" },
+  inputRow: { alignItems: "flex-end", flexDirection: "row", gap: 5 },
+  inputShell: { alignItems: "flex-end", backgroundColor: colors.cardMuted, borderColor: "transparent", borderRadius: 25, borderWidth: 1, flex: 1, flexDirection: "row", minWidth: 0, padding: 3 },
+  inputShellFocused: { borderColor: colors.borderStrong },
+  inputShellRecording: { backgroundColor: colors.dangerSoft, borderColor: "transparent" },
+  micAction: { alignItems: "center", borderRadius: radius.round, height: 38, justifyContent: "center", width: 38 },
+  pressed: { opacity: 0.65, transform: [{ scale: 0.95 }] },
+  preview: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: 18, flexDirection: "row", gap: spacing.sm, minHeight: 52, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  previewError: { backgroundColor: colors.dangerSoft, borderColor: colors.danger, borderWidth: 1 },
+  previewErrorText: { color: colors.danger },
+  previewImage: { borderRadius: 10, height: 38, width: 38 },
+  previewText: { color: colors.primaryDark, flex: 1, fontFamily: fonts.medium, fontSize: typography.caption },
+  recording: { backgroundColor: colors.danger },
+  recordingDot: { backgroundColor: colors.danger, borderRadius: radius.round, height: 8, width: 8 },
+  recordingHint: { color: colors.textMuted, flex: 1, fontFamily: fonts.medium, fontSize: 11 },
+  recordingHintCancel: { color: colors.danger, fontFamily: fonts.semiBold },
+  recordingStatus: { alignItems: "center", flex: 1, flexDirection: "row", gap: 6, minHeight: 40, paddingHorizontal: spacing.sm },
+  recordingTime: { color: colors.textPrimary, fontFamily: fonts.semiBold, fontSize: typography.caption, minWidth: 34 },
+  roundAction: { alignItems: "center", borderRadius: radius.round, height: 46, justifyContent: "center", width: 42 },
+  roundActionActive: { backgroundColor: colors.primarySoft },
+  send: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.round, height: 38, justifyContent: "center", width: 38 },
+  sendDisabled: { backgroundColor: colors.borderStrong },
+  trailingAction: { alignSelf: "flex-end", marginBottom: 1 },
 });

@@ -1990,7 +1990,7 @@ export const sellerStyles = StyleSheet.create({
     width: 28,
   },
   sellerChatBubble: {
-    borderRadius: 16,
+    borderRadius: 18,
     gap: 3,
     maxWidth: "80%",
     paddingHorizontal: 12,
@@ -2000,7 +2000,7 @@ export const sellerStyles = StyleSheet.create({
     backgroundColor: colors.card,
     borderBottomLeftRadius: radius.sm,
     borderColor: colors.border,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   sellerChatBubbleStore: {
     backgroundColor: colors.primaryDark,
@@ -2009,8 +2009,8 @@ export const sellerStyles = StyleSheet.create({
   sellerChatBubbleText: {
     color: colors.textPrimary,
     fontFamily: fonts.regular,
-    fontSize: typography.small,
-    lineHeight: 20,
+    fontSize: typography.body,
+    lineHeight: 21,
   },
   sellerChatBubbleTextStore: {
     color: colors.card,

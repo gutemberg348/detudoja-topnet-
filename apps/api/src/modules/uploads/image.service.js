@@ -46,6 +46,12 @@ const profiles = {
     quality: 82,
     width: 512,
   },
+  userProfile: {
+    fit: "cover",
+    height: 640,
+    quality: 82,
+    width: 640,
+  },
 };
 
 function publicPathFromRelative(relativePath) {

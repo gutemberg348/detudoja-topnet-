@@ -263,7 +263,7 @@ export function PersonalConversationScreen({ navigation, route }) {
         ) : (
           <View style={styles.timeline}>
             <FlatList
-              automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+              automaticallyAdjustKeyboardInsets={false}
               contentContainerStyle={styles.messages}
               data={conversation?.messages ?? []}
               keyExtractor={(item) => String(item.id)}
@@ -281,6 +281,7 @@ export function PersonalConversationScreen({ navigation, route }) {
                 </View>
               )}
               onContentSizeChange={timeline.onContentSizeChange}
+              onLayout={timeline.onLayout}
               onScroll={(event) => {
                 timeline.onScroll(event);
                 if (event.nativeEvent.contentOffset.y < 60) void loadOlder();
@@ -351,15 +352,15 @@ const styles = StyleSheet.create({
   aliasButton: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 40, justifyContent: "center", width: 40 },
   blockButton: { alignItems: "center", backgroundColor: "#FFF1F2", borderRadius: radius.round, height: 40, justifyContent: "center", width: 40 },
   aliasInput: { borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, color: colors.textPrimary, fontFamily: fonts.medium, fontSize: typography.body, minHeight: 52, paddingHorizontal: spacing.md },
-  bubble: { backgroundColor: colors.cardMuted, borderBottomLeftRadius: 4, borderRadius: radius.lg, gap: 4, maxWidth: "84%", paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
-  bubbleMine: { backgroundColor: colors.primaryDark, borderBottomLeftRadius: radius.lg, borderBottomRightRadius: 4 },
+  bubble: { backgroundColor: colors.cardMuted, borderBottomLeftRadius: 5, borderRadius: 18, gap: 4, maxWidth: "84%", paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  bubbleMine: { backgroundColor: colors.primaryDark, borderBottomLeftRadius: 18, borderBottomRightRadius: 5 },
   empty: { alignItems: "center", alignSelf: "center", gap: spacing.sm, maxWidth: 300, paddingVertical: spacing.xxxl },
   emptyIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 56, justifyContent: "center", width: 56 },
   emptyText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption, lineHeight: 18, textAlign: "center" },
   emptyTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.label },
   errorStrip: { alignItems: "center", backgroundColor: "#FFF1F2", flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
   errorText: { color: colors.danger, flex: 1, fontFamily: fonts.medium, fontSize: typography.caption },
-  header: { alignItems: "center", backgroundColor: colors.card, borderBottomColor: colors.border, borderBottomWidth: 1, flexDirection: "row", gap: spacing.md, minHeight: 68, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  header: { alignItems: "center", backgroundColor: colors.card, borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: spacing.md, minHeight: 68, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
   headerActions: { flexDirection: "row", gap: spacing.xs },
   headerCopy: { flex: 1, minWidth: 0 },
   keyboard: { flex: 1 },
@@ -367,7 +368,7 @@ const styles = StyleSheet.create({
   loading: { alignItems: "center", flex: 1, justifyContent: "center" },
   messageLine: { alignItems: "flex-start" },
   messageLineMine: { alignItems: "flex-end" },
-  messageText: { color: colors.textPrimary, fontFamily: fonts.regular, fontSize: typography.small, lineHeight: 20 },
+  messageText: { color: colors.textPrimary, fontFamily: fonts.regular, fontSize: typography.body, lineHeight: 21 },
   messageTextMine: { color: colors.card },
   messages: { flexGrow: 1, gap: spacing.sm, justifyContent: "flex-end", paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   modalCard: { alignItems: "stretch", backgroundColor: colors.card, borderRadius: radius.lg, gap: spacing.md, maxWidth: 400, padding: spacing.xl, width: "92%", ...shadowSoft },

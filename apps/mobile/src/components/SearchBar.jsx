@@ -15,6 +15,7 @@ export function SearchBar({
   onFocusChange,
   onSelectSuggestion,
   onSubmit,
+  recentSuggestions = [],
   placeholder = "Buscar produtos, serviços ou categorias",
   showVoice = false,
   suggestions = [],
@@ -23,7 +24,7 @@ export function SearchBar({
   const [focused, setFocused] = useState(false);
   const blurTimeoutRef = useRef(null);
   const { height: windowHeight } = useWindowDimensions();
-  const visibleSuggestions = focused && (loading || suggestions.length > 0);
+  const visibleSuggestions = focused && (loading || suggestions.length > 0 || recentSuggestions.length > 0);
   const rowHeight = expandedSuggestions ? 78 : 68;
   const maximumListHeight = expandedSuggestions
     ? Math.min(390, Math.max(280, windowHeight * 0.46))
@@ -112,6 +113,31 @@ export function SearchBar({
         <View
           style={[styles.suggestions, compact && styles.suggestionsCompact]}
         >
+          {!value.trim() && recentSuggestions.length ? (
+            <View style={styles.recentsSection}>
+              <View style={styles.recentsHeading}>
+                <Text style={styles.recentsTitle}>Conversas recentes</Text>
+              </View>
+              <ScrollView
+                contentContainerStyle={styles.recentsContent}
+                horizontal
+                keyboardShouldPersistTaps="always"
+                showsHorizontalScrollIndicator={false}
+              >
+                {recentSuggestions.slice(0, 8).map((suggestion) => (
+                  <Pressable
+                    accessibilityLabel={`Abrir conversa com ${suggestion.label}`}
+                    key={`recent:${suggestion.id}`}
+                    onPress={() => selectSuggestion(suggestion)}
+                    style={({ pressed }) => [styles.recentItem, pressed && styles.suggestionPressed]}
+                  >
+                    <SuggestionArtwork recent suggestion={suggestion} visual={suggestionVisual("conversation")} />
+                    <Text numberOfLines={2} style={styles.recentLabel}>{suggestion.label}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
           <View style={styles.suggestionsHeader}>
             <Text style={styles.suggestionsTitle}>
               {value.trim() ? "Resultados rapidos" : initialSuggestionsTitle}
@@ -175,7 +201,7 @@ export function SearchBar({
   );
 }
 
-function SuggestionArtwork({ suggestion, visual }) {
+function SuggestionArtwork({ recent = false, suggestion, visual }) {
   const iconUrl = resolveMediaUrl(suggestion.iconUrl ?? suggestion.imageUrl);
   const [imageFailed, setImageFailed] = useState(false);
 
@@ -184,7 +210,7 @@ function SuggestionArtwork({ suggestion, visual }) {
   }, [iconUrl]);
 
   return (
-    <View style={[styles.suggestionIcon, { backgroundColor: visual.background }]}>
+    <View style={[styles.suggestionIcon, recent && styles.recentAvatar, { backgroundColor: visual.background }]}>
       {iconUrl && !imageFailed ? (
         <Image
           onError={() => setImageFailed(true)}
@@ -196,7 +222,7 @@ function SuggestionArtwork({ suggestion, visual }) {
         <Ionicons
           color={visual.color}
           name={suggestionIcon(suggestion.type, suggestion.iconName)}
-          size={20}
+          size={recent ? 26 : 20}
         />
       )}
     </View>
@@ -313,6 +339,44 @@ const styles = StyleSheet.create({
     minHeight: 64,
   },
   inputCompact: { minHeight: 50 },
+  recentAvatar: {
+    borderColor: colors.primaryLight,
+    borderWidth: 1,
+    height: 62,
+    width: 62,
+  },
+  recentItem: {
+    alignItems: "center",
+    borderRadius: radius.md,
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+    width: 76,
+  },
+  recentLabel: {
+    color: colors.textPrimary,
+    fontFamily: fonts.medium,
+    fontSize: 11,
+    lineHeight: 14,
+    textAlign: "center",
+  },
+  recentsContent: {
+    gap: spacing.sm,
+    paddingBottom: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  recentsHeading: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+  },
+  recentsSection: {
+    borderBottomColor: colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  recentsTitle: {
+    color: colors.textPrimary,
+    fontFamily: fonts.bold,
+    fontSize: typography.small,
+  },
   search: {
     alignItems: "center",
     backgroundColor: colors.card,

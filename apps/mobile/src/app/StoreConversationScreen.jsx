@@ -61,6 +61,8 @@ export function StoreConversationScreen({ navigation, route }) {
     addItem,
     itemCountForStore,
     items: cartItems,
+    removeItem,
+    updateItemQuantity,
   } = useCartStore();
   const insets = useSafeAreaInsets();
   const initialConversation = route.params?.conversation ?? null;
@@ -100,6 +102,8 @@ export function StoreConversationScreen({ navigation, route }) {
     ?? initialStore?.id
     ?? route.params?.storeId;
   const currentStoreItemCount = itemCountForStore(storeId);
+  const hasActiveOrders = customerOrders.some((order) => !["CANCELADO", "CONCLUIDO"].includes(order.status));
+  const compactOrderHistory = !hasActiveOrders && !ordersVisible;
   const timeline = useChatTimeline({
     latestMessageId: conversation?.messages?.at(-1)?.id,
     latestMessageIsMine: conversation?.messages?.at(-1)?.isMine,
@@ -366,7 +370,7 @@ export function StoreConversationScreen({ navigation, route }) {
     });
   }
 
-  function animateProductToCart(product, origin) {
+  function animateProductToCart(origin) {
     if (!origin?.pageX || !origin?.pageY || !cartTargetRef.current) return;
     cartTargetRef.current.measureInWindow((targetX, targetY, width, height) => {
       const targetCenterX = targetX + (width / 2);
@@ -374,9 +378,8 @@ export function StoreConversationScreen({ navigation, route }) {
       setCartFlight({
         deltaX: targetCenterX - origin.pageX,
         deltaY: targetCenterY - origin.pageY,
-        imageUrl: resolveMediaUrl(product.imageUrl),
-        startX: origin.pageX - 19,
-        startY: origin.pageY - insets.top - 19,
+        startX: origin.pageX - 9,
+        startY: origin.pageY - insets.top - 9,
       });
       cartFlightProgress.stopAnimation();
       cartFlightProgress.setValue(0);
@@ -397,7 +400,7 @@ export function StoreConversationScreen({ navigation, route }) {
       && String(item.id) === String(product.id)
     ));
     addItem(buildCartItem(product), storeView, conversation?.id);
-    animateProductToCart(product, origin);
+    animateProductToCart(origin);
     if (!alreadyInCart && conversation?.id && session?.accessToken && !conversation.isStore) {
       void trackStoreConversationActivity(session.accessToken, conversation.id, {
         action: "ADD_TO_CART",
@@ -411,6 +414,29 @@ export function StoreConversationScreen({ navigation, route }) {
       (item) => String(item.id) === String(product?.id),
     );
     addProduct(catalogProduct ?? product, origin);
+  }
+
+  function findCartProduct(product) {
+    if (!storeView?.id || !product?.id) return null;
+    return cartItems.find((item) => (
+      String(item.storeId) === String(storeView.id)
+      && String(item.id) === String(product.id)
+    )) ?? null;
+  }
+
+  function getProductQuantity(product) {
+    return Number(findCartProduct(product)?.quantity ?? 0);
+  }
+
+  function decreaseProduct(product) {
+    const cartProduct = findCartProduct(product);
+    if (!cartProduct) return;
+    const quantity = Number(cartProduct.quantity ?? 0);
+    if (quantity <= 1) {
+      removeItem(cartProduct.cartKey);
+      return;
+    }
+    updateItemQuantity(cartProduct.cartKey, quantity - 1);
   }
 
   function requestPaidOrderCancellation(order, refundDestination) {
@@ -673,7 +699,9 @@ export function StoreConversationScreen({ navigation, route }) {
         >
           {!conversation?.isStore ? (
             <StoreWelcomeCard
+              getProductQuantity={getProductQuantity}
               onAddProduct={addProduct}
+              onDecreaseProduct={decreaseProduct}
               onOpenCatalog={() => setCatalogOpen(true)}
               onOpenProduct={openProduct}
               store={storeView}
@@ -690,7 +718,9 @@ export function StoreConversationScreen({ navigation, route }) {
                 key={message.id}
                 loading={openingContent === String(message.id)}
                 message={message}
+                getProductQuantity={getProductQuantity}
                 onAddProduct={!conversation?.isStore ? addSharedProduct : null}
+                onDecreaseProduct={!conversation?.isStore ? decreaseProduct : null}
                 onOpenCatalog={!conversation?.isStore ? () => setCatalogOpen(true) : null}
                 onOpenContent={openCommercialContent}
                 onOpenSearchProduct={!conversation?.isStore ? openProduct : null}
@@ -710,25 +740,34 @@ export function StoreConversationScreen({ navigation, route }) {
             </View>
           )}
           {!conversation?.isStore && customerOrders.length ? (
-            <View style={styles.ordersDrawer}>
+            <View style={[styles.ordersDrawer, compactOrderHistory && styles.ordersDrawerCompact]}>
               <Pressable
+                accessibilityLabel={ordersVisible ? "Recolher pedidos" : "Mostrar pedidos da loja"}
+                accessibilityRole="button"
                 accessibilityState={{ expanded: ordersVisible }}
-                onPress={() => setOrdersVisible((current) => !current)}
-                style={({ pressed }) => [styles.ordersDrawerToggle, pressed && styles.pressed]}
+                onPress={() => {
+                  if (!ordersVisible && !expandedOrderId) {
+                    setExpandedOrderId(customerOrders.find((order) => !["CANCELADO", "CONCLUIDO"].includes(order.status))?.id ?? customerOrders[0]?.id);
+                  }
+                  setOrdersVisible((current) => !current);
+                }}
+                style={({ pressed }) => [styles.ordersDrawerToggle, compactOrderHistory && styles.ordersDrawerCompactToggle, pressed && styles.pressed]}
               >
-                <View style={styles.orderAccordionHeadingIcon}>
+                <View style={!compactOrderHistory && styles.orderAccordionHeadingIcon}>
                   <Ionicons color={colors.primaryDark} name="receipt-outline" size={17} />
                 </View>
+                {!compactOrderHistory ? <>
                 <View style={styles.orderAccordionHeadingCopy}>
                   <Text style={styles.orderAccordionTitle}>Pedidos</Text>
                   <Text style={styles.orderAccordionSubtitle}>
-                    {ordersVisible ? "Ocultar acompanhamentos" : "Puxar pedidos e acompanhar status"}
+                    {ordersVisible ? "Recolher acompanhamentos" : "Acompanhar seus pedidos"}
                   </Text>
                 </View>
                 <View style={styles.orderAccordionCount}>
                   <Text style={styles.orderAccordionCountText}>{customerOrders.length}</Text>
                 </View>
-                <Ionicons color={colors.primaryDark} name={ordersVisible ? "chevron-down" : "chevron-up"} size={20} />
+                </> : null}
+                <Ionicons color={colors.primaryDark} name={compactOrderHistory ? "chevron-back" : ordersVisible ? "chevron-up" : "chevron-down"} size={compactOrderHistory ? 16 : 20} />
               </Pressable>
               {ordersVisible ? (
                 <StoreOrdersAccordion
@@ -751,7 +790,9 @@ export function StoreConversationScreen({ navigation, route }) {
 
       {catalogProductSuggestions.length ? (
         <StoreProductSuggestions
+          getProductQuantity={getProductQuantity}
           onAdd={addProduct}
+          onDecrease={decreaseProduct}
           onOpen={(product) => {
             void send({ productId: product.id, type: "PRODUTO" }).catch(() => {});
           }}
@@ -761,12 +802,7 @@ export function StoreConversationScreen({ navigation, route }) {
       ) : null}
 
       <ChatComposer
-        accessory={conversation?.isStore ? (
-          <View style={styles.searchComposerHint}>
-            <Ionicons color={colors.primaryDark} name="chatbubbles-outline" size={15} />
-            <Text style={styles.searchComposerHintText}>Voce pode conversar e oferecer ajuda a qualquer momento</Text>
-          </View>
-        ) : (
+        accessory={conversation?.isStore ? null : (
           <View style={[styles.supportToggle, supportMode && styles.supportToggleActive]}>
             <View style={[styles.supportToggleIcon, supportMode && styles.supportToggleIconActive]}>
               <Ionicons
@@ -779,8 +815,8 @@ export function StoreConversationScreen({ navigation, route }) {
               <Text style={styles.supportToggleTitle}>Falar com uma pessoa</Text>
               <Text style={styles.supportToggleText}>
                 {supportMode
-                  ? "Ligado: suas mensagens vao para o atendimento real"
-                  : "Deixe ligado para falar com o suporte real da loja"}
+                  ? "Suas mensagens vão para a equipe da loja"
+                  : "Ative para falar com o atendimento da loja"}
               </Text>
             </View>
             <Switch
@@ -797,18 +833,11 @@ export function StoreConversationScreen({ navigation, route }) {
         )}
         draft={draft}
         onAttachmentError={setError}
-        leadingAction={conversation?.isStore ? (
-          <Pressable
-            accessibilityLabel="Compartilhar produto ou catalogo"
-            onPress={() => setShareOpen(true)}
-            style={({ pressed }) => [
-              styles.shareButton,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Ionicons color={colors.primaryDark} name="albums-outline" size={21} />
-          </Pressable>
-        ) : null}
+        extraActions={conversation?.isStore ? [{
+          icon: "albums-outline",
+          label: "Catálogo",
+          onPress: () => setShareOpen(true),
+        }] : []}
         onChangeDraft={setDraft}
         onBlur={() => setTimeout(() => setCatalogSearchFocused(false), 180)}
         onFocus={() => {
@@ -822,7 +851,7 @@ export function StoreConversationScreen({ navigation, route }) {
             ? "Escreva para o cliente"
             : supportMode
               ? "Escreva a mensagem para a loja"
-              : "Escreva ou pesquise nesta loja"
+              : "Pesquisar na loja…"
         }
         sending={sending}
         style={{ paddingBottom: Math.max(spacing.sm, insets.bottom + spacing.xs) }}
@@ -837,8 +866,10 @@ export function StoreConversationScreen({ navigation, route }) {
         visible={shareOpen}
       />
       <CustomerCatalogModal
+        getProductQuantity={getProductQuantity}
         onClose={() => setCatalogOpen(false)}
         onAddProduct={addProduct}
+        onDecreaseProduct={decreaseProduct}
         onOpenProduct={openProduct}
         store={storeView}
         visible={catalogOpen}
@@ -850,22 +881,16 @@ export function StoreConversationScreen({ navigation, route }) {
             styles.cartFlight,
             {
               left: cartFlight.startX,
-              opacity: cartFlightProgress.interpolate({ inputRange: [0, 0.82, 1], outputRange: [1, 1, 0] }),
+              opacity: cartFlightProgress.interpolate({ inputRange: [0, 0.94, 1], outputRange: [1, 1, 0] }),
               top: cartFlight.startY,
               transform: [
                 { translateX: cartFlightProgress.interpolate({ inputRange: [0, 1], outputRange: [0, cartFlight.deltaX] }) },
                 { translateY: cartFlightProgress.interpolate({ inputRange: [0, 1], outputRange: [0, cartFlight.deltaY] }) },
-                { scale: cartFlightProgress.interpolate({ inputRange: [0, 0.7, 1], outputRange: [1, 0.72, 0.3] }) },
+                { scale: cartFlightProgress.interpolate({ inputRange: [0, 0.88, 1], outputRange: [1, 1, 0.35] }) },
               ],
             },
           ]}
-        >
-          {cartFlight.imageUrl ? (
-            <Image source={{ uri: cartFlight.imageUrl }} style={styles.cartFlightImage} />
-          ) : (
-            <Ionicons color={colors.card} name="cube" size={20} />
-          )}
-        </Animated.View>
+        />
       ) : null}
     </ScreenContainer>
   );
@@ -1084,7 +1109,14 @@ function formatOrderAddress(address) {
     .join(" · ");
 }
 
-function StoreWelcomeCard({ onAddProduct, onOpenCatalog, onOpenProduct, store }) {
+function StoreWelcomeCard({
+  getProductQuantity,
+  onAddProduct,
+  onDecreaseProduct,
+  onOpenCatalog,
+  onOpenProduct,
+  store,
+}) {
   const delivery = store?.delivery;
   const cashback = Number(store?.cashbackPercent ?? 0);
   const deliveryLabel = delivery?.available
@@ -1127,8 +1159,10 @@ function StoreWelcomeCard({ onAddProduct, onOpenCatalog, onOpenProduct, store })
               <CompactProductCard
                 key={product.id}
                 onAdd={(origin) => onAddProduct(product, origin)}
+                onDecrease={() => onDecreaseProduct(product)}
                 onPress={() => onOpenProduct(product)}
                 product={product}
+                quantity={getProductQuantity(product)}
               />
             ))}
           </View>
@@ -1144,11 +1178,12 @@ function StoreWelcomeCard({ onAddProduct, onOpenCatalog, onOpenProduct, store })
   );
 }
 
-function CompactProductCard({ onAdd, onPress, product }) {
+function CompactProductCard({ onAdd, onDecrease, onPress, product, quantity }) {
   const imageUrl = resolveMediaUrl(product.imageUrl);
+  const soldOut = product.stockControlled && Number(product.stockQuantity ?? 0) <= 0;
   return (
-    <View style={styles.compactProduct}>
-      <Pressable onPress={onPress} style={({ pressed }) => [styles.compactProductMain, pressed && styles.pressed]}>
+    <View style={[styles.compactProduct, soldOut && styles.customerProductDisabled]}>
+      <Pressable disabled={!onPress || soldOut} onPress={onPress} style={({ pressed }) => [styles.compactProductMain, pressed && styles.pressed]}>
         <View style={styles.compactProductImage}>
           {imageUrl ? (
             <Image source={{ uri: imageUrl }} style={styles.compactProductImageAsset} />
@@ -1159,16 +1194,25 @@ function CompactProductCard({ onAdd, onPress, product }) {
         <Text numberOfLines={2} style={styles.compactProductName}>{product.name}</Text>
       </Pressable>
       <View style={styles.compactProductFooter}>
-        <Text numberOfLines={1} style={styles.compactProductPrice}>
+        <Text style={styles.compactProductPrice}>
           {formatarDinheiro(product.promotionalPriceCents ?? product.priceCents)}
         </Text>
-        <CartAddButton direction="up" name={product.name} onPress={onAdd} size={29} />
+        <View style={styles.productQuantityRow}>
+        {soldOut ? <Text style={styles.productSoldOut}>Esgotado</Text> : onAdd ? <CartAddButton
+          name={product.name}
+          onDecrease={onDecrease}
+          onPress={onAdd}
+          quantity={quantity}
+          size={34}
+          style={quantity > 0 ? styles.productQuantityControl : undefined}
+        /> : null}
+        </View>
       </View>
     </View>
   );
 }
 
-function StoreProductSuggestions({ onAdd, onOpen, products, title }) {
+function StoreProductSuggestions({ getProductQuantity, onAdd, onDecrease, onOpen, products, title }) {
   return (
     <View style={styles.composerSuggestions}>
       <View style={styles.composerSuggestionsHeading}>
@@ -1204,9 +1248,10 @@ function StoreProductSuggestions({ onAdd, onOpen, products, title }) {
                 </View>
               </Pressable>
               <CartAddButton
-                direction="up"
                 name={product.name}
+                onDecrease={() => onDecrease(product)}
                 onPress={(origin) => onAdd(product, origin)}
+                quantity={getProductQuantity(product)}
                 size={29}
               />
             </View>
@@ -1240,7 +1285,7 @@ function InfoChip({ icon, text }) {
   );
 }
 
-function CustomerProductRow({ onAdd, onPress, product }) {
+function CustomerProductRow({ onAdd, onDecrease, onPress, product, quantity }) {
   const imageUrl = resolveMediaUrl(product.imageUrl);
   const soldOut = product.stockControlled && Number(product.stockQuantity ?? 0) <= 0;
   return (
@@ -1268,13 +1313,27 @@ function CustomerProductRow({ onAdd, onPress, product }) {
         </View>
       </Pressable>
       {!soldOut && onAdd ? (
-        <CartAddButton direction="up" name={product.name} onPress={onAdd} size={32} />
+        <CartAddButton
+          name={product.name}
+          onDecrease={onDecrease}
+          onPress={onAdd}
+          quantity={quantity}
+          size={32}
+        />
       ) : null}
     </View>
   );
 }
 
-function CustomerCatalogModal({ onAddProduct, onClose, onOpenProduct, store, visible }) {
+function CustomerCatalogModal({
+  getProductQuantity,
+  onAddProduct,
+  onClose,
+  onDecreaseProduct,
+  onOpenProduct,
+  store,
+  visible,
+}) {
   const products = store?.products ?? [];
   return (
     <Modal animationType="slide" onRequestClose={onClose} transparent visible={visible}>
@@ -1298,8 +1357,10 @@ function CustomerCatalogModal({ onAddProduct, onClose, onOpenProduct, store, vis
               <CustomerProductRow
                 key={product.id}
                 onAdd={(origin) => onAddProduct(product, origin)}
+                onDecrease={() => onDecreaseProduct(product)}
                 onPress={() => onOpenProduct(product)}
                 product={product}
+                quantity={getProductQuantity(product)}
               />
             )) : (
               <View style={styles.shareEmpty}>
@@ -1350,9 +1411,11 @@ function StoreTypingIndicator() {
 
 function MessageBubble({
   accessToken,
+  getProductQuantity,
   loading,
   message,
   onAddProduct,
+  onDecreaseProduct,
   onOpenCatalog,
   onOpenContent,
   onOpenSearchProduct,
@@ -1367,7 +1430,9 @@ function MessageBubble({
           content={message.content}
           loading={loading}
           onAdd={onAddProduct ? (origin) => onAddProduct(message.content.product, origin) : null}
+          onDecrease={onDecreaseProduct ? () => onDecreaseProduct(message.content.product) : null}
           onPress={() => onOpenContent(message)}
+          quantity={getProductQuantity?.(message.content.product) ?? 0}
           text={message.text}
           type="PRODUTO"
         />
@@ -1392,7 +1457,13 @@ function MessageBubble({
           onAdd={message.content?.kind === "PRODUCT" && onAddProduct
             ? (origin) => onAddProduct(message.content.product, origin)
             : null}
+          onDecrease={message.content?.kind === "PRODUCT" && onDecreaseProduct
+            ? () => onDecreaseProduct(message.content.product)
+            : null}
           onPress={() => onOpenContent(message)}
+          quantity={message.content?.kind === "PRODUCT"
+            ? getProductQuantity?.(message.content.product) ?? 0
+            : 0}
           text={message.text}
           type={message.type}
         />
@@ -1435,7 +1506,9 @@ function MessageBubble({
       </View>
       {searchProducts ? (
         <ChatSearchResults
+          getProductQuantity={getProductQuantity}
           onAdd={onAddProduct}
+          onDecrease={onDecreaseProduct}
           onOpenCatalog={onOpenCatalog}
           onOpen={onOpenSearchProduct}
           products={searchProducts}
@@ -1448,7 +1521,17 @@ function MessageBubble({
   );
 }
 
-function ChatSearchResults({ onAdd, onOpen, onOpenCatalog, products, query, suggestions, total }) {
+function ChatSearchResults({
+  getProductQuantity,
+  onAdd,
+  onDecrease,
+  onOpen,
+  onOpenCatalog,
+  products,
+  query,
+  suggestions,
+  total,
+}) {
   const isSuggestion = total === 0;
   const [suggestionPage, setSuggestionPage] = useState(0);
   const suggestionBatchSize = 2;
@@ -1487,36 +1570,16 @@ function ChatSearchResults({ onAdd, onOpen, onOpenCatalog, products, query, sugg
       ) : null}
       {visibleProducts.length ? (
         <View style={styles.chatSearchGrid}>
-          {visibleProducts.slice(0, 4).map((product) => {
-            const imageUrl = resolveMediaUrl(product.imageUrl);
-            const soldOut = product.stockControlled && Number(product.stockQuantity ?? 0) <= 0;
-            return (
-              <View key={product.id} style={[styles.chatSearchProduct, soldOut && styles.customerProductDisabled]}>
-                <Pressable
-                  disabled={!onOpen || soldOut}
-                  onPress={() => onOpen(product)}
-                  style={({ pressed }) => [styles.chatSearchProductMain, pressed && styles.pressed]}
-                >
-                  <View style={styles.chatSearchProductImage}>
-                    {imageUrl ? (
-                      <Image source={{ uri: imageUrl }} style={styles.customerProductImageAsset} />
-                    ) : (
-                      <Ionicons color={colors.primaryDark} name="cube-outline" size={20} />
-                    )}
-                  </View>
-                  <Text numberOfLines={2} style={styles.chatSearchProductName}>{product.name}</Text>
-                  <Text style={styles.chatSearchProductPrice}>
-                    {formatarDinheiro(product.promotionalPriceCents ?? product.priceCents)}
-                  </Text>
-                </Pressable>
-                {!soldOut && onAdd ? (
-                  <View style={styles.chatSearchAdd}>
-                    <CartAddButton direction="up" name={product.name} onPress={(origin) => onAdd(product, origin)} size={28} />
-                  </View>
-                ) : null}
-              </View>
-            );
-          })}
+          {visibleProducts.slice(0, 4).map((product) => (
+            <CompactProductCard
+              key={product.id}
+              onAdd={onAdd ? (origin) => onAdd(product, origin) : null}
+              onDecrease={() => onDecrease?.(product)}
+              onPress={onOpen ? () => onOpen(product) : null}
+              product={product}
+              quantity={getProductQuantity?.(product) ?? 0}
+            />
+          ))}
         </View>
       ) : (
         <Text style={styles.searchResponseText}>Tente outro nome ou abra todos os produtos.</Text>
@@ -1546,7 +1609,7 @@ function ChatSearchResults({ onAdd, onOpen, onOpenCatalog, products, query, sugg
   );
 }
 
-function CommercialMessageCard({ content, loading, onAdd, onPress, text, type }) {
+function CommercialMessageCard({ content, loading, onAdd, onDecrease, onPress, quantity, text, type }) {
   const product = content.product;
   const category = content.category;
   const catalogProducts = content.products ?? [];
@@ -1640,9 +1703,10 @@ function CommercialMessageCard({ content, loading, onAdd, onPress, text, type })
     </Pressable>
       {type === "PRODUTO" && onAdd ? (
         <CartAddButton
-          direction="up"
           name={product?.name ?? "produto"}
+          onDecrease={onDecrease}
           onPress={onAdd}
+          quantity={quantity}
           size={29}
         />
       ) : null}
@@ -1806,19 +1870,17 @@ function getInitials(value = "") {
 const styles = StyleSheet.create({
   cartFlight: {
     alignItems: "center",
-    backgroundColor: colors.primaryDark,
+    backgroundColor: colors.primary,
     borderColor: colors.card,
     borderRadius: radius.round,
-    borderWidth: 3,
-    height: 38,
+    borderWidth: 2,
+    height: 18,
     justifyContent: "center",
-    overflow: "hidden",
     position: "absolute",
-    width: 38,
+    width: 18,
     zIndex: 200,
     ...shadowSoft,
   },
-  cartFlightImage: { height: "100%", width: "100%" },
   inlineProgress: { flexDirection: "row", paddingVertical: spacing.xs },
   inlineProgressDot: { alignItems: "center", backgroundColor: colors.cardMuted, borderColor: colors.border, borderRadius: radius.round, borderWidth: 2, height: 27, justifyContent: "center", width: 27, zIndex: 2 },
   inlineProgressDotDone: { backgroundColor: colors.primaryDark, borderColor: colors.primaryDark },
@@ -1876,8 +1938,10 @@ const styles = StyleSheet.create({
   orderCashbackText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 9, lineHeight: 14 },
   orderCashbackTitle: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: typography.caption },
   orderCashbackValue: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: typography.body },
-  ordersDrawer: { backgroundColor: colors.backgroundSoft, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, overflow: "hidden" },
-  ordersDrawerToggle: { alignItems: "center", backgroundColor: colors.card, flexDirection: "row", gap: spacing.sm, minHeight: 64, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  ordersDrawer: { backgroundColor: colors.backgroundSoft, borderColor: colors.border, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, overflow: "hidden" },
+  ordersDrawerCompact: { alignSelf: "flex-end", borderBottomRightRadius: 0, borderTopRightRadius: 0, marginRight: -spacing.lg },
+  ordersDrawerCompactToggle: { gap: 7, minHeight: 44, paddingHorizontal: 12 },
+  ordersDrawerToggle: { alignItems: "center", backgroundColor: colors.card, flexDirection: "row", gap: spacing.sm, minHeight: 56, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   avatar: {
     alignItems: "center",
     backgroundColor: colors.primarySoft,
@@ -1897,9 +1961,8 @@ const styles = StyleSheet.create({
   },
   bubble: {
     backgroundColor: colors.cardMuted,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    borderWidth: 1,
+    borderRadius: 18,
+    borderBottomLeftRadius: 5,
     gap: 4,
     maxWidth: "82%",
     paddingHorizontal: spacing.md,
@@ -1907,11 +1970,11 @@ const styles = StyleSheet.create({
   },
   bubbleMine: {
     backgroundColor: colors.primaryDark,
-    borderColor: colors.primaryDark,
+    borderBottomLeftRadius: 18,
+    borderBottomRightRadius: 5,
   },
   bubbleSupport: {
-    borderColor: colors.primary,
-    borderWidth: 2,
+    paddingTop: 10,
   },
   catalogAction: {
     alignItems: "center",
@@ -2059,11 +2122,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.extraBold,
     fontSize: typography.label,
   },
-  chatSearchAdd: {
-    bottom: spacing.xs,
-    position: "absolute",
-    right: spacing.xs,
-  },
   chatSearchActions: {
     flexDirection: "row",
     gap: spacing.xs,
@@ -2111,47 +2169,13 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bold,
     fontSize: typography.caption,
   },
-  chatSearchProduct: {
-    backgroundColor: colors.card,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    minHeight: 142,
-    overflow: "visible",
-    padding: spacing.xs,
-    position: "relative",
-    width: "48.5%",
-  },
-  chatSearchProductImage: {
-    alignItems: "center",
-    aspectRatio: 1.55,
-    backgroundColor: colors.primarySoft,
-    borderRadius: radius.sm,
-    justifyContent: "center",
-    overflow: "hidden",
-    width: "100%",
-  },
-  chatSearchProductMain: { flex: 1, gap: 3 },
-  chatSearchProductName: {
-    color: colors.textPrimary,
-    fontFamily: fonts.bold,
-    fontSize: 11,
-    lineHeight: 14,
-    paddingRight: spacing.xl,
-  },
-  chatSearchProductPrice: {
-    color: colors.primaryDark,
-    fontFamily: fonts.extraBold,
-    fontSize: 11,
-    paddingRight: spacing.xl,
-  },
   chatSearchResults: {
     alignSelf: "stretch",
     backgroundColor: colors.cardMuted,
-    borderColor: colors.primaryLight,
-    borderRadius: radius.lg,
-    borderTopRightRadius: radius.sm,
-    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 20,
+    borderTopRightRadius: 5,
+    borderWidth: StyleSheet.hairlineWidth,
     gap: spacing.sm,
     marginTop: spacing.xs,
     maxWidth: 390,
@@ -2164,27 +2188,28 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   compactProduct: {
-    backgroundColor: colors.cardMuted,
+    backgroundColor: colors.card,
     borderColor: colors.border,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    gap: 4,
-    overflow: "visible",
-    padding: spacing.xs,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: spacing.sm,
+    overflow: "hidden",
+    padding: spacing.sm,
     width: "48.5%",
   },
   compactProductFooter: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: spacing.xs,
-    justifyContent: "space-between",
+    gap: spacing.sm,
+    marginTop: "auto",
   },
-  compactProductMain: { gap: 4 },
+  productQuantityRow: { alignItems: "flex-end", minHeight: 34 },
+  productQuantityControl: { width: "100%", minWidth: 0 },
+  productSoldOut: { color: colors.textMuted, fontFamily: fonts.medium, fontSize: 12, paddingVertical: spacing.sm },
+  compactProductMain: { gap: spacing.sm },
   compactProductImage: {
     alignItems: "center",
     aspectRatio: 1.55,
     backgroundColor: colors.primarySoft,
-    borderRadius: radius.sm,
+    borderRadius: 10,
     justifyContent: "center",
     overflow: "hidden",
     width: "100%",
@@ -2193,15 +2218,14 @@ const styles = StyleSheet.create({
   compactProductName: {
     color: colors.textPrimary,
     fontFamily: fonts.bold,
-    fontSize: 11,
-    lineHeight: 14,
-    minHeight: 28,
+    fontSize: 12,
+    lineHeight: 17,
+    minHeight: 34,
   },
   compactProductPrice: {
     color: colors.primaryDark,
-    flex: 1,
     fontFamily: fonts.extraBold,
-    fontSize: typography.caption,
+    fontSize: typography.small,
   },
   composerSuggestion: {
     alignItems: "center",
@@ -2391,11 +2415,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: colors.card,
     borderBottomColor: colors.border,
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
     gap: spacing.md,
-    padding: spacing.lg,
-    ...shadowSoft,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
   },
   headerCopy: { flex: 1, gap: 2, minWidth: 0 },
   headerCart: {
@@ -2447,8 +2471,8 @@ const styles = StyleSheet.create({
   messageText: {
     color: colors.textPrimary,
     fontFamily: fonts.regular,
-    fontSize: typography.small,
-    lineHeight: 19,
+    fontSize: typography.body,
+    lineHeight: 21,
   },
   messageSender: {
     color: colors.primaryDark,
@@ -2801,8 +2825,8 @@ const styles = StyleSheet.create({
   storeWelcome: {
     backgroundColor: colors.card,
     borderColor: colors.border,
-    borderRadius: radius.xl,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
     overflow: "hidden",
     ...shadowSoft,
   },
@@ -2854,27 +2878,24 @@ const styles = StyleSheet.create({
   supportBadgeTextMine: { color: colors.card },
   supportToggle: {
     alignItems: "center",
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    borderWidth: 1,
+    borderRadius: 16,
     flexDirection: "row",
     gap: spacing.sm,
-    minHeight: 58,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    minHeight: 44,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
   },
   supportToggleActive: {
     backgroundColor: colors.primarySoft,
-    borderColor: colors.primaryLight,
   },
   supportToggleCopy: { flex: 1, gap: 1 },
   supportToggleIcon: {
     alignItems: "center",
-    backgroundColor: colors.primarySoft,
+    backgroundColor: colors.cardMuted,
     borderRadius: 18,
-    height: 36,
+    height: 28,
     justifyContent: "center",
-    width: 36,
+    width: 28,
   },
   supportToggleIconActive: { backgroundColor: colors.primary },
   supportToggleText: {

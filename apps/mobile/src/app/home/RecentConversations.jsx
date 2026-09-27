@@ -1,6 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { AppButton } from "../../components/AppButton";
+import { ContactAvatar } from "../../components/ContactAvatar";
 import { colors, fonts, radius, spacing, typography } from "../../utils/theme";
 
 function formatConversationDate(value) {
@@ -83,21 +84,11 @@ export function RecentConversations({
               pressed && styles.rowPressed,
             ]}
           >
-            <View style={styles.icon}>
-              <Ionicons
-                color={colors.primaryDark}
-                name={
-                  conversation.kind === "service"
-                    ? "briefcase-outline"
-                    : conversation.kind === "person"
-                      ? "person-outline"
-                    : ["store", "store-order"].includes(conversation.kind)
-                      ? "chatbubbles-outline"
-                      : "receipt-outline"
-                }
-                size={19}
-              />
-            </View>
+            <ContactAvatar
+              name={conversation.title}
+              photoUrl={conversation.imageUrl}
+              size={54}
+            />
             <View style={styles.copy}>
               <View style={styles.titleRow}>
                 <Text numberOfLines={1} style={styles.conversationTitle}>
@@ -105,6 +96,7 @@ export function RecentConversations({
                 </Text>
                 <Text style={styles.date}>{formatConversationDate(conversation.date)}</Text>
               </View>
+              <Text numberOfLines={1} style={styles.preview}>{conversation.subtitle}</Text>
             </View>
             {conversation.unreadCount > 0 ? (
               <View style={styles.unreadBadge}>
@@ -127,10 +119,10 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     flex: 1,
     fontFamily: fonts.semiBold,
-    fontSize: typography.small,
+    fontSize: typography.body,
     fontWeight: "600",
   },
-  copy: { flex: 1, minWidth: 0 },
+  copy: { flex: 1, gap: 5, minWidth: 0 },
   date: {
     color: colors.textMuted,
     fontFamily: fonts.medium,
@@ -177,14 +169,6 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   headingCopy: { flex: 1, minWidth: 0 },
-  icon: {
-    alignItems: "center",
-    backgroundColor: colors.primarySoft,
-    borderRadius: radius.round,
-    height: 38,
-    justifyContent: "center",
-    width: 38,
-  },
   list: {
     borderBottomColor: colors.border,
     borderBottomWidth: 1,
@@ -192,12 +176,17 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
   },
   pressed: { opacity: 0.65 },
+  preview: {
+    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    fontSize: typography.caption,
+  },
   row: {
     alignItems: "center",
     flexDirection: "row",
     gap: spacing.md,
-    minHeight: 58,
-    paddingVertical: spacing.sm,
+    minHeight: 76,
+    paddingVertical: spacing.md,
   },
   rowDivider: {
     borderBottomColor: colors.border,

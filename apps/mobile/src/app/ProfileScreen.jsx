@@ -21,7 +21,7 @@ import {
   getStoreConversations,
   subscribeStoreConversationRead,
 } from "../services/store-chats.api";
-import { getCurrentUser, updateCurrentUser } from "../services/users.api";
+import { getCurrentUser, updateCurrentUser, updateCurrentUserPhoto } from "../services/users.api";
 import { fetchCepAddress } from "../services/cep.api";
 import { ApiError } from "../services/api";
 import {
@@ -99,6 +99,7 @@ export function ProfileScreen({ navigation }) {
   const [fieldErrors, setFieldErrors] = useState({});
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isPhotoSaving, setIsPhotoSaving] = useState(false);
   const [name, setName] = useState("");
   const [activeOrdersCount, setActiveOrdersCount] = useState(0);
   const [address, setAddress] = useState({
@@ -348,6 +349,37 @@ export function ProfileScreen({ navigation }) {
     }
   }
 
+  async function chooseProfilePhoto() {
+    if (isPhotoSaving) return;
+    const Picker = await import("expo-image-picker");
+    const permission = await Picker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("Permissao necessaria", "Permita o acesso as fotos para escolher sua imagem de perfil.");
+      return;
+    }
+
+    const result = await Picker.launchImageLibraryAsync({
+      allowsEditing: true,
+      aspect: [1, 1],
+      mediaTypes: Picker.MediaTypeOptions?.Images ?? ["images"],
+      quality: 0.82,
+    });
+    const photo = result.assets?.[0];
+    if (result.canceled || !photo) return;
+
+    setIsPhotoSaving(true);
+    setError("");
+    try {
+      const response = await updateCurrentUserPhoto(session.accessToken, photo);
+      setProfile(response.user);
+      updateSessionUser({ photoUrl: response.user.photoUrl });
+    } catch (requestError) {
+      setError(requestError.message ?? "Nao foi possivel atualizar sua foto.");
+    } finally {
+      setIsPhotoSaving(false);
+    }
+  }
+
   if (isLoading && !profile) {
     return (
       <View style={styles.centered}>
@@ -499,12 +531,14 @@ export function ProfileScreen({ navigation }) {
       </View>
 
       <ProfileHero
+        isPhotoSaving={isPhotoSaving}
         onEdit={() => {
           fillForm(profile);
           setError("");
           setFieldErrors({});
           setEditing((current) => !current);
         }}
+        onPhotoPress={chooseProfilePhoto}
         profile={profile}
       />
 
@@ -654,7 +688,7 @@ export function ProfileScreen({ navigation }) {
   );
 }
 
-function ProfileHero({ onEdit, profile }) {
+function ProfileHero({ isPhotoSaving, onEdit, onPhotoPress, profile }) {
   return (
     <View style={styles.profileHero}>
       <View style={styles.profileHeroTopline}>
@@ -675,11 +709,24 @@ function ProfileHero({ onEdit, profile }) {
       </View>
 
       <View style={styles.profileIdentity}>
-        <View style={styles.avatarRing}>
+        <Pressable
+          accessibilityLabel="Alterar foto do perfil"
+          disabled={isPhotoSaving}
+          onPress={onPhotoPress}
+          style={({ pressed }) => [styles.avatarRing, pressed && styles.pressed]}
+        >
           <View style={styles.avatar}>
-            <Ionicons color={colors.card} name="person-outline" size={31} />
+            {profile.photoUrl ? (
+              <Image source={{ uri: resolveMediaUrl(profile.photoUrl) }} style={styles.avatarImage} />
+            ) : (
+              <Ionicons color={colors.card} name="person-outline" size={31} />
+            )}
+            {isPhotoSaving ? <ActivityIndicator color={colors.card} style={styles.avatarLoading} /> : null}
           </View>
-        </View>
+          <View style={styles.avatarCamera}>
+            <Ionicons color={colors.card} name="camera" size={12} />
+          </View>
+        </Pressable>
         <View style={styles.profileCopy}>
           <Text numberOfLines={1} style={styles.name}>
             {profile.name}
@@ -1063,7 +1110,23 @@ const styles = StyleSheet.create({
     height: 56,
     justifyContent: "center",
     width: 56,
+    overflow: "hidden",
   },
+  avatarCamera: {
+    alignItems: "center",
+    backgroundColor: colors.primaryDark,
+    borderColor: colors.card,
+    borderRadius: radius.round,
+    borderWidth: 2,
+    bottom: -1,
+    height: 23,
+    justifyContent: "center",
+    position: "absolute",
+    right: -1,
+    width: 23,
+  },
+  avatarImage: { height: "100%", width: "100%" },
+  avatarLoading: { backgroundColor: "rgba(0,0,0,0.32)", bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
   avatarRing: {
     alignItems: "center",
     backgroundColor: colors.card,

@@ -646,12 +646,13 @@ export function ServiceConversationScreen({ navigation, route }) {
 
       <View style={styles.timeline}>
         <ScrollView
-          automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+          automaticallyAdjustKeyboardInsets={false}
           contentContainerStyle={styles.messages}
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           keyboardShouldPersistTaps="handled"
           maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           onContentSizeChange={timeline.onContentSizeChange}
+          onLayout={timeline.onLayout}
           onScroll={(event) => {
             timeline.onScroll(event);
             if (event.nativeEvent.contentOffset.y < 60) void loadOlder();
@@ -685,25 +686,12 @@ export function ServiceConversationScreen({ navigation, route }) {
       <ChatComposer
         disabled={!canChat}
         draft={draft}
-        leadingAction={(
-          <View style={styles.composerActions}>
-            {!conversation.isSeller ? (
-              <Pressable
-                accessibilityLabel="Enviar endereco de retirada, destino ou outro ponto da rota"
-                disabled={!canChat}
-                onPress={() => setShareAddressOpen(true)}
-                style={styles.routeAddressAction}
-              >
-                <Ionicons
-                  color={canChat ? colors.primaryDark : colors.textMuted}
-                  name="map-outline"
-                  size={18}
-                />
-                <Text style={[styles.routeAddressActionText, !canChat && styles.routeAddressActionTextDisabled]}>Endereco</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        )}
+        extraActions={conversation.isSeller ? [] : [{
+          hint: "Enviar endereço de retirada, destino ou outro ponto da rota",
+          icon: "map-outline",
+          label: "Endereço",
+          onPress: () => setShareAddressOpen(true),
+        }]}
         onChangeDraft={setDraft}
         onAttachmentError={setError}
         onFocus={() => timeline.scrollToLatest(true)}
@@ -1317,7 +1305,7 @@ const styles = StyleSheet.create({
   avatar: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 42, justifyContent: "center", overflow: "hidden", width: 42 },
   avatarImage: { height: "100%", width: "100%" },
   avatarText: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: typography.h3 },
-  bubble: { backgroundColor: colors.cardMuted, borderBottomLeftRadius: 4, borderRadius: radius.lg, gap: 5, maxWidth: "84%", paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  bubble: { backgroundColor: colors.cardMuted, borderBottomLeftRadius: 5, borderRadius: 18, gap: 5, maxWidth: "84%", paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   cancelModalCard: { alignItems: "stretch", backgroundColor: colors.card, borderRadius: radius.lg, gap: spacing.md, maxWidth: 420, padding: spacing.xl, width: "92%", ...shadowSoft },
   cancelModalIcon: { alignItems: "center", alignSelf: "center", backgroundColor: "#FFF1F2", borderRadius: radius.round, height: 56, justifyContent: "center", width: 56 },
   cancelModalText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.small, lineHeight: 20, textAlign: "center" },
@@ -1386,12 +1374,12 @@ const styles = StyleSheet.create({
   messageImage: { borderRadius: radius.md, height: 190, maxWidth: "100%", width: 240 },
   messageLine: { alignItems: "flex-start" },
   messageLineMine: { alignItems: "flex-end" },
-  messageText: { color: colors.textPrimary, fontFamily: fonts.regular, fontSize: typography.small, lineHeight: 20 },
+  messageText: { color: colors.textPrimary, fontFamily: fonts.regular, fontSize: typography.body, lineHeight: 21 },
   messageTime: { alignSelf: "flex-end", color: colors.textMuted, fontFamily: fonts.medium, fontSize: 9 },
   messages: { flexGrow: 1, gap: spacing.sm, justifyContent: "flex-end", paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   messagesScroll: { flex: 1 },
   timeline: { flex: 1, position: "relative" },
-  mine: { backgroundColor: colors.primaryDark, borderBottomLeftRadius: radius.lg, borderBottomRightRadius: 4 },
+  mine: { backgroundColor: colors.primaryDark, borderBottomLeftRadius: 18, borderBottomRightRadius: 5 },
   mineText: { color: colors.card },
   mineTime: { color: "#BDE5D6" },
   modalAction: { flex: 1 },
