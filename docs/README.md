@@ -13,6 +13,8 @@ quando ela altera regra de negocio, banco, rota, tela, infraestrutura ou risco.
 - `banco.md`: tabelas, IDs, indices, relacoes e regras do PostgreSQL.
 - `front-mobile.md` e `front-admin.md`: fluxos e estrutura das interfaces.
 - `docker-redis.md`: Docker Compose, API, painel, Redis e comandos locais.
+- `sicredi-multipag.md`: teste seguro de certificado, chave e credenciais
+  Multipag na VPS.
 - `backups.md`: rotina de backup interno, conferencia e restauracao segura.
 - `monitoramento-ci.md`: logs, health, metricas, alertas e verificacoes antes
   de publicar.
