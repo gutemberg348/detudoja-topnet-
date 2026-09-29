@@ -39,18 +39,22 @@ export function multipagTransferSummary(data) {
 
 // Teste do contrato estatico: o GET do exemplo ja retorna SUCESSO antes do POST.
 // Mantido separado do fluxo de repasses com consulta preventiva.
-export async function runMultipagSandboxExample({ config, environment, confirmation }, {
+export async function runMultipagSandboxExample({ config, environment, confirmation, dateMode = "documentacao" }, {
   clientFactory = createSicrediMultipagClient, onProgress = () => {},
 } = {}) {
   assertMultipagSandboxConfig(config, environment);
   if (confirmation !== "CONFIRMO_SANDBOX") throw new AppError("Exemplo exige CONFIRMO_SANDBOX", 400);
+  if (!["documentacao", "hoje"].includes(dateMode)) throw new AppError("Data do exemplo: use documentacao ou hoje", 400);
+  const date = dateMode === "hoje" ? new Intl.DateTimeFormat("sv-SE", {
+    day: "2-digit", month: "2-digit", year: "numeric", timeZone: "America/Sao_Paulo",
+  }).format(new Date()) : "2026-08-14";
   const { transactionId, ...payer } = MULTIPAG_SANDBOX_EXAMPLE;
   const client = clientFactory({ ...config, ...payer, transferEnabled: true });
-  onProgress({ stage: "criacao_exemplo_estatico", method: "POST", transactionId });
+  onProgress({ stage: "criacao_exemplo_estatico", method: "POST", transactionId, date });
   try {
     const data = await client.createPixTransfer({
       transactionId, associatedPaymentId: "EMP:001", amountCents: 2010,
-      date: "2026-08-14", description: "Pagamento ordem 001",
+      date, description: "Pagamento ordem 001",
       destinationKeyType: "TELEFONE", destinationKey: "+5511999999999",
       destinationDocument: "11111111111",
     });

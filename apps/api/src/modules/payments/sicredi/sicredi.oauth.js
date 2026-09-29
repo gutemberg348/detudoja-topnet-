@@ -90,7 +90,9 @@ export function createSicrediOAuthClient(config, { httpRequest = sicrediHttpRequ
     const values = (value) => value && typeof value === "object"
       ? Object.values(value).flatMap(values) : typeof value === "string" ? [value] : [];
     return assertSicrediSuccess(result, "a operacao", {
-      sensitiveValues: [config.clientId, config.clientSecret, token, ...values(body), ...values(headers)],
+      sensitiveValues: [config.clientId, config.clientSecret, token,
+        Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64"),
+        ...values(body), ...values(headers)],
       method, path: endpoint.pathname, stage: "operacao",
     });
   }

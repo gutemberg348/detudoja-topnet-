@@ -27,9 +27,10 @@ async function main() {
   const config = sicrediMultipagConfigFromEnv();
   const environment = String(process.env.SICREDI_MULTIPAG_ENV ?? "sandbox").trim().toLowerCase();
   if (mode === "enviar-exemplo") {
-    console.log("[sicredi-multipag-pix] POST do exemplo estatico oficial: 0910F3HT1, R$ 20,10, data 2026-08-14. Usa somente dados publicos do guia.");
+    console.log("[sicredi-multipag-pix] POST do exemplo de Sandbox: 0910F3HT1, R$ 20,10. A data utilizada aparece na etapa abaixo.");
     const result = await runMultipagSandboxExample({
       config, environment, confirmation: process.env.SICREDI_MULTIPAG_TEST_CONFIRM,
+      dateMode: process.env.SICREDI_MULTIPAG_EXAMPLE_DATE_MODE || "documentacao",
     }, { onProgress: (event) => console.log("[sicredi-multipag-pix] Etapa:", event) });
     console.log("[sicredi-multipag-pix]", result);
     console.log("[sicredi-multipag-pix] Resposta do contrato estatico; nao comprova liquidacao real nem o repasse TESTE-REPASSE-20260929-01.");
@@ -76,6 +77,7 @@ main().catch((error) => {
     method: error.providerMethod,
     path: error.providerPath,
     status: error.providerStatusCode,
+    response: error.providerResponseInfo,
     details: error.providerDiagnostics,
   });
   if (error.testStage === "consulta_previa") {

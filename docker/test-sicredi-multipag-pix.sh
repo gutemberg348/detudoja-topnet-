@@ -11,14 +11,17 @@ chain_input="${3:-}"
 mode="${4:-}"
 transaction_id="${5:-}"
 confirmation="${6:-}"
+example_date_mode=documentacao
 
 if [[ $# -lt 4 || $# -gt 6 || -z "$certificate_input" || -z "$key_input" || -z "$chain_input" ]]; then
-  printf 'Uso: bash docker/test-sicredi-multipag-pix.sh CERTIFICADO_CER CHAVE_KEY CADEIA_CER consultar|enviar ID_TRANSACAO [CONFIRMO_SANDBOX] ou consultar-exemplo ou enviar-exemplo CONFIRMO_SANDBOX\n' >&2
+  printf 'Uso: bash docker/test-sicredi-multipag-pix.sh CERTIFICADO_CER CHAVE_KEY CADEIA_CER consultar|enviar ID_TRANSACAO [CONFIRMO_SANDBOX] ou consultar-exemplo ou enviar-exemplo CONFIRMO_SANDBOX [hoje|documentacao]\n' >&2
   exit 2
 fi
 case "$mode" in
   enviar-exemplo)
-    if [[ $# -ne 5 || "$transaction_id" != CONFIRMO_SANDBOX ]]; then printf 'Use enviar-exemplo CONFIRMO_SANDBOX (sem ID).\n' >&2; exit 2; fi
+    if [[ $# -lt 5 || "$transaction_id" != CONFIRMO_SANDBOX ]]; then printf 'Use enviar-exemplo CONFIRMO_SANDBOX [hoje|documentacao] (sem ID).\n' >&2; exit 2; fi
+    example_date_mode="${6:-documentacao}"
+    case "$example_date_mode" in hoje|documentacao) ;; *) printf 'Data invalida: use hoje ou documentacao.\n' >&2; exit 2 ;; esac
     confirmation="$transaction_id"
     transaction_id=""
     ;;
@@ -54,6 +57,7 @@ docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
   --env-file "$repo_dir/apps/api/.env" \
   --env SICREDI_MULTIPAG_ENV=sandbox \
   --env "SICREDI_MULTIPAG_TEST_CONFIRM=$confirmation" \
+  --env "SICREDI_MULTIPAG_EXAMPLE_DATE_MODE=$example_date_mode" \
   --env SICREDI_MULTIPAG_CERT_PATH=/run/sicredi/client.cer \
   --env SICREDI_MULTIPAG_KEY_PATH=/run/sicredi/client.key \
   --env SICREDI_MULTIPAG_CHAIN_PATH=/run/sicredi/chain.cer \

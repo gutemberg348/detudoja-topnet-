@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createSicrediOAuthClient } from "../src/modules/payments/sicredi/sicredi.oauth.js";
-import { sicrediErrorDiagnostics } from "../src/modules/payments/sicredi/sicredi.transport.js";
+import { assertSicrediSuccess, decodeSicrediResponse, sicrediErrorDiagnostics } from "../src/modules/payments/sicredi/sicredi.transport.js";
 import {
   createSicrediPixClient,
   sicrediTxidForPayment,
@@ -125,7 +125,39 @@ test("diagnostico preserva mensagem do banco sem expor credenciais ou corpo brut
   }
   assert.match(text, /PIX_INVALIDO/);
   assert.match(text, /CAMPO_INVALIDO/);
-  assert.deepEqual(sicrediErrorDiagnostics("<html>segredoXYZ</html>"), []);
+  const html = sicrediErrorDiagnostics("<html>segredoXYZ</html>", ["segredoXYZ"]);
+  assert.equal(JSON.stringify(html).includes("segredoXYZ"), false);
+});
+
+test("diagnostico aceita arrays de mensagens, validacoes aninhadas e campos em portugues", () => {
+  const details = sicrediErrorDiagnostics({
+    resposta: { validacoes: [{ campo: "dataPagamento", descricao: "Data anterior ao dia atual" }] },
+    errors: ["Campo obrigatorio", { defaultMessage: "Formato invalido" }],
+    mensagemErro: "Pagamento invalido",
+    request: { message: "conteudo sensivel da requisicao" },
+    rejectedValue: { message: "valor sensivel" },
+  });
+  const text = JSON.stringify(details);
+  for (const value of ["dataPagamento", "Data anterior", "Campo obrigatorio", "Formato invalido", "Pagamento invalido"]) assert.ok(text.includes(value));
+  assert.equal(text.includes("sensivel"), false);
+  assert.match(JSON.stringify(sicrediErrorDiagnostics(["Erro de validacao"])), /Erro de validacao/);
+});
+
+test("resposta 400 texto ou HTML conserva diagnostico sanitizado e metadados", () => {
+  const raw = '<html><h1>Bad Request</h1><p>Data invalida token-secreto</p></html>';
+  const response = decodeSicrediResponse(raw, 400, "text/html");
+  assert.equal(response.data, null);
+  assert.equal(response.responseInfo.format, "text");
+  assert.equal(response.responseInfo.bytes, Buffer.byteLength(raw));
+  assert.throws(() => assertSicrediSuccess(response, "a operacao", { sensitiveValues: ["token-secreto"] }), (error) => {
+    assert.match(JSON.stringify(error.providerDiagnostics), /Data invalida/);
+    assert.equal(JSON.stringify(error).includes("token-secreto"), false);
+    assert.equal(error.providerResponseInfo.contentType, "text/html");
+    return true;
+  });
+  assert.equal(decodeSicrediResponse("", 400).responseInfo.format, "empty");
+  assert.equal(decodeSicrediResponse('{"message":"Erro"}', 400).responseInfo.format, "json");
+  assert.equal(decodeSicrediResponse("texto", 200).errorText, undefined);
 });
 
 test("erro HTTP registra metodo e endpoint corretos sem vazar segredo ecoado pelo banco", async () => {

@@ -168,6 +168,27 @@ Atualize os arquivos antes de executar. Este modo tambem usa a imagem
 existente, sem novo build. Se falhar, o log identifica `criacao_exemplo_estatico`
 e o detalhe sanitizado retornado pelo Sicredi.
 
+Se o POST do exemplo retornar HTTP 400, a data fixa publicada no guia pode
+ser uma causa de rejeicao, mas o status sozinho nao confirma isso. O teste
+aceita `hoje` como ultimo argumento para variar somente a dataPagamento,
+mantendo ID, conta, favorecido e valor do exemplo:
+
+```bash
+bash docker/test-sicredi-multipag-pix.sh \
+  /etc/detudoja/certificados/sicredi-multipag.cer \
+  /etc/detudoja/certificados/sicredi-multipag.key \
+  /etc/detudoja/certificados/sicredi-multipag-chain.cer \
+  enviar-exemplo CONFIRMO_SANDBOX hoje
+```
+
+A data e calculada em America/Sao_Paulo e aparece no log antes do POST.
+Sem `hoje`, o teste continua reproduzindo `2026-08-14` do guia. O log de erro
+inclui formato, tamanho e Content-Type da resposta. Mensagens de validacao
+aninhadas, listas e respostas texto/HTML passam pela sanitizacao; uma resposta
+sem corpo aparece como `format: empty`, permitindo distinguir falta de
+detalhe no banco de um formato anteriormente ignorado pelo script.
+Um novo teste deve ser manual; o script nao faz tentativas automaticas.
+
 O Multipag cria **pagamentos de saida** por chave Pix em
 `POST /v1/pagamentos/pix/chave` e consulta pelo mesmo `idTransacao` em
 `GET /v1/pagamentos/pix/{idTransacao}`. O escopo de envio e

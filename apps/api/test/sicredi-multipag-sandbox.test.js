@@ -58,6 +58,19 @@ test("falha do exemplo identifica POST e nunca repete automaticamente", async ()
   assert.equal(failure.testStage, "criacao_exemplo_estatico");
 });
 
+test("exemplo permite testar a data atual sem alterar ID e valor", async () => {
+  const today = () => new Intl.DateTimeFormat("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: "America/Sao_Paulo" }).format(new Date());
+  const before = today();
+  let submitted;
+  await runMultipagSandboxExample({ config, environment: "sandbox", confirmation: "CONFIRMO_SANDBOX", dateMode: "hoje" }, {
+    clientFactory: () => ({ createPixTransfer: async (body) => { submitted = body; return { status: "RECEBIDO" }; } }),
+  });
+  assert.ok([before, today()].includes(submitted.date));
+  assert.equal(submitted.transactionId, "0910F3HT1");
+  assert.equal(submitted.amountCents, 2010);
+  await assert.rejects(runMultipagSandboxExample({ config, environment: "sandbox", confirmation: "CONFIRMO_SANDBOX", dateMode: "invalida" }), /Data do exemplo/);
+});
+
 test("teste de repasse recusa producao e endpoints alterados", () => {
   assert.throws(() => assertMultipagSandboxConfig(config, "production"), /somente nos endpoints oficiais/);
   assert.throws(() => assertMultipagSandboxConfig({ ...config, apiUrl: "https://mtls-api-parceiro.sicredi.com.br/multipag" }, "sandbox"), /somente nos endpoints oficiais/);
