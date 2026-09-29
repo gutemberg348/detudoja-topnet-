@@ -3,13 +3,60 @@ import test from "node:test";
 import {
   assertMultipagSandboxConfig,
   runMultipagSandboxTransfer,
+  runMultipagSandboxExample,
 } from "../src/modules/payments/sicredi/sicredi.multipag.sandbox.js";
+import { createSicrediMultipagClient } from "../src/modules/payments/sicredi/sicredi.multipag.client.js";
 
 const config = {
   apiUrl: "https://mtls-api-parceiro.sicredi.com.br/sb/multipag-pagamento-sandbox",
   tokenUrl: "https://mtls-api-parceiro.sicredi.com.br/sb/thirdparty/auth/token",
 };
 const transfer = { transactionId: "TESTE-PIX-1" };
+
+test("POST do exemplo usa exatamente os dados oficiais e ignora conta real do env", async () => {
+  const calls = [];
+  const result = await runMultipagSandboxExample({
+    config: { ...config, conta: "123456", cooperativa: "9999", documento: "22222222000122" },
+    environment: "sandbox", confirmation: "CONFIRMO_SANDBOX",
+  }, {
+    clientFactory: (settings) => createSicrediMultipagClient(settings, {
+      oauthFactory: (oauthConfig) => ({ request: async (path, options) => {
+        calls.push({ scope: oauthConfig.scope, path, ...options });
+        return { idTransacao: "0910F3HT1", status: "RECEBIDO", valorPagamento: 20.1 };
+      } }),
+    }),
+  });
+  assert.deepEqual(calls, [{
+    scope: "multipag.pix.pagar", path: "/v1/pagamentos/pix/chave", method: "POST",
+    body: {
+      conta: "000001", cooperativa: "0100", documento: "11111111000111",
+      chavePix: "+5511999999999", documentoBeneficiario: "11111111111",
+      dataPagamento: "2026-08-14", valorPagamento: 20.1,
+      identificadorPagamentoAssociado: "EMP:001", mensagemPix: "Pagamento ordem 001", idTransacao: "0910F3HT1",
+    },
+  }]);
+  assert.equal(result.action, "exemplo_estatico_enviado");
+});
+
+test("exemplo estatico exige confirmacao e bloqueia URLs de producao antes de criar cliente", async () => {
+  const dependencies = { clientFactory: () => { assert.fail("Nao deve instanciar cliente"); } };
+  await assert.rejects(runMultipagSandboxExample({ config, environment: "sandbox" }, dependencies), /CONFIRMO_SANDBOX/);
+  await assert.rejects(runMultipagSandboxExample({ config, environment: "production", confirmation: "CONFIRMO_SANDBOX" }, dependencies), /somente nos endpoints oficiais/);
+  await assert.rejects(runMultipagSandboxExample({
+    config: { ...config, apiUrl: "https://mtls-api-parceiro.sicredi.com.br/multipag" },
+    environment: "sandbox", confirmation: "CONFIRMO_SANDBOX",
+  }, dependencies), /somente nos endpoints oficiais/);
+});
+
+test("falha do exemplo identifica POST e nunca repete automaticamente", async () => {
+  let attempts = 0;
+  const failure = Object.assign(new Error("HTTP 500"), { providerStateUnknown: true });
+  await assert.rejects(runMultipagSandboxExample({ config, environment: "sandbox", confirmation: "CONFIRMO_SANDBOX" }, {
+    clientFactory: () => ({ createPixTransfer: async () => { attempts++; throw failure; } }),
+  }), /HTTP 500/);
+  assert.equal(attempts, 1);
+  assert.equal(failure.testStage, "criacao_exemplo_estatico");
+});
 
 test("teste de repasse recusa producao e endpoints alterados", () => {
   assert.throws(() => assertMultipagSandboxConfig(config, "production"), /somente nos endpoints oficiais/);

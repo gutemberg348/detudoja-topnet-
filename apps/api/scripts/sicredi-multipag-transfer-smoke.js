@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { sicrediMultipagConfigFromEnv } from "../src/modules/payments/sicredi/sicredi.multipag.client.js";
-import { MULTIPAG_SANDBOX_EXAMPLE, runMultipagSandboxTransfer } from "../src/modules/payments/sicredi/sicredi.multipag.sandbox.js";
+import { MULTIPAG_SANDBOX_EXAMPLE, runMultipagSandboxTransfer, runMultipagSandboxExample } from "../src/modules/payments/sicredi/sicredi.multipag.sandbox.js";
 
 function required(name) {
   const value = String(process.env[name] ?? "").trim();
@@ -19,12 +19,22 @@ function saoPauloToday() {
 
 async function main() {
   let [mode, transactionId] = process.argv.slice(2);
-  const example = mode === "consultar-exemplo";
+  const example = mode === "consultar-exemplo" || mode === "enviar-exemplo";
   if ((!example && process.argv.length !== 4) || (example && process.argv.length !== 3)
-    || !["consultar", "enviar", "consultar-exemplo"].includes(mode)) {
-    throw new Error("Uso: node sicredi-multipag-transfer-smoke.js consultar|enviar ID_TRANSACAO ou consultar-exemplo");
+    || !["consultar", "enviar", "consultar-exemplo", "enviar-exemplo"].includes(mode)) {
+    throw new Error("Uso: node sicredi-multipag-transfer-smoke.js consultar|enviar ID_TRANSACAO ou consultar-exemplo|enviar-exemplo");
   }
   const config = sicrediMultipagConfigFromEnv();
+  const environment = String(process.env.SICREDI_MULTIPAG_ENV ?? "sandbox").trim().toLowerCase();
+  if (mode === "enviar-exemplo") {
+    console.log("[sicredi-multipag-pix] POST do exemplo estatico oficial: 0910F3HT1, R$ 20,10, data 2026-08-14. Usa somente dados publicos do guia.");
+    const result = await runMultipagSandboxExample({
+      config, environment, confirmation: process.env.SICREDI_MULTIPAG_TEST_CONFIRM,
+    }, { onProgress: (event) => console.log("[sicredi-multipag-pix] Etapa:", event) });
+    console.log("[sicredi-multipag-pix]", result);
+    console.log("[sicredi-multipag-pix] Resposta do contrato estatico; nao comprova liquidacao real nem o repasse TESTE-REPASSE-20260929-01.");
+    return;
+  }
   if (example) {
     const { transactionId: exampleId, ...payer } = MULTIPAG_SANDBOX_EXAMPLE;
     Object.assign(config, payer);
@@ -32,7 +42,6 @@ async function main() {
     transactionId = exampleId;
     console.log("[sicredi-multipag-pix] Consulta do exemplo publico do Sicredi (0910F3HT1). Nenhum POST de pagamento sera feito.");
   }
-  const environment = String(process.env.SICREDI_MULTIPAG_ENV ?? "sandbox").trim().toLowerCase();
   if (mode === "enviar" && process.env.SICREDI_MULTIPAG_TEST_CONFIRM !== "CONFIRMO_SANDBOX") {
     throw new Error("Envio exige confirmacao explicita CONFIRMO_SANDBOX");
   }

@@ -37,6 +37,30 @@ export function multipagTransferSummary(data) {
   };
 }
 
+// Teste do contrato estatico: o GET do exemplo ja retorna SUCESSO antes do POST.
+// Mantido separado do fluxo de repasses com consulta preventiva.
+export async function runMultipagSandboxExample({ config, environment, confirmation }, {
+  clientFactory = createSicrediMultipagClient, onProgress = () => {},
+} = {}) {
+  assertMultipagSandboxConfig(config, environment);
+  if (confirmation !== "CONFIRMO_SANDBOX") throw new AppError("Exemplo exige CONFIRMO_SANDBOX", 400);
+  const { transactionId, ...payer } = MULTIPAG_SANDBOX_EXAMPLE;
+  const client = clientFactory({ ...config, ...payer, transferEnabled: true });
+  onProgress({ stage: "criacao_exemplo_estatico", method: "POST", transactionId });
+  try {
+    const data = await client.createPixTransfer({
+      transactionId, associatedPaymentId: "EMP:001", amountCents: 2010,
+      date: "2026-08-14", description: "Pagamento ordem 001",
+      destinationKeyType: "TELEFONE", destinationKey: "+5511999999999",
+      destinationDocument: "11111111111",
+    });
+    return { action: "exemplo_estatico_enviado", data: multipagTransferSummary(data) };
+  } catch (error) {
+    error.testStage = "criacao_exemplo_estatico";
+    throw error;
+  }
+}
+
 export async function runMultipagSandboxTransfer({
   config,
   environment,

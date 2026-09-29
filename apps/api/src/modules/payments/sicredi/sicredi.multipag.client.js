@@ -67,9 +67,11 @@ export function createSicrediMultipagClient(config, { oauthFactory = createSicre
   }
 
   return {
-    async createPixTransfer({ amountCents, date, description, destinationDocument, destinationKey, destinationKeyType, destinationName, transactionId }) {
+    async createPixTransfer({ amountCents, date, description, destinationDocument, destinationKey, destinationKeyType, destinationName, transactionId, associatedPaymentId }) {
       if (config.transferEnabled !== true) throw new AppError("Envio Pix Multipag nao habilitado", 503);
       const id = required(transactionId, "ID da transferencia");
+      const reference = associatedPaymentId == null ? id : required(associatedPaymentId, "Identificador associado");
+      if (reference.length > 100) throw new AppError("Identificador associado excede 100 caracteres", 400);
       const document = required(destinationDocument, "Documento beneficiario").replace(/\D/g, "");
       if (!/^[a-zA-Z0-9:-]{1,100}$/.test(id) || !/^\d{11}(\d{3})?$/.test(document)) {
         throw new AppError("Identificacao da transferencia Multipag invalida", 400);
@@ -82,7 +84,7 @@ export function createSicrediMultipagClient(config, { oauthFactory = createSicre
           dataPagamento: date,
           documentoBeneficiario: document,
           idTransacao: id,
-          identificadorPagamentoAssociado: id,
+          identificadorPagamentoAssociado: reference,
           ...(description ? { mensagemPix: String(description).slice(0, 140) } : {}),
           ...(destinationName ? { nomeBeneficiario: String(destinationName).slice(0, 100) } : {}),
           valorPagamento: amount(amountCents),

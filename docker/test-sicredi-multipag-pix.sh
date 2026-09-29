@@ -13,16 +13,21 @@ transaction_id="${5:-}"
 confirmation="${6:-}"
 
 if [[ $# -lt 4 || $# -gt 6 || -z "$certificate_input" || -z "$key_input" || -z "$chain_input" ]]; then
-  printf 'Uso: bash docker/test-sicredi-multipag-pix.sh CERTIFICADO_CER CHAVE_KEY CADEIA_CER consultar|enviar ID_TRANSACAO [CONFIRMO_SANDBOX] ou consultar-exemplo (sem ID)\n' >&2
+  printf 'Uso: bash docker/test-sicredi-multipag-pix.sh CERTIFICADO_CER CHAVE_KEY CADEIA_CER consultar|enviar ID_TRANSACAO [CONFIRMO_SANDBOX] ou consultar-exemplo ou enviar-exemplo CONFIRMO_SANDBOX\n' >&2
   exit 2
 fi
 case "$mode" in
+  enviar-exemplo)
+    if [[ $# -ne 5 || "$transaction_id" != CONFIRMO_SANDBOX ]]; then printf 'Use enviar-exemplo CONFIRMO_SANDBOX (sem ID).\n' >&2; exit 2; fi
+    confirmation="$transaction_id"
+    transaction_id=""
+    ;;
   consultar-exemplo) if [[ $# -ne 4 ]]; then printf 'consultar-exemplo nao aceita ID nem confirmacao.\n' >&2; exit 2; fi ;;
   consultar) if [[ $# -ne 5 ]]; then printf 'Consulta nao aceita confirmacao de envio.\n' >&2; exit 2; fi ;;
   enviar) if [[ "$confirmation" != CONFIRMO_SANDBOX ]]; then printf 'Para enviar em Sandbox, acrescente CONFIRMO_SANDBOX.\n' >&2; exit 2; fi ;;
-  *) printf 'Acao invalida: use consultar, consultar-exemplo ou enviar.\n' >&2; exit 2 ;;
+  *) printf 'Acao invalida: use consultar, consultar-exemplo, enviar ou enviar-exemplo.\n' >&2; exit 2 ;;
 esac
-if [[ "$mode" != consultar-exemplo && ! "$transaction_id" =~ ^[a-zA-Z0-9:-]{1,100}$ ]]; then
+if [[ "$mode" != *-exemplo && ! "$transaction_id" =~ ^[a-zA-Z0-9:-]{1,100}$ ]]; then
   printf 'ID_TRANSACAO invalido (use letras, numeros, : ou -; ate 100 caracteres).\n' >&2
   exit 2
 fi
@@ -43,7 +48,7 @@ fi
 # Reutiliza as dependencias da imagem e carrega o diagnostico do checkout atual.
 # Atualizacoes destes arquivos JS nao exigem rebuild da imagem inteira.
 script_args=("$mode")
-if [[ "$mode" != consultar-exemplo ]]; then script_args+=("$transaction_id"); fi
+if [[ "$mode" != *-exemplo ]]; then script_args+=("$transaction_id"); fi
 docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
   --user 0:0 \
   --env-file "$repo_dir/apps/api/.env" \

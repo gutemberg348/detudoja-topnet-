@@ -138,6 +138,36 @@ imagem**: o comando monta o script e o diretorio de clientes Sicredi do
 checkout atual em somente leitura, aproveitando as dependencias da imagem
 existente. Mudancas futuras de dependencias continuam exigindo build.
 
+### Testar o POST do exemplo estatico oficial
+
+Depois de validar `consultar-exemplo`, teste o corpo do exemplo oficial:
+
+```bash
+bash docker/test-sicredi-multipag-pix.sh \
+  /etc/detudoja/certificados/sicredi-multipag.cer \
+  /etc/detudoja/certificados/sicredi-multipag.key \
+  /etc/detudoja/certificados/sicredi-multipag-chain.cer \
+  enviar-exemplo CONFIRMO_SANDBOX
+```
+
+Este modo envia um unico POST com ID `0910F3HT1`, identificador `EMP:001`,
+valor `20.10`, data `2026-08-14`, conta e favorecido publicados no guia.
+A data fixa reproduz o exemplo de homologacao; nao e uma data para envio
+real. As variaveis de conta, favorecido e valor do `.env` nao sao usadas
+neste modo; as credenciais e os certificados existentes sao reaproveitados.
+
+Como o GET desse ID ja devolve um registro estatico, esse teste especifico
+executa o POST diretamente para validar seu contrato. A consulta preventiva
+permanece no modo `enviar ID`. `enviar-exemplo` exige as URLs oficiais de
+Sandbox e a confirmacao acima, nao aceita ID ou payload personalizados e
+nao repete chamadas automaticamente. A resposta esperada do exemplo de POST
+no guia tem status `RECEBIDO`; um resultado positivo valida essa chamada em
+homologacao e nao prova liquidacao real ou conciliacao do repasse do app.
+
+Atualize os arquivos antes de executar. Este modo tambem usa a imagem
+existente, sem novo build. Se falhar, o log identifica `criacao_exemplo_estatico`
+e o detalhe sanitizado retornado pelo Sicredi.
+
 O Multipag cria **pagamentos de saida** por chave Pix em
 `POST /v1/pagamentos/pix/chave` e consulta pelo mesmo `idTransacao` em
 `GET /v1/pagamentos/pix/{idTransacao}`. O escopo de envio e
