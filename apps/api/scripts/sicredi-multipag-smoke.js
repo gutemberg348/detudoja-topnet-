@@ -8,10 +8,11 @@ const tokenUrls = {
   production: "https://mtls-api-parceiro.sicredi.com.br/thirdparty/auth/token",
   sandbox: "https://mtls-api-parceiro.sicredi.com.br/sb/thirdparty/auth/token",
 };
-const readOnlyScopes = new Set([
+const tokenOnlyScopes = new Set([
   "multipag.boleto.consultar",
   "multipag.tributos.consultar",
   "multipag.pix.consultar",
+  "multipag.pix.pagar",
 ]);
 
 function environment() {
@@ -25,8 +26,8 @@ function environment() {
 function consultationScope() {
   const value = String(process.env.SICREDI_MULTIPAG_SCOPE ?? "multipag.pix.consultar").trim();
   const scopes = value.split(/\s+/);
-  if (!scopes.length || scopes.some((scope) => !readOnlyScopes.has(scope))) {
-    throw new Error("SICREDI_MULTIPAG_SCOPE aceita apenas escopos de consulta do Multipag");
+  if (!scopes.length || scopes.some((scope) => !tokenOnlyScopes.has(scope))) {
+    throw new Error("SICREDI_MULTIPAG_SCOPE contem escopo nao permitido neste teste de token");
   }
   return value;
 }
@@ -152,10 +153,20 @@ async function main() {
     return;
   }
 
+  const grantedScopes = String(result.payload.scope ?? "").split(/\s+/).filter(Boolean);
+  if (scope === "multipag.pix.pagar" && !grantedScopes.includes(scope)) {
+    console.error("[sicredi-multipag] Token recebido, mas o escopo de pagamento nao foi confirmado na resposta.", {
+      environment: targetEnvironment,
+      grantedScopes,
+    });
+    process.exitCode = 1;
+    return;
+  }
+
   console.log("[sicredi-multipag] Autenticacao mTLS concluida.", {
     environment: targetEnvironment,
     expiresIn: result.payload.expires_in ?? null,
-    scope: result.payload.scope ?? scope,
+    scope: result.payload.scope ?? null,
     tokenType: result.payload.token_type ?? "Bearer",
   });
 }

@@ -1,7 +1,8 @@
 # Teste do certificado Sicredi Multipag na VPS
 
-O teste abaixo autentica no Sicredi por mTLS e pede apenas um token com escopo de
-**consulta**. Ele nao cria pagamento, nao envia Pix e nao mostra o token ou as
+O teste abaixo autentica no Sicredi por mTLS e pede apenas um token. Por
+padrao usa escopo de **consulta**; opcionalmente pode verificar se o escopo
+`multipag.pix.pagar` foi liberado. Ele nao cria pagamento, nao envia Pix e nao mostra o token ou as
 credenciais no terminal. Aprovacao do certificado e recebimento de `client_id`
 e `client_secret` sao etapas separadas.
 
@@ -31,11 +32,10 @@ Nao envie a `.key` de volta ao PC; ela ja esta na VPS. Confira o destino e a
 identidade do servidor antes de aceitar a conexao SSH.
 
 Em producao, use as credenciais de producao. Para o teste inicial, prefira
-`sandbox`, que e o padrao. O escopo padrao e `multipag.pix.consultar`; se o
-Sicredi liberou apenas outro escopo de consulta, defina
-`SICREDI_MULTIPAG_SCOPE=multipag.boleto.consultar` ou
-`multipag.tributos.consultar` no mesmo `.env`. Escopos de pagamento sao
-recusados pelo teste.
+`sandbox`, que e o padrao. O escopo padrao do comando e
+`multipag.pix.consultar`; o quinto argumento opcional permite testar somente
+a emissao de um token com `multipag.pix.pagar`. Nenhuma chamada de pagamento
+e feita por este script.
 
 ## Comando na VPS
 
@@ -52,13 +52,26 @@ bash docker/test-sicredi-multipag.sh \
 
 Troque os caminhos se salvou os arquivos com outros nomes. Se ja fez
 `docker compose up -d --build api`, a primeira linha e desnecessaria. O teste
-usa a imagem da API, mas abre um container temporario isolado: somente o `.cer`
-e a `.key` sao montados nele, em modo leitura. A API em funcionamento e o banco
+usa a imagem da API, mas abre um container temporario isolado: o `.cer`, a
+cadeia e a `.key` sao montados nele, em modo leitura. A API em funcionamento e o banco
 nao sao alterados. A chave pode continuar com permissao `600` e dono `root`.
 
-Para testar a autenticacao de producao, depois de configurar as credenciais
-correspondentes, troque o ultimo argumento por `production`. Essa opcao ainda
-**so solicita um token de consulta**.
+Para verificar se o Sicredi liberou a permissao de **enviar Pix** no Sandbox,
+adicione `pagar` como quinto argumento, depois do caminho da cadeia. Isso
+**apenas solicita um token** com `multipag.pix.pagar`: nao faz transferencia.
+
+```bash
+bash docker/test-sicredi-multipag.sh \
+  /etc/detudoja/certificados/sicredi-multipag.cer \
+  /etc/detudoja/certificados/sicredi-multipag.key \
+  sandbox \
+  /etc/detudoja/certificados/sicredi-multipag-chain.cer \
+  pagar
+```
+
+Se retornar `invalid_scope` ou `403`, solicite a liberacao dessa permissao ao
+Sicredi. Para testar autenticacao de producao, use credenciais de producao e
+troque o terceiro argumento (`sandbox`) por `production`.
 
 O script aceita o certificado do cliente em PEM ou DER, acrescenta a cadeia
 PEM em memoria e confere localmente se a chave privada corresponde ao
@@ -85,3 +98,78 @@ aprovacao da cooperativa para transacoes, Webhook ou integracao de pagamentos.
 O projeto ainda nao usa Sicredi Multipag no fluxo financeiro do aplicativo.
 
 Referencia: [guia oficial da API Multipag Sicredi](https://developers.sicredi.com.br/public/docs/getting-started-multipag).
+
+## Teste de repasse Pix no Sandbox
+
+O Multipag cria **pagamentos de saida** por chave Pix em
+`POST /v1/pagamentos/pix/chave` e consulta pelo mesmo `idTransacao` em
+`GET /v1/pagamentos/pix/{idTransacao}`. O escopo de envio e
+`multipag.pix.pagar`; o de consulta e `multipag.pix.consultar`. A resposta
+`RECEBIDO` indica que a solicitacao foi registrada, **nao** que o dinheiro
+foi liquidado. Consulte ate `SUCESSO`, `CANCELADO` ou `ERRO`. O cadastro de
+webhook do Multipag existe somente em **producao**, portanto o teste de
+Sandbox usa consulta. Fontes: [guia Multipag](https://developers.sicredi.com.br/public/docs/getting-started-multipag),
+[criar Pix por chave](https://developers.sicredi.com.br/public/reference/post_v1-pagamentos-pix-chave),
+[webhook Multipag](https://developers.sicredi.com.br/public/docs/webhook).
+
+Na VPS, mantenha as credenciais ja validadas no `apps/api/.env` e acrescente
+os dados **da conta pagadora e do favorecido de homologacao**. Nao use dados
+reais de producao, nao envie segredo por chat e nao versione o `.env`:
+
+```dotenv
+SICREDI_MULTIPAG_COOPERATIVA=<COOPERATIVA_SANDBOX_4_DIGITOS>
+SICREDI_MULTIPAG_CONTA=<CONTA_SANDBOX_COM_DIGITO_SEM_TRACO>
+SICREDI_MULTIPAG_DOCUMENTO=<CPF_OU_CNPJ_PAGADOR_SANDBOX>
+SICREDI_MULTIPAG_TEST_DESTINATION_KEY_TYPE=<TELEFONE|EMAIL|CPF|CNPJ|ALEATORIA>
+SICREDI_MULTIPAG_TEST_DESTINATION_KEY=<CHAVE_PIX_FAVORECIDO_SANDBOX>
+SICREDI_MULTIPAG_TEST_DESTINATION_DOCUMENT=<CPF_OU_CNPJ_FAVORECIDO_SANDBOX>
+SICREDI_MULTIPAG_TEST_DESTINATION_NAME=<NOME_FAVORECIDO_SANDBOX>
+SICREDI_MULTIPAG_TEST_AMOUNT_CENTS=100
+```
+
+`100` significa **R$ 1,00**. Se o Sicredi tiver enviado um cenario de teste
+com outro valor/data, use-o. `SICREDI_MULTIPAG_TEST_DATE=AAAA-MM-DD` e opcional;
+sem essa linha o script usa a data atual em Sao Paulo. Nao e necessario alterar
+`SICREDI_MULTIPAG_TRANSFER_ENABLED`: o teste autoriza o envio somente no
+processo temporario de Sandbox; o gateway do app continua no Asaas.
+
+Atualize o codigo na VPS e construa a imagem antes dos comandos. Primeiro
+teste o escopo de envio, **sem criar pagamento**:
+
+```bash
+docker compose build api
+bash docker/test-sicredi-multipag.sh \
+  /etc/detudoja/certificados/sicredi-multipag.cer \
+  /etc/detudoja/certificados/sicredi-multipag.key \
+  sandbox \
+  /etc/detudoja/certificados/sicredi-multipag-chain.cer \
+  pagar
+```
+
+Escolha um `idTransacao` unico e guarde-o. **Somente quando quiser fazer o
+POST no Sandbox**, execute:
+
+```bash
+bash docker/test-sicredi-multipag-pix.sh \
+  /etc/detudoja/certificados/sicredi-multipag.cer \
+  /etc/detudoja/certificados/sicredi-multipag.key \
+  /etc/detudoja/certificados/sicredi-multipag-chain.cer \
+  enviar TESTE-REPASSE-001 CONFIRMO_SANDBOX
+```
+
+O script consulta `TESTE-REPASSE-001` antes do POST. Se o ID ja existir, ele
+**nao reenvia**; se a consulta falhar por timeout/erro diferente de 404, ele
+**nao envia**. Guarde o mesmo ID e consulte a situacao depois:
+
+```bash
+bash docker/test-sicredi-multipag-pix.sh \
+  /etc/detudoja/certificados/sicredi-multipag.cer \
+  /etc/detudoja/certificados/sicredi-multipag.key \
+  /etc/detudoja/certificados/sicredi-multipag-chain.cer \
+  consultar TESTE-REPASSE-001
+```
+
+Nao execute o POST novamente com outro ID para contornar erro ou timeout.
+O teste recusa qualquer endpoint diferente do **Sandbox oficial** e nao
+aciona saques/repasses do aplicativo. Integracao no fluxo real ainda requer
+persistencia, conciliacao e tratamento de webhook em producao.

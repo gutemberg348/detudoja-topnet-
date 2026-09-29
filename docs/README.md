@@ -15,6 +15,8 @@ quando ela altera regra de negocio, banco, rota, tela, infraestrutura ou risco.
 - `docker-redis.md`: Docker Compose, API, painel, Redis e comandos locais.
 - `sicredi-multipag.md`: teste seguro de certificado, chave e credenciais
   Multipag na VPS.
+- `sicredi-gateway-rollout.md`: mapa dos fluxos financeiros Sicredi, APIs
+  necessarias e requisitos para liberar cada operacao.
 - `backups.md`: rotina de backup interno, conferencia e restauracao segura.
 - `monitoramento-ci.md`: logs, health, metricas, alertas e verificacoes antes
   de publicar.

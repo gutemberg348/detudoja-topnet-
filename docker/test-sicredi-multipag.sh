@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Uso: bash docker/test-sicredi-multipag.sh CERTIFICADO_CER [CHAVE_KEY] [sandbox|production] [CADEIA_CER]
+# Uso: bash docker/test-sicredi-multipag.sh CERTIFICADO_CER [CHAVE_KEY] [sandbox|production] [CADEIA_CER] [consultar|pagar]
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
@@ -9,15 +9,21 @@ certificate_input="${1:-}"
 key_input="${2:-/etc/detudoja/certificados/sicredi-multipag.key}"
 target_environment="${3:-sandbox}"
 chain_input="${4:-}"
+scope_mode="${5:-consultar}"
 
-if [[ -z "$certificate_input" || $# -gt 4 ]]; then
-  printf 'Uso: bash docker/test-sicredi-multipag.sh CERTIFICADO_CER [CHAVE_KEY] [sandbox|production] [CADEIA_CER]\n' >&2
+if [[ -z "$certificate_input" || $# -gt 5 ]]; then
+  printf 'Uso: bash docker/test-sicredi-multipag.sh CERTIFICADO_CER [CHAVE_KEY] [sandbox|production] [CADEIA_CER] [consultar|pagar]\n' >&2
   exit 2
 fi
 
 case "$target_environment" in
   sandbox|production) ;;
   *) printf 'Ambiente invalido: use sandbox ou production.\n' >&2; exit 2 ;;
+esac
+case "$scope_mode" in
+  consultar) target_scope=multipag.pix.consultar ;;
+  pagar) target_scope=multipag.pix.pagar ;;
+  *) printf 'Escopo invalido: use consultar ou pagar.\n' >&2; exit 2 ;;
 esac
 
 if [[ ! -f "$certificate_input" || ! -f "$key_input" ]]; then
@@ -56,6 +62,7 @@ docker_args=(
   --user 0:0
   --env-file "$repo_dir/apps/api/.env"
   --env "SICREDI_MULTIPAG_ENV=$target_environment"
+  --env "SICREDI_MULTIPAG_SCOPE=$target_scope"
   --env SICREDI_MULTIPAG_CERT_PATH=/run/sicredi/client.cer
   --env SICREDI_MULTIPAG_KEY_PATH=/run/sicredi/client.key
   --env SICREDI_MULTIPAG_PFX_PATH=
