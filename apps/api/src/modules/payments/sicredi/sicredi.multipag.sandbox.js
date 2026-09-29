@@ -4,6 +4,11 @@ import { createSicrediMultipagClient } from "./sicredi.multipag.client.js";
 const SANDBOX_AUTH_URL = "https://mtls-api-parceiro.sicredi.com.br/sb/thirdparty/auth/token";
 const SANDBOX_API_URL = "https://mtls-api-parceiro.sicredi.com.br/sb/multipag-pagamento-sandbox";
 
+// Dados publicos do Guia de Pagamentos Pix, nao dados da conta do aplicativo.
+export const MULTIPAG_SANDBOX_EXAMPLE = Object.freeze({
+  transactionId: "0910F3HT1", conta: "000001", cooperativa: "0100", documento: "11111111000111",
+});
+
 function normalizedUrl(value) {
   try {
     const url = new URL(value);
@@ -38,7 +43,7 @@ export async function runMultipagSandboxTransfer({
   mode,
   transactionId,
   transfer,
-}, { clientFactory = createSicrediMultipagClient } = {}) {
+}, { clientFactory = createSicrediMultipagClient, onProgress = () => {} } = {}) {
   assertMultipagSandboxConfig(config, environment);
   if (mode !== "consultar" && mode !== "enviar") {
     throw new AppError("Acao invalida: use consultar ou enviar", 400);
@@ -48,8 +53,13 @@ export async function runMultipagSandboxTransfer({
   }
 
   const client = clientFactory({ ...config, transferEnabled: mode === "enviar" });
+  async function lookup(stage) {
+    onProgress({ stage, method: "GET", transactionId });
+    try { return await client.getPixTransfer(transactionId); }
+    catch (error) { error.testStage = stage; throw error; }
+  }
   if (mode === "consultar") {
-    const data = await client.getPixTransfer(transactionId);
+    const data = await lookup("consulta");
     return { action: "consultado", data: multipagTransferSummary(data) };
   }
   if (!transfer || transfer.transactionId !== transactionId) {
@@ -59,12 +69,16 @@ export async function runMultipagSandboxTransfer({
   // Um 404 permite a primeira tentativa. Qualquer outra falha e ambigua:
   // nao envie um novo Pix se a consulta nao pode confirmar a ausencia do ID.
   try {
-    const existing = await client.getPixTransfer(transactionId);
+    const existing = await lookup("consulta_previa");
     return { action: "ja_existia_nao_reenviado", data: multipagTransferSummary(existing) };
   } catch (error) {
-    if (error.providerStatusCode !== 404) throw error;
+    if (error.providerStatusCode !== 404 || error.providerStage === "autenticacao") throw error;
+    onProgress({ stage: "consulta_previa_404", transactionId });
   }
 
-  const created = await client.createPixTransfer(transfer);
+  onProgress({ stage: "criacao", method: "POST", transactionId });
+  let created;
+  try { created = await client.createPixTransfer(transfer); }
+  catch (error) { error.testStage = "criacao"; throw error; }
   return { action: "solicitacao_enviada", data: multipagTransferSummary(created) };
 }

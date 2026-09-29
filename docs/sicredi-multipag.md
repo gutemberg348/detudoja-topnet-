@@ -101,6 +101,43 @@ Referencia: [guia oficial da API Multipag Sicredi](https://developers.sicredi.co
 
 ## Teste de repasse Pix no Sandbox
 
+### Diagnosticar HTTP 500 no envio e HTTP 404 na consulta
+
+O [Guia de Pagamentos Pix](https://developers.sicredi.com.br/public/docs/guia-de-pagamentos-pix)
+publica o exemplo por chave com `idTransacao=0910F3HT1`, identificador
+`EMP:001`, valor `20.10` e data `2026-08-14`. O guia geral informa que o
+Sandbox trabalha com dados estaticos. Um ID escolhido livremente e o valor
+R$ 1,00 diferem desse exemplo; nao ha evidencia suficiente para afirmar que
+essas diferencas causaram o HTTP 500, nem que o Sandbox persista pagamentos
+arbitrarios como producao. Um HTTP 404 isolado tambem nao distingue uma
+transacao ausente de uma rota ausente.
+
+Depois de publicar e atualizar estes arquivos na VPS, consulte o exemplo:
+
+```bash
+bash docker/test-sicredi-multipag-pix.sh \
+  /etc/detudoja/certificados/sicredi-multipag.cer \
+  /etc/detudoja/certificados/sicredi-multipag.key \
+  /etc/detudoja/certificados/sicredi-multipag-chain.cer \
+  consultar-exemplo
+```
+
+Esse modo usa a conta `000001`, cooperativa `0100` e documento
+`11111111000111` publicados no guia, junto das credenciais ja existentes na
+VPS. Nao edita o `.env` e nao faz POST de pagamento. O ID do exemplo nao
+representa nem comprova o resultado de `TESTE-REPASSE-20260929-01`.
+
+O script agora imprime a etapa (`consulta`, `consulta_previa` ou `criacao`),
+metodo, caminho e campos de erro selecionados e sanitizados. Se parar em
+`consulta_previa`, este processo nao chamou o POST de pagamento. Se houver
+HTTP 500 em `criacao`, mantenha o mesmo ID para conciliacao. Nunca conclua
+sucesso financeiro apenas pela resposta estatica de homologacao.
+
+Para esta atualizacao de diagnostico, **nao e necessario reconstruir a
+imagem**: o comando monta o script e o diretorio de clientes Sicredi do
+checkout atual em somente leitura, aproveitando as dependencias da imagem
+existente. Mudancas futuras de dependencias continuam exigindo build.
+
 O Multipag cria **pagamentos de saida** por chave Pix em
 `POST /v1/pagamentos/pix/chave` e consulta pelo mesmo `idTransacao` em
 `GET /v1/pagamentos/pix/{idTransacao}`. O escopo de envio e

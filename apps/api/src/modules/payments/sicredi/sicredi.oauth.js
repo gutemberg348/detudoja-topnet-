@@ -49,7 +49,10 @@ export function createSicrediOAuthClient(config, { httpRequest = sicrediHttpRequ
       headers,
       method: "POST",
     });
-    const data = assertSicrediSuccess(result, "a autenticacao");
+    const data = assertSicrediSuccess(result, "a autenticacao", {
+      sensitiveValues: [clientId, clientSecret, Buffer.from(`${clientId}:${clientSecret}`).toString("base64")],
+      method: "POST", path: url.pathname, stage: "autenticacao",
+    });
     if (!data?.access_token || !Number.isFinite(Number(data.expires_in))) {
       throw new AppError("Resposta de autenticacao Sicredi incompleta", 502);
     }
@@ -84,7 +87,12 @@ export function createSicrediOAuthClient(config, { httpRequest = sicrediHttpRequ
       tokenExpiresAt = 0;
       result = await send();
     }
-    return assertSicrediSuccess(result, "a operacao");
+    const values = (value) => value && typeof value === "object"
+      ? Object.values(value).flatMap(values) : typeof value === "string" ? [value] : [];
+    return assertSicrediSuccess(result, "a operacao", {
+      sensitiveValues: [config.clientId, config.clientSecret, token, ...values(body), ...values(headers)],
+      method, path: endpoint.pathname, stage: "operacao",
+    });
   }
 
   return { accessToken, request };

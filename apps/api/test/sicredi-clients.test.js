@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createSicrediOAuthClient } from "../src/modules/payments/sicredi/sicredi.oauth.js";
+import { sicrediErrorDiagnostics } from "../src/modules/payments/sicredi/sicredi.transport.js";
 import {
   createSicrediPixClient,
   sicrediTxidForPayment,
@@ -108,4 +109,45 @@ test("OAuth Sicredi guarda token e nao repete mutacao apos 401", async () => {
   assert.equal(calls.length, 2);
   assert.equal(calls[0].options.headers.Authorization.startsWith("Basic "), true);
   assert.equal(calls[1].options.headers.Authorization, "Bearer token");
+});
+
+test("diagnostico preserva mensagem do banco sem expor credenciais ou corpo bruto", () => {
+  const details = sicrediErrorDiagnostics({
+    code: "PIX_INVALIDO",
+    message: "Erro com segredoXYZ e teste@example.com, documento 11111111000111, Bearer abc.123.sig",
+    client_secret: "nao-mostrar",
+    access_token: "nao-mostrar-token",
+    errors: [{ codigo: "CAMPO_INVALIDO", mensagem: "Conta 000001 invalida" }],
+  }, ["segredoXYZ", "000001"]);
+  const text = JSON.stringify(details);
+  for (const value of ["segredoXYZ", "000001", "teste@example.com", "11111111000111", "abc.123.sig", "nao-mostrar"]) {
+    assert.equal(text.includes(value), false, value);
+  }
+  assert.match(text, /PIX_INVALIDO/);
+  assert.match(text, /CAMPO_INVALIDO/);
+  assert.deepEqual(sicrediErrorDiagnostics("<html>segredoXYZ</html>"), []);
+});
+
+test("erro HTTP registra metodo e endpoint corretos sem vazar segredo ecoado pelo banco", async () => {
+  const client = createSicrediOAuthClient({
+    apiUrl: "https://sicredi.test/multipag",
+    tokenUrl: "https://sicredi.test/auth/token",
+    clientId: "cliente-teste", clientSecret: "segredo-teste",
+    scope: "multipag.pix.consultar", tokenStyle: "body", mtls: {},
+  }, {
+    mtlsLoader: async () => ({}),
+    httpRequest: async (url) => String(url).endsWith("/auth/token")
+      ? { statusCode: 200, data: { access_token: "token-teste", expires_in: 300 } }
+      : { statusCode: 500, data: { message: "Falha interna segredo-teste token-teste" } },
+  });
+  await assert.rejects(client.request("/v1/pagamentos/pix/TESTE1"), (error) => {
+    assert.equal(error.providerMethod, "GET");
+    assert.equal(error.providerPath, "/multipag/v1/pagamentos/pix/TESTE1");
+    assert.equal(error.providerStage, "operacao");
+    assert.equal(error.providerStatusCode, 500);
+    assert.equal(error.providerStateUnknown, true);
+    assert.equal(JSON.stringify(error.providerDiagnostics).includes("segredo-teste"), false);
+    assert.equal(JSON.stringify(error.providerDiagnostics).includes("token-teste"), false);
+    return true;
+  });
 });

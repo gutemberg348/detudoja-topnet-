@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { sicrediMultipagConfigFromEnv } from "../src/modules/payments/sicredi/sicredi.multipag.client.js";
-import { runMultipagSandboxTransfer } from "../src/modules/payments/sicredi/sicredi.multipag.sandbox.js";
+import { MULTIPAG_SANDBOX_EXAMPLE, runMultipagSandboxTransfer } from "../src/modules/payments/sicredi/sicredi.multipag.sandbox.js";
 
 function required(name) {
   const value = String(process.env[name] ?? "").trim();
@@ -18,11 +18,20 @@ function saoPauloToday() {
 }
 
 async function main() {
-  const [mode, transactionId] = process.argv.slice(2);
-  if (process.argv.length !== 4 || !["consultar", "enviar"].includes(mode)) {
-    throw new Error("Uso: node sicredi-multipag-transfer-smoke.js consultar|enviar ID_TRANSACAO");
+  let [mode, transactionId] = process.argv.slice(2);
+  const example = mode === "consultar-exemplo";
+  if ((!example && process.argv.length !== 4) || (example && process.argv.length !== 3)
+    || !["consultar", "enviar", "consultar-exemplo"].includes(mode)) {
+    throw new Error("Uso: node sicredi-multipag-transfer-smoke.js consultar|enviar ID_TRANSACAO ou consultar-exemplo");
   }
   const config = sicrediMultipagConfigFromEnv();
+  if (example) {
+    const { transactionId: exampleId, ...payer } = MULTIPAG_SANDBOX_EXAMPLE;
+    Object.assign(config, payer);
+    mode = "consultar";
+    transactionId = exampleId;
+    console.log("[sicredi-multipag-pix] Consulta do exemplo publico do Sicredi (0910F3HT1). Nenhum POST de pagamento sera feito.");
+  }
   const environment = String(process.env.SICREDI_MULTIPAG_ENV ?? "sandbox").trim().toLowerCase();
   if (mode === "enviar" && process.env.SICREDI_MULTIPAG_TEST_CONFIRM !== "CONFIRMO_SANDBOX") {
     throw new Error("Envio exige confirmacao explicita CONFIRMO_SANDBOX");
@@ -43,7 +52,7 @@ async function main() {
     mode,
     transactionId,
     transfer,
-  });
+  }, { onProgress: (event) => console.log("[sicredi-multipag-pix] Etapa:", event) });
   console.log("[sicredi-multipag-pix]", result);
   if (result.action === "solicitacao_enviada") {
     console.log("[sicredi-multipag-pix] Solicitacao criada nao significa Pix liquidado. Consulte o mesmo ID; nao repita o envio.");
@@ -52,7 +61,17 @@ async function main() {
 
 main().catch((error) => {
   console.error(`[sicredi-multipag-pix] ${error.message}`);
-  if (error.providerStateUnknown) {
+  console.error("[sicredi-multipag-pix] Diagnostico:", {
+    stage: error.testStage,
+    providerStage: error.providerStage,
+    method: error.providerMethod,
+    path: error.providerPath,
+    status: error.providerStatusCode,
+    details: error.providerDiagnostics,
+  });
+  if (error.testStage === "consulta_previa") {
+    console.error("[sicredi-multipag-pix] Interrompido na consulta previa; este processo NAO chamou o POST de pagamento.");
+  } else if (error.providerStateUnknown && error.testStage === "criacao") {
     console.error("[sicredi-multipag-pix] Estado desconhecido: consulte o MESMO idTransacao antes de qualquer nova tentativa.");
   }
   process.exitCode = 1;

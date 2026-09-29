@@ -96,11 +96,44 @@ export function sicrediHttpRequest(url, { agent, body, headers = {}, method = "G
   });
 }
 
-export function assertSicrediSuccess(result, operation) {
+export function sicrediErrorDiagnostics(data, sensitiveValues = []) {
+  const secrets = sensitiveValues.filter((value) => typeof value === "string" && value.length)
+    .flatMap((value) => [value, encodeURIComponent(value)]).sort((a, b) => b.length - a.length);
+  function clean(value) {
+    let text = String(value);
+    for (const secret of secrets) text = text.split(secret).join("[oculto]");
+    return text
+      .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9+/=._-]+/gi, "$1 [oculto]")
+      .replace(/\beyJ[A-Za-z0-9_.-]+/g, "[oculto]")
+      .replace(/((?:client_secret|access_token|refresh_token|authorization)\s*[=:]\s*)[^\s,;]+/gi, "$1[oculto]")
+      .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, "[email oculto]")
+      .replace(/\d[\d. /()+-]{9,}\d/g, "[numero oculto]")
+      .replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 400);
+  }
+  const entries = [];
+  function visit(node, depth = 0) {
+    if (!node || typeof node !== "object" || depth > 2) return;
+    if (Array.isArray(node)) { node.slice(0, 5).forEach((item) => visit(item, depth + 1)); return; }
+    for (const field of ["code", "codigo", "error", "message", "mensagem", "error_description", "detail", "title"]) {
+      if (typeof node[field] === "string" || typeof node[field] === "number") {
+        entries.push({ field, value: clean(node[field]) });
+      }
+    }
+    for (const field of ["error", "errors", "erros", "details"]) visit(node[field], depth + 1);
+  }
+  visit(data);
+  return entries.slice(0, 10);
+}
+
+export function assertSicrediSuccess(result, operation, { sensitiveValues, method, path, stage } = {}) {
   if (result.statusCode >= 200 && result.statusCode < 300) return result.data;
   const error = new AppError(`Sicredi recusou ${operation} (HTTP ${result.statusCode})`, 502);
   error.providerStatusCode = result.statusCode;
   error.providerRejected = result.statusCode >= 400 && result.statusCode < 500 && result.statusCode !== 429;
   error.providerStateUnknown = result.statusCode === 429 || result.statusCode >= 500;
+  error.providerDiagnostics = sicrediErrorDiagnostics(result.data, sensitiveValues);
+  error.providerMethod = method;
+  error.providerPath = path;
+  error.providerStage = stage;
   throw error;
 }

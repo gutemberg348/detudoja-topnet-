@@ -73,4 +73,33 @@ test("falha ou timeout da consulta previa bloqueia POST", async () => {
     }),
   }), /estado desconhecido/);
   assert.equal(sent, false);
+  assert.equal(failure.testStage, "consulta_previa");
+});
+
+test("404 da autenticacao nao e confundido com ausencia de pagamento", async () => {
+  let sent = false;
+  const failure = Object.assign(new Error("auth 404"), { providerStatusCode: 404, providerStage: "autenticacao" });
+  await assert.rejects(runMultipagSandboxTransfer({ config, environment: "sandbox", mode: "enviar", transactionId: "TESTE-PIX-1", transfer }, {
+    clientFactory: () => ({
+      getPixTransfer: async () => { throw failure; },
+      createPixTransfer: async () => { sent = true; },
+    }),
+  }), /auth 404/);
+  assert.equal(sent, false);
+});
+
+test("500 do POST identifica a etapa e nao repete o envio", async () => {
+  let sent = 0;
+  const events = [];
+  const failure = Object.assign(new Error("HTTP 500"), { providerStatusCode: 500, providerStateUnknown: true });
+  await assert.rejects(runMultipagSandboxTransfer({ config, environment: "sandbox", mode: "enviar", transactionId: "TESTE-PIX-1", transfer }, {
+    onProgress: (event) => events.push(event.stage),
+    clientFactory: () => ({
+      getPixTransfer: async () => { throw Object.assign(new Error("404"), { providerStatusCode: 404 }); },
+      createPixTransfer: async () => { sent += 1; throw failure; },
+    }),
+  }), /HTTP 500/);
+  assert.equal(sent, 1);
+  assert.equal(failure.testStage, "criacao");
+  assert.deepEqual(events, ["consulta_previa", "consulta_previa_404", "criacao"]);
 });

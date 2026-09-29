@@ -12,16 +12,17 @@ mode="${4:-}"
 transaction_id="${5:-}"
 confirmation="${6:-}"
 
-if [[ $# -lt 5 || $# -gt 6 || -z "$certificate_input" || -z "$key_input" || -z "$chain_input" || -z "$transaction_id" ]]; then
-  printf 'Uso: bash docker/test-sicredi-multipag-pix.sh CERTIFICADO_CER CHAVE_KEY CADEIA_CER consultar|enviar ID_TRANSACAO [CONFIRMO_SANDBOX]\n' >&2
+if [[ $# -lt 4 || $# -gt 6 || -z "$certificate_input" || -z "$key_input" || -z "$chain_input" ]]; then
+  printf 'Uso: bash docker/test-sicredi-multipag-pix.sh CERTIFICADO_CER CHAVE_KEY CADEIA_CER consultar|enviar ID_TRANSACAO [CONFIRMO_SANDBOX] ou consultar-exemplo (sem ID)\n' >&2
   exit 2
 fi
 case "$mode" in
+  consultar-exemplo) if [[ $# -ne 4 ]]; then printf 'consultar-exemplo nao aceita ID nem confirmacao.\n' >&2; exit 2; fi ;;
   consultar) if [[ $# -ne 5 ]]; then printf 'Consulta nao aceita confirmacao de envio.\n' >&2; exit 2; fi ;;
   enviar) if [[ "$confirmation" != CONFIRMO_SANDBOX ]]; then printf 'Para enviar em Sandbox, acrescente CONFIRMO_SANDBOX.\n' >&2; exit 2; fi ;;
-  *) printf 'Acao invalida: use consultar ou enviar.\n' >&2; exit 2 ;;
+  *) printf 'Acao invalida: use consultar, consultar-exemplo ou enviar.\n' >&2; exit 2 ;;
 esac
-if [[ ! "$transaction_id" =~ ^[a-zA-Z0-9:-]{1,100}$ ]]; then
+if [[ "$mode" != consultar-exemplo && ! "$transaction_id" =~ ^[a-zA-Z0-9:-]{1,100}$ ]]; then
   printf 'ID_TRANSACAO invalido (use letras, numeros, : ou -; ate 100 caracteres).\n' >&2
   exit 2
 fi
@@ -39,6 +40,10 @@ if [[ -z "$api_image" ]] || ! docker image inspect "$api_image" >/dev/null 2>&1;
   exit 1
 fi
 
+# Reutiliza as dependencias da imagem e carrega o diagnostico do checkout atual.
+# Atualizacoes destes arquivos JS nao exigem rebuild da imagem inteira.
+script_args=("$mode")
+if [[ "$mode" != consultar-exemplo ]]; then script_args+=("$transaction_id"); fi
 docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
   --user 0:0 \
   --env-file "$repo_dir/apps/api/.env" \
@@ -50,4 +55,6 @@ docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
   --mount "type=bind,source=$certificate_file,target=/run/sicredi/client.cer,readonly" \
   --mount "type=bind,source=$key_file,target=/run/sicredi/client.key,readonly" \
   --mount "type=bind,source=$chain_file,target=/run/sicredi/chain.cer,readonly" \
-  "$api_image" node /app/apps/api/scripts/sicredi-multipag-transfer-smoke.js "$mode" "$transaction_id"
+  --mount "type=bind,source=$repo_dir/apps/api/scripts/sicredi-multipag-transfer-smoke.js,target=/app/apps/api/scripts/sicredi-multipag-transfer-smoke.js,readonly" \
+  --mount "type=bind,source=$repo_dir/apps/api/src/modules/payments/sicredi,target=/app/apps/api/src/modules/payments/sicredi,readonly" \
+  "$api_image" node /app/apps/api/scripts/sicredi-multipag-transfer-smoke.js "${script_args[@]}"
