@@ -1,4 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import * as ImagePicker from "expo-image-picker";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -351,25 +352,24 @@ export function ProfileScreen({ navigation }) {
 
   async function chooseProfilePhoto() {
     if (isPhotoSaving) return;
-    const Picker = await import("expo-image-picker");
-    const permission = await Picker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert("Permissao necessaria", "Permita o acesso as fotos para escolher sua imagem de perfil.");
-      return;
-    }
-
-    const result = await Picker.launchImageLibraryAsync({
-      allowsEditing: true,
-      aspect: [1, 1],
-      mediaTypes: Picker.MediaTypeOptions?.Images ?? ["images"],
-      quality: 0.82,
-    });
-    const photo = result.assets?.[0];
-    if (result.canceled || !photo) return;
-
-    setIsPhotoSaving(true);
-    setError("");
     try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert("Permissao necessaria", "Permita o acesso as fotos para escolher sua imagem de perfil.");
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        allowsEditing: true,
+        aspect: [1, 1],
+        mediaTypes: ["images"],
+        quality: 0.82,
+      });
+      const photo = result.assets?.[0];
+      if (result.canceled || !photo) return;
+
+      setIsPhotoSaving(true);
+      setError("");
       const response = await updateCurrentUserPhoto(session.accessToken, photo);
       setProfile(response.user);
       updateSessionUser({ photoUrl: response.user.photoUrl });

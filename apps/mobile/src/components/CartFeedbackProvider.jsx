@@ -1,10 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Easing, Keyboard, Platform, StyleSheet, View } from "react-native";
-import { FullWindowOverlay } from "react-native-screens";
+import { Animated, Easing, Keyboard, StyleSheet, View } from "react-native";
 import { createCartFlightQueue } from "../utils/cart-feedback";
 import { colors } from "../utils/theme";
 
 const CartFeedbackContext = createContext(null);
+const CartFeedbackLayerContext = createContext(null);
 
 // The overlay and the measured destination live outside scrolling/search content.
 export function CartFeedbackProvider({ children }) {
@@ -43,21 +43,28 @@ export function CartFeedbackProvider({ children }) {
   }, []);
   const value = useMemo(() => ({ animateToCart, setCartTarget, onCartLayout: flushFlights }),
     [animateToCart, setCartTarget, flushFlights]);
-  const overlay = (
+  const layerValue = useMemo(() => ({ hostRef, flights, finishFlight, flushFlights }),
+    [flights, finishFlight, flushFlights]);
+  return (
+    <CartFeedbackContext.Provider value={value}>
+      <CartFeedbackLayerContext.Provider value={layerValue}>
+        {children}
+      </CartFeedbackLayerContext.Provider>
+    </CartFeedbackContext.Provider>
+  );
+}
+
+// Draw inside the Buscar screen, above its ScrollView, so native navigation
+// and the scroll content cannot cover the dot.
+export function CartFeedbackLayer() {
+  const context = useContext(CartFeedbackLayerContext);
+  if (!context) throw new Error("CartFeedbackLayer must be used inside CartFeedbackProvider");
+  const { hostRef, flights, finishFlight, flushFlights } = context;
+  return (
     <View ref={hostRef} collapsable={false} onLayout={flushFlights}
       pointerEvents="none" accessible={false} style={styles.overlay}>
       {flights.map((flight) => <CartDot key={flight.id} flight={flight} onFinish={finishFlight} />)}
     </View>
-  );
-
-  return (
-    <CartFeedbackContext.Provider value={value}>
-      <View style={styles.host}>
-        {children}
-        {/* iOS native-stack screens can cover an ordinary JS sibling overlay. */}
-        {Platform.OS === "ios" ? <FullWindowOverlay>{overlay}</FullWindowOverlay> : overlay}
-      </View>
-    </CartFeedbackContext.Provider>
   );
 }
 
@@ -97,7 +104,6 @@ export function useCartFeedback() {
 }
 
 const styles = StyleSheet.create({
-  host: { flex: 1 },
   overlay: { ...StyleSheet.absoluteFillObject, zIndex: 200, elevation: 20 },
   dot: {
     position: "absolute",

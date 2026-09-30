@@ -73,6 +73,22 @@ export function getAdminPayments(accessToken, params) {
   return apiGet(withQuery("/api/admin/payments", params), accessToken);
 }
 
+export function getAdminPaymentDetails(accessToken, paymentId) {
+  return apiGet(`/api/admin/payments/${paymentId}`, accessToken);
+}
+
+export function cancelAdminPayment(accessToken, paymentId, reason) {
+  return apiRequest(`/api/admin/payments/${paymentId}/cancel`, {
+    body: { reason }, method: "POST", token: accessToken,
+  });
+}
+
+export function archiveAdminPayment(accessToken, paymentId, archived, reason) {
+  return apiRequest(`/api/admin/payments/${paymentId}/archive`, {
+    body: { archived, reason }, method: "POST", token: accessToken,
+  });
+}
+
 export function approveSandboxPayment(accessToken, paymentId, data) {
   return apiRequest(`/api/admin/payments/${paymentId}/sandbox-approve`, {
     body: data, method: "POST", token: accessToken,

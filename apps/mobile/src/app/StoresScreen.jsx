@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { BrandLogo } from "../components/BrandLogo";
+import { CartFeedbackLayer } from "../components/CartFeedbackProvider";
 import { MarketplaceLocationModal } from "../components/MarketplaceLocationModal";
 import { MarketplaceProductCard } from "../components/MarketplaceProductCard";
 import { ScreenContainer } from "../components/ScreenContainer";
@@ -395,7 +396,7 @@ export function StoresScreen({ navigation, route }) {
         : `Lojas disponiveis em ${locationLabel}`;
 
   return (
-    <ScreenContainer contentContainerStyle={styles.content} padded={false}>
+    <ScreenContainer contentContainerStyle={styles.content} overlay={<CartFeedbackLayer />} padded={false}>
       <View style={styles.hero}>
         <BrandLogo centered size="large" />
 

@@ -1,10 +1,13 @@
-import { CircleAlert, RefreshCw, RotateCcw, Search, WalletCards, X } from "lucide-react";
+import { Ban, CircleAlert, Eye, RefreshCw, RotateCcw, Search, WalletCards, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
   getAdminPayments,
   refreshAdminRefund,
   refundAdminPayment,
   approveSandboxPayment,
+  getAdminPaymentDetails,
+  cancelAdminPayment,
+  archiveAdminPayment,
 } from "../services/admin.api";
 
 const statusLabels = {
@@ -46,24 +49,36 @@ export function PaymentsPage({ accessToken, canRefundPayments = false }) {
   const [refundReason, setRefundReason] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
+  const [archived, setArchived] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 });
   const [sandboxEnabled, setSandboxEnabled] = useState(false);
   const [sandboxPayment, setSandboxPayment] = useState(null);
   const [sandboxReason, setSandboxReason] = useState("");
   const [sandboxConfirmation, setSandboxConfirmation] = useState("");
+  const [receiveGateway, setReceiveGateway] = useState(null);
+  const [details, setDetails] = useState(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [cancelPayment, setCancelPayment] = useState(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [archivePayment, setArchivePayment] = useState(null);
+  const [archiveReason, setArchiveReason] = useState("");
 
   const load = useCallback(async () => {
     setError("");
     setIsLoading(true);
     try {
-      const response = await getAdminPayments(accessToken, { search, status });
+      const response = await getAdminPayments(accessToken, { search, status, archived, page });
       setPayments(response.payments ?? []);
+      setPagination(response.pagination ?? { page: 1, totalPages: 1, total: 0 });
       setSandboxEnabled(Boolean(response.sandboxApprovalEnabled));
+      setReceiveGateway(response.receiveGateway ?? null);
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel carregar os pagamentos.");
     } finally {
       setIsLoading(false);
     }
-  }, [accessToken, search, status]);
+  }, [accessToken, search, status, archived, page]);
 
   useEffect(() => {
     const timeout = setTimeout(load, 250);
@@ -91,8 +106,9 @@ export function PaymentsPage({ accessToken, canRefundPayments = false }) {
     setError("");
     try {
       await refundAdminPayment(accessToken, refundPayment.id, refundReason.trim());
-      closeRefund();
+      setRefundPayment(null);
       await load();
+      if (details?.payment.id === refundPayment.id) await openDetails(refundPayment.id);
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel solicitar o estorno.");
     } finally {
@@ -106,6 +122,7 @@ export function PaymentsPage({ accessToken, canRefundPayments = false }) {
     try {
       await refreshAdminRefund(accessToken, payment.id);
       await load();
+      if (details?.payment.id === payment.id) await openDetails(payment.id);
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel consultar o gateway.");
     } finally {
@@ -125,8 +142,50 @@ export function PaymentsPage({ accessToken, canRefundPayments = false }) {
       });
       setSandboxPayment(null);
       await load();
+      if (details?.payment.id === sandboxPayment.id) await openDetails(sandboxPayment.id);
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel aprovar o teste.");
+    } finally { setProcessingId(null); }
+  }
+
+  async function openDetails(paymentId) {
+    setDetailsLoading(true);
+    setError("");
+    try { setDetails(await getAdminPaymentDetails(accessToken, paymentId)); }
+    catch (requestError) { setError(requestError.message ?? "Nao foi possivel abrir a transacao."); }
+    finally { setDetailsLoading(false); }
+  }
+
+  async function submitCancel(event) {
+    event.preventDefault();
+    if (!cancelPayment || cancelReason.trim().length < 8) return;
+    setProcessingId(cancelPayment.id);
+    setError("");
+    try {
+      await cancelAdminPayment(accessToken, cancelPayment.id, cancelReason.trim());
+      const paymentId = cancelPayment.id;
+      setCancelPayment(null);
+      setCancelReason("");
+      await load();
+      if (details?.payment.id === paymentId) await openDetails(paymentId);
+    } catch (requestError) {
+      setError(requestError.message ?? "Nao foi possivel cancelar a cobranca.");
+    } finally { setProcessingId(null); }
+  }
+
+  async function submitArchive(event) {
+    event.preventDefault();
+    if (!archivePayment || archiveReason.trim().length < 8) return;
+    setProcessingId(archivePayment.id);
+    setError("");
+    try {
+      await archiveAdminPayment(accessToken, archivePayment.id, !archivePayment.archivedAt, archiveReason.trim());
+      setArchivePayment(null);
+      setArchiveReason("");
+      setDetails(null);
+      await load();
+    } catch (requestError) {
+      setError(requestError.message ?? "Nao foi possivel atualizar o arquivo.");
     } finally { setProcessingId(null); }
   }
 
@@ -151,17 +210,25 @@ export function PaymentsPage({ accessToken, canRefundPayments = false }) {
         </div>
       </section>
 
+      <section className={`payments-gateway payments-gateway--${receiveGateway === "SICREDI" ? "sicredi" : "fallback"}`}>
+        <span className="payments-gateway__dot" />
+        <div><strong>Novos Pix: {receiveGateway === "SICREDI" ? "Sicredi" : receiveGateway === "ASAAS" ? "Asaas" : "nenhum gateway pronto"}</strong>
+          <p>{receiveGateway === "SICREDI" ? "A cobranca Pix de recebimento esta habilitada para novas transacoes." : "O Multipag nao gera cobrancas Pix de recebimento. Para usar Sicredi aqui, configure e habilite a API Pix de cobranca na VPS."} Pagamentos antigos permanecem no gateway em que foram criados.</p>
+        </div>
+      </section>
+
       <div className="payments-toolbar">
         <label className="payments-search">
           <Search size={17} />
-          <input onChange={(event) => setSearch(event.target.value)} placeholder="Pedido, cliente, e-mail ou loja" value={search} />
+          <input onChange={(event) => { setPage(1); setSearch(event.target.value); }} placeholder="Pedido, cliente, e-mail ou loja" value={search} />
         </label>
-        <select onChange={(event) => setStatus(event.target.value)} value={status}>
+        <select onChange={(event) => { setPage(1); setStatus(event.target.value); }} value={status}>
           <option value="">Todos os status</option>
           {Object.entries(statusLabels).map(([value, label]) => (
             <option key={value} value={value}>{label}</option>
           ))}
         </select>
+        <label className="payments-archive-filter"><input type="checkbox" checked={archived} onChange={(event) => { setPage(1); setArchived(event.target.checked); }} /> Ver arquivados</label>
       </div>
 
       {sandboxEnabled ? <section className="payments-policy"><CircleAlert size={21} /><div>
@@ -187,28 +254,34 @@ export function PaymentsPage({ accessToken, canRefundPayments = false }) {
                     <td><span className="table-primary">{payment.store?.name ?? "Venda autonoma"}</span><span className="table-secondary">{payment.method}</span></td>
                     <td><span className="payment-value">{money(payment.totalCents)}</span><span className="table-secondary">Saldo {money(payment.walletCents)} · Pix {money(payment.pixCents)}</span></td>
                     <td><span className={`status-badge status-badge--${statusTone(payment.status)}`}>{statusLabels[payment.status] ?? payment.status}</span></td>
-                    <td>
+                    <td><div className="payments-actions">
+                      <button className="button button--secondary" disabled={detailsLoading} type="button" onClick={() => openDetails(payment.id)}><Eye size={15} /> Ver detalhes</button>
                       {payment.sandboxSimulated ? <span className="table-secondary">Simulado pelo admin · Sandbox</span> : null}
                       {canRefundPayments && (payment.sandboxApprovable || payment.sandboxRefundable) ? (
                         <button className="button button--secondary" disabled={Boolean(processingId)} type="button" onClick={() => {
                           setSandboxPayment(payment); setSandboxReason(""); setSandboxConfirmation(""); setError("");
                         }}>{payment.sandboxRefundable ? "Confirmar estorno de teste" : "Aprovar pagamento de teste"}</button>
-                      ) : canRefundPayments && payment.status === "EM_DISPUTA" ? (
+                      ) : null}
+                      {canRefundPayments && payment.cancelable ? (
+                        <button className="button button--secondary" disabled={Boolean(processingId)} type="button" onClick={() => { setCancelPayment(payment); setCancelReason(""); }}><Ban size={15} /> Cancelar cobrança</button>
+                      ) : null}
+                      {canRefundPayments && payment.status === "EM_DISPUTA" && !payment.sandboxRefundable ? (
                         <button className="button button--secondary" disabled={processingId === payment.id} onClick={() => refreshRefund(payment)} type="button">
                           <RefreshCw className={processingId === payment.id ? "spin" : ""} size={15} /> Consultar gateway
                         </button>
-                      ) : canRefundPayments ? (
+                      ) : null}
+                      {canRefundPayments && payment.refundable ? (
                         <button
                           className="button button--secondary"
-                          disabled={!payment.refundable || processingId === payment.id}
+                          disabled={processingId === payment.id}
                           onClick={() => openRefund(payment)}
                           title="Solicitar estorno financeiro"
                           type="button"
                         >
                           <RotateCcw size={15} /> {processingId === payment.id ? "Processando" : "Estornar"}
                         </button>
-                      ) : <span className="table-secondary">Somente consulta</span>}
-                    </td>
+                      ) : null}
+                    </div></td>
                   </tr>
                 ))}
               </tbody>
@@ -216,6 +289,95 @@ export function PaymentsPage({ accessToken, canRefundPayments = false }) {
           </div>
         )}
       </section>
+
+      {pagination.totalPages > 1 ? <nav className="payments-pagination" aria-label="Paginas de pagamentos">
+        <button className="button button--secondary" type="button" disabled={page <= 1 || isLoading} onClick={() => setPage((value) => value - 1)}>Anterior</button>
+        <span>Pagina {pagination.page} de {pagination.totalPages} · {pagination.total} pagamentos</span>
+        <button className="button button--secondary" type="button" disabled={page >= pagination.totalPages || isLoading} onClick={() => setPage((value) => value + 1)}>Proxima</button>
+      </nav> : null}
+
+      {details ? <div className="modal-backdrop" onMouseDown={() => setDetails(null)}>
+        <section className="modal payment-details" role="dialog" aria-modal="true" aria-labelledby="payment-details-title" onMouseDown={(event) => event.stopPropagation()}>
+          <div className="modal__header">
+            <div><p className="eyebrow">RASTREIO DA TRANSACAO</p><h2 id="payment-details-title">Pagamento #{details.payment.id}</h2></div>
+            <button className="icon-button" type="button" onClick={() => setDetails(null)} aria-label="Fechar"><X size={19} /></button>
+          </div>
+          <div className="payment-details__hero">
+            <strong>{money(details.payment.totalCents)}</strong>
+            <span className={`status-badge status-badge--${statusTone(details.payment.status)}`}>{statusLabels[details.payment.status] ?? details.payment.status}</span>
+            <small>{details.payment.gateway} · {details.payment.gatewayEnvironment ?? "ambiente nao informado"} · {details.payment.gatewayPaymentId ?? "sem ID no gateway"}</small>
+          </div>
+          <div className="payment-details__facts">
+            <div><span>Cliente</span><strong>{details.payment.payer?.name ?? "—"}</strong><small>{details.payment.payer?.email}</small></div>
+            <div><span>Destino</span><strong>{details.payment.store?.name ?? (details.deposit ? "Deposito em carteira" : "Pagamento avulso")}</strong><small>{details.payment.orderCode ? `Pedido ${details.payment.orderCode}` : "Sem pedido de loja"}</small></div>
+            <div><span>Datas</span><strong>Criado {dateTime(details.payment.createdAt)}</strong><small>Pago {dateTime(details.payment.paidAt)} · Estornado {dateTime(details.payment.refundedAt)}</small></div>
+          </div>
+          <h3>Origem do valor</h3>
+          <div className="payment-details__rows">
+            <div><span>Pix</span><strong>{money(details.payment.pixCents)}</strong></div>
+            <div><span>Saldo das carteiras</span><strong>{money(details.payment.walletCents)}</strong></div>
+            {details.sources.map((source) => <div key={source.id}><span>{source.walletType ?? source.type} · {source.status}</span><strong>{money(source.amountCents)}</strong></div>)}
+          </div>
+          {details.items.length ? <><h3>Itens</h3><div className="payment-details__rows">
+            {details.items.map((item) => <div key={item.id}><span>{item.quantity}× {item.name}</span><strong>{money(item.totalCents)}</strong></div>)}
+          </div></> : null}
+          {details.deposit ? <><h3>Deposito em carteira</h3><div className="payment-details__rows"><div><span>{details.deposit.walletType ?? "Carteira"} · {details.deposit.status}</span><strong>{money(details.deposit.creditedCents)}</strong></div></div></> : null}
+          {details.settlement ? <>
+            <h3>Distribuicao da transacao #{details.settlement.id} · {details.settlement.status}</h3>
+            <div className="payment-details__rows">
+              <div><span>Bruto</span><strong>{money(details.settlement.grossCents)}</strong></div>
+              <div><span>Liquido previsto para loja</span><strong>{money(details.settlement.sellerNetCents)}</strong></div>
+              <div><span>Taxa da plataforma</span><strong>{money(details.settlement.platformFeeCents)}</strong></div>
+              <div><span>Taxa de processamento</span><strong>{money(details.settlement.processingFeeCents)}</strong></div>
+              <div><span>Cashback prioritario</span><strong>{money(details.settlement.cashbackCents)}</strong></div>
+              <div><span>Pool de recompensas</span><strong>{money(details.settlement.rewardsPoolCents)}</strong></div>
+              <div><span>Empresa</span><strong>{money(details.settlement.companyCents)}</strong></div>
+            </div>
+            <p className="payment-details__hint">Valores previstos no calculo nao significam que ja foram liberados ou enviados. Confira o status de cada lancamento abaixo.</p>
+            <h3>Para quem foi</h3>
+            {details.settlement.receivables.length || details.settlement.rewards.length || details.settlement.platformEntries.length ? <div className="payment-details__rows">
+              {details.settlement.receivables.map((item) => <div key={`rec-${item.id}`}><span>Recebivel · {item.type} · {item.recipient?.name ?? item.recipient?.nome} · {item.status}</span><strong>{money(item.netCents)}</strong></div>)}
+              {details.settlement.rewards.map((item) => <div key={`rew-${item.id}`}><span>{item.type} · {item.recipient?.nome} · {item.status}</span><strong>{money(item.amountCents)}</strong></div>)}
+              {details.settlement.platformEntries.map((item) => <div key={`pla-${item.id}`}><span>{item.account ?? item.accountType} · {item.type} · {item.status}</span><strong>{money(item.amountCents)}</strong></div>)}
+            </div> : <p className="payment-details__hint">Ainda nao ha ganhos registrados para esta transacao.</p>}
+            <h3>Repasse Pix</h3><p className="payment-details__hint">{details.settlement.transfer ? `${details.settlement.transfer.gateway} · ${details.settlement.transfer.status} · ${money(details.settlement.transfer.amountCents)} · Pago ${dateTime(details.settlement.transfer.paidAt)}` : "Nenhum repasse Pix registrado."}</p>
+          </> : <p className="payment-details__hint">Ainda nao houve distribuicao de ganhos para este pagamento.</p>}
+          {details.walletEntries.length ? <><h3>Lancamentos nas carteiras</h3><div className="payment-details__rows">
+            {details.walletEntries.map((item) => <div key={`wallet-${item.id}`}><span>{item.type} · {item.origin} · {item.recipient?.nome ?? "Usuario"} · {item.walletType ?? "Carteira"} · {item.status}</span><strong>{money(item.amountCents)}</strong></div>)}
+          </div></> : null}
+          {details.events.length ? <><h3>Historico financeiro</h3><div className="payment-details__events">{details.events.map((item) => <div key={item.id}><strong>{item.type}</strong><span>{item.description ?? ""}</span><small>{dateTime(item.at)}</small></div>)}</div></> : null}
+          <p className="payment-details__hint">Registros financeiros nao podem ser apagados; use cancelamento antes do pagamento ou estorno apos a confirmacao.</p>
+          {canRefundPayments && ["CANCELADO", "ESTORNADO", "FALHOU"].includes(details.payment.status) ? <div className="modal__actions">
+            <button className="button button--secondary" type="button" onClick={() => { setArchivePayment(details.payment); setArchiveReason(""); }}>
+              {details.payment.archivedAt ? "Restaurar na lista" : "Excluir da lista (arquivar)"}
+            </button>
+          </div> : null}
+        </section>
+      </div> : null}
+
+      {archivePayment ? <div className="modal-backdrop" onMouseDown={() => !processingId && setArchivePayment(null)}>
+        <section className="modal refund-modal" role="dialog" aria-modal="true" aria-labelledby="archive-payment-title" onMouseDown={(event) => event.stopPropagation()}>
+          <div className="modal__header"><h2 id="archive-payment-title">{archivePayment.archivedAt ? "Restaurar" : "Arquivar"} pagamento #{archivePayment.id}</h2><button className="icon-button" type="button" disabled={Boolean(processingId)} onClick={() => setArchivePayment(null)} aria-label="Fechar"><X size={19} /></button></div>
+          <p>{archivePayment.archivedAt ? "A transacao voltara para a lista principal." : "A transacao sai da lista principal, mas o historico e os ganhos permanecem registrados para auditoria. Ela ficara no filtro Arquivados."}</p>
+          <form className="refund-form" onSubmit={submitArchive}>
+            <label>Motivo<textarea required minLength={8} maxLength={500} value={archiveReason} onChange={(event) => setArchiveReason(event.target.value)} /></label>
+            {error ? <div className="form-error">{error}</div> : null}
+            <div className="modal__actions"><button className="button button--secondary" type="button" disabled={Boolean(processingId)} onClick={() => setArchivePayment(null)}>Voltar</button><button className="button button--primary" disabled={Boolean(processingId) || archiveReason.trim().length < 8} type="submit">Confirmar</button></div>
+          </form>
+        </section>
+      </div> : null}
+
+      {cancelPayment ? <div className="modal-backdrop" onMouseDown={() => !processingId && setCancelPayment(null)}>
+        <section className="modal refund-modal" role="dialog" aria-modal="true" aria-labelledby="cancel-payment-title" onMouseDown={(event) => event.stopPropagation()}>
+          <div className="modal__header"><h2 id="cancel-payment-title">Cancelar cobranca #{cancelPayment.id}</h2><button className="icon-button" type="button" disabled={Boolean(processingId)} onClick={() => setCancelPayment(null)} aria-label="Fechar"><X size={19} /></button></div>
+          <p>So e permitido enquanto o pedido aguarda pagamento. A cobranca sera cancelada no gateway e o pedido sera liberado, sem apagar o historico.</p>
+          <form className="refund-form" onSubmit={submitCancel}>
+            <label>Motivo<textarea required minLength={8} maxLength={500} value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} /></label>
+            {error ? <div className="form-error">{error}</div> : null}
+            <div className="modal__actions"><button className="button button--secondary" type="button" disabled={Boolean(processingId)} onClick={() => setCancelPayment(null)}>Voltar</button><button className="button button--danger" disabled={Boolean(processingId) || cancelReason.trim().length < 8} type="submit">Confirmar cancelamento</button></div>
+          </form>
+        </section>
+      </div> : null}
 
       {sandboxPayment ? <div className="modal-backdrop">
         <section className="modal refund-modal" role="dialog" aria-modal="true" aria-labelledby="sandbox-payment-title">

@@ -3,7 +3,24 @@ import {
   refreshAdminAsaasRefundPayment,
   refundAdminPayment,
   approveAdminSandboxPayment,
+  getAdminPaymentDetails,
+  cancelAdminPendingPayment,
+  archiveAdminPayment,
 } from "./admin-payments.service.js";
+
+export async function archiveAdminPaymentController(req, res, next) {
+  try { res.json(await archiveAdminPayment(req.auth.user.id, req.params.paymentId, req.body)); }
+  catch (error) { next(error); }
+}
+
+export async function getAdminPaymentDetailsController(req, res, next) {
+  try { res.json(await getAdminPaymentDetails(req.params.paymentId)); } catch (error) { next(error); }
+}
+
+export async function cancelAdminPendingPaymentController(req, res, next) {
+  try { res.json(await cancelAdminPendingPayment(req.auth.user.id, req.params.paymentId, req.body)); }
+  catch (error) { next(error); }
+}
 
 export async function approveAdminSandboxPaymentController(req, res, next) {
   try {

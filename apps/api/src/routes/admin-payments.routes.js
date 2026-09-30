@@ -4,8 +4,11 @@ import {
   refreshAdminAsaasRefundPaymentController,
   refundAdminPaymentController,
   approveAdminSandboxPaymentController,
+  getAdminPaymentDetailsController,
+  cancelAdminPendingPaymentController,
+  archiveAdminPaymentController,
 } from "../modules/admin/admin-payments.controller.js";
-import { refundAdminPaymentSchema, sandboxPaymentApprovalSchema } from "../modules/admin/admin.validator.js";
+import { archiveAdminPaymentSchema, refundAdminPaymentSchema, sandboxPaymentApprovalSchema } from "../modules/admin/admin.validator.js";
 import { paymentStatusRefreshRateLimit } from "../middlewares/rate-limit.middleware.js";
 import { roleMiddleware } from "../middlewares/role.middleware.js";
 import { validate } from "../middlewares/validate.middleware.js";
@@ -13,6 +16,19 @@ import { validate } from "../middlewares/validate.middleware.js";
 export const adminPaymentsRoutes = Router();
 
 adminPaymentsRoutes.get("/", listAdminPaymentsController);
+adminPaymentsRoutes.get("/:paymentId", getAdminPaymentDetailsController);
+adminPaymentsRoutes.post(
+  "/:paymentId/archive",
+  roleMiddleware("super_admin", "financeiro"),
+  validate(archiveAdminPaymentSchema),
+  archiveAdminPaymentController,
+);
+adminPaymentsRoutes.post(
+  "/:paymentId/cancel",
+  roleMiddleware("super_admin", "financeiro"),
+  validate(refundAdminPaymentSchema),
+  cancelAdminPendingPaymentController,
+);
 adminPaymentsRoutes.post(
   "/:paymentId/sandbox-approve",
   roleMiddleware("super_admin", "financeiro"),

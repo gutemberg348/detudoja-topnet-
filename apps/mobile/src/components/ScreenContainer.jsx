@@ -15,6 +15,7 @@ export function ScreenContainer({
   keyboardAvoiding = true,
   keyboardVerticalOffset = 0,
   onContentSizeChange,
+  overlay,
   padded = true,
   scroll = true,
   scrollEnabled = true,
@@ -45,6 +46,7 @@ export function ScreenContainer({
   const safeContent = (
     <SafeAreaView edges={edges} style={[styles.safeArea, style]}>
       {content}
+      {overlay}
     </SafeAreaView>
   );
 

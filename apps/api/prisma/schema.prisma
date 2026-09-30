@@ -1731,6 +1731,7 @@ model Pagamento {
   pago_em                       DateTime?        @db.Timestamptz(3)
   cancelado_em                  DateTime?        @db.Timestamptz(3)
   estornado_em                  DateTime?        @db.Timestamptz(3)
+  arquivado_admin_em            DateTime?        @db.Timestamptz(3)
   criado_em                     DateTime         @default(now()) @db.Timestamptz(3)
   atualizado_em                 DateTime         @updatedAt @db.Timestamptz(3)
 
@@ -1754,6 +1755,7 @@ model Pagamento {
   @@index([status])
   @@index([gateway])
   @@index([gateway_pagamento_id])
+  @@index([arquivado_admin_em])
   @@index([criado_em])
   @@map("pagamentos")
 }

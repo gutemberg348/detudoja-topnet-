@@ -177,6 +177,10 @@ docker compose -f docker-compose.yml -f docker-compose.sicredi.yml logs --tail=1
 
 O check e local: imprime provedor escolhido e verifica leitura/matching de
 certificado/chave, sem exibir segredos, autenticar, cobrar ou enviar dinheiro.
+Para Pix de recebimento indisponivel, mostra apenas os **nomes** das variaveis
+ausentes e se ambiente/URLs/flags batem. Se mostrar `selected: 'ASAAS'`, novos
+checkout, QR e depositos ainda usarao o fallback; pagamentos ja criados nunca
+sao trocados de gateway. O painel financeiro tambem exibe essa escolha.
 Se houver erro, corrigir antes do up. Ele nao confirma escopos nem homologacao.
 
 Autenticacao Pix sem gerar cobranca:

@@ -92,6 +92,57 @@ export function createAdminPaymentsRepository(database = prisma) {
       });
     },
 
+    findPaymentDetails(id) {
+      return database.pagamento.findUnique({
+        include: {
+          ...paymentInclude,
+          itens: { orderBy: { id: "asc" } },
+          deposito_carteira: { include: { carteira: { include: { tipo_carteira: true } } } },
+          eventos_financeiros: { orderBy: { criado_em: "asc" }, select: {
+            id: true, tipo_evento: true, descricao: true, criado_em: true,
+          } },
+          transacao_comercial: { include: {
+            recebiveis: { include: { usuario_recebedor: { select: { id: true, nome: true, email: true } } } },
+            recompensas: { include: { usuario_beneficiado: { select: { id: true, nome: true, email: true } } } },
+            lancamentos_plataforma: { include: { conta_plataforma: { select: { tipo_conta: true, nome: true } } } },
+            repasse_pix: { select: { id: true, status: true, gateway: true, valor_centavos: true,
+              solicitado_em: true, pago_em: true, motivo_falha: true } },
+          } },
+        },
+        where: { id },
+      });
+    },
+
+    findWalletEntriesForTransaction(transactionId) {
+      if (!transactionId) return [];
+      return database.lancamentoCarteira.findMany({
+        where: { origem_id: transactionId, origem: { in: [
+          "VENDA", "CASHBACK", "BONUS_INDICACAO", "BONUS_VENDEDOR", "BONUS_REDE",
+        ] } },
+        include: {
+          usuario: { select: { id: true, nome: true, email: true } },
+          carteira: { include: { tipo_carteira: { select: { nome: true } } } },
+        },
+        orderBy: { criado_em: "asc" },
+        take: 100,
+      });
+    },
+
+    createAudit(data) {
+      return database.auditoriaAdministrativa.create({ data });
+    },
+
+    updatePaymentArchive(id, archived) {
+      return database.pagamento.updateMany({
+        data: { arquivado_admin_em: archived ? new Date() : null },
+        where: {
+          id,
+          arquivado_admin_em: archived ? null : { not: null },
+          status: { in: ["CANCELADO", "ESTORNADO", "FALHOU"] },
+        },
+      });
+    },
+
     findPaymentByOrderId(orderId) {
       return database.pagamento.findFirst({
         include: paymentInclude,

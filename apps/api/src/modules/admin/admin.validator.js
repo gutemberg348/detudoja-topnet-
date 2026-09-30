@@ -208,6 +208,11 @@ export const refundAdminPaymentSchema = z.object({
     .max(500, "O motivo deve ter no maximo 500 caracteres"),
 });
 
+export const archiveAdminPaymentSchema = z.object({
+  archived: z.boolean(),
+  reason: z.string().trim().min(8).max(500),
+}).strict();
+
 export const updateAdminSupportSettingsSchema = z.object({
   message: z
     .string()

@@ -14,7 +14,9 @@ import {
   refreshAsaasRefundPayment,
   requestAsaasPaymentRefund,
   processVerifiedPaymentEvent,
+  cancelPendingAsaasOrderPayment,
 } from "../payments/asaas.service.js";
+import { gatewayAvailability, selectPaymentGateway } from "../payments/payment-gateway.js";
 import { assertSandboxApproval, sandboxApprovalEnabled } from "../payments/sandbox-approval.js";
 import {
   creditPaymentRefundToBalance,
@@ -60,6 +62,12 @@ function serializePayment(payment) {
       && ["AGUARDANDO_PAGAMENTO", "EM_RECONCILIACAO"].includes(payment.status),
     sandboxRefundable: sandboxApprovalEnabled() && payment.gateway_ambiente === "sandbox"
       && Boolean(payment.gateway_dados_json?.sandboxManualApproval) && payment.status === "EM_DISPUTA",
+    archivedAt: asIso(payment.arquivado_admin_em),
+    cancelable: Boolean(payment.pedido_loja
+      && payment.pedido_loja.status === "AGUARDANDO_PAGAMENTO"
+      && payment.status === "AGUARDANDO_PAGAMENTO"
+      && payment.gateway_pagamento_id
+      && ["ASAAS", "SICREDI"].includes(payment.gateway)),
     id: payment.id,
     method: payment.metodo_principal,
     orderCode: payment.pedido_loja?.codigo ?? null,
@@ -89,6 +97,123 @@ function serializePayment(payment) {
   };
 }
 
+const asIso = (value) => value?.toISOString() ?? null;
+
+export async function getAdminPaymentDetails(paymentId) {
+  const id = parsePositiveId(paymentId, "Pagamento invalido");
+  const payment = await adminPaymentsRepository.findPaymentDetails(id);
+  if (!payment) throw new AppError("Pagamento nao encontrado", 404);
+  const settlement = payment.transacao_comercial;
+  const walletEntries = await adminPaymentsRepository.findWalletEntriesForTransaction(settlement?.id);
+  return {
+    payment: {
+      ...serializePayment(payment),
+      gatewayPaymentId: payment.gateway_pagamento_id,
+      expiresAt: asIso(payment.expira_em),
+      canceledAt: asIso(payment.cancelado_em),
+      refundedAt: asIso(payment.estornado_em),
+    },
+    items: payment.itens.map((item) => ({
+      id: item.id, name: item.nome_item, quantity: item.quantidade,
+      unitCents: cents(item.valor_unitario_centavos), totalCents: cents(item.valor_total_centavos),
+    })),
+    sources: payment.composicoes.map((item) => ({
+      id: item.id, type: item.tipo_origem, walletType: item.carteira?.tipo_carteira?.nome ?? null,
+      amountCents: cents(item.valor_centavos), status: item.status,
+    })),
+    deposit: payment.deposito_carteira ? {
+      status: payment.deposito_carteira.status,
+      walletType: payment.deposito_carteira.carteira?.tipo_carteira?.nome ?? null,
+      creditedCents: cents(payment.deposito_carteira.valor_liquido_centavos),
+      creditedAt: asIso(payment.deposito_carteira.creditado_em),
+    } : null,
+    settlement: settlement ? {
+      id: settlement.id, status: settlement.status,
+      validatedAt: asIso(settlement.validada_em), settledAt: asIso(settlement.liquidada_em),
+      grossCents: cents(settlement.valor_bruto_centavos),
+      platformFeeCents: cents(settlement.taxa_plataforma_centavos),
+      processingFeeCents: cents(settlement.taxa_processamento_centavos),
+      cashbackCents: cents(settlement.cashback_prioritario_centavos),
+      sellerNetCents: cents(settlement.valor_liquido_lojista_centavos),
+      rewardsPoolCents: cents(settlement.valor_pool_recompensas_centavos),
+      companyCents: cents(settlement.valor_empresa_centavos),
+      receivables: settlement.recebiveis.map((item) => ({
+        id: item.id, type: item.tipo_recebedor, status: item.status,
+        grossCents: cents(item.valor_bruto_centavos), netCents: cents(item.valor_liquido_centavos),
+        availableAt: asIso(item.disponivel_em), paidAt: asIso(item.pago_em),
+        recipient: item.usuario_recebedor,
+      })),
+      rewards: settlement.recompensas.map((item) => ({
+        id: item.id, type: item.tipo_recompensa, status: item.status,
+        amountCents: cents(item.valor_centavos), recipient: item.usuario_beneficiado,
+        releasedAt: asIso(item.liberado_em), reversedAt: asIso(item.estornado_em),
+      })),
+      platformEntries: settlement.lancamentos_plataforma.map((item) => ({
+        id: item.id, account: item.conta_plataforma?.nome, accountType: item.conta_plataforma?.tipo_conta,
+        type: item.tipo_lancamento, status: item.status, amountCents: cents(item.valor_centavos),
+      })),
+      transfer: settlement.repasse_pix ? {
+        id: settlement.repasse_pix.id, gateway: settlement.repasse_pix.gateway,
+        status: settlement.repasse_pix.status, amountCents: cents(settlement.repasse_pix.valor_centavos),
+        requestedAt: asIso(settlement.repasse_pix.solicitado_em), paidAt: asIso(settlement.repasse_pix.pago_em),
+        failureReason: settlement.repasse_pix.motivo_falha,
+      } : null,
+    } : null,
+    events: payment.eventos_financeiros.map((item) => ({
+      id: item.id, type: item.tipo_evento, description: item.descricao, at: asIso(item.criado_em),
+    })),
+    walletEntries: walletEntries.map((item) => ({
+      id: item.id, origin: item.origem, type: item.tipo_lancamento, status: item.status,
+      amountCents: cents(item.valor_centavos), recipient: item.usuario,
+      walletType: item.carteira?.tipo_carteira?.nome ?? null,
+      description: item.descricao, at: asIso(item.criado_em),
+    })),
+  };
+}
+
+export async function cancelAdminPendingPayment(adminId, paymentId, { reason }) {
+  const id = parsePositiveId(paymentId, "Pagamento invalido");
+  const payment = await adminPaymentsRepository.findPayment(id);
+  if (!payment) throw new AppError("Pagamento nao encontrado", 404);
+  if (!payment.pedido_loja || payment.pedido_loja.status !== "AGUARDANDO_PAGAMENTO"
+    || payment.status !== "AGUARDANDO_PAGAMENTO" || !payment.gateway_pagamento_id
+    || !["ASAAS", "SICREDI"].includes(payment.gateway)) {
+    throw new AppError("Somente cobranca Pix de pedido ainda nao pago pode ser cancelada aqui", 409);
+  }
+  await cancelPendingAsaasOrderPayment(payment.pedido_loja.usuario_id, payment.pedido_loja.id);
+  const updated = await adminPaymentsRepository.findPayment(id);
+  if (updated.status !== "CANCELADO") {
+    throw new AppError("A cobranca mudou durante o cancelamento; consulte o gateway e revise o pedido", 409);
+  }
+  await adminPaymentsRepository.createAudit({
+    administrador_id: adminId, usuario_alvo_id: payment.usuario_pagador_id,
+    acao: "PAGAMENTO_CANCELADO_ADMIN",
+    dados_json: { paymentId: id, orderId: payment.pedido_loja.id, reason },
+  });
+  return { payment: serializePayment(updated) };
+}
+
+export async function archiveAdminPayment(adminId, paymentId, { archived, reason }) {
+  const id = parsePositiveId(paymentId, "Pagamento invalido");
+  const payment = await adminPaymentsRepository.findPayment(id);
+  if (!payment) throw new AppError("Pagamento nao encontrado", 404);
+  if (!["CANCELADO", "ESTORNADO", "FALHOU"].includes(payment.status)) {
+    throw new AppError("So e possivel arquivar transacoes encerradas", 409);
+  }
+  const updated = await adminPaymentsRepository.transaction(async (repository) => {
+    const claim = await repository.updatePaymentArchive(id, archived);
+    if (claim.count !== 1) throw new AppError("Estado do pagamento mudou; atualize a lista", 409);
+    await repository.createAudit({
+      administrador_id: adminId,
+      usuario_alvo_id: payment.usuario_pagador_id,
+      acao: archived ? "PAGAMENTO_ARQUIVADO_ADMIN" : "PAGAMENTO_RESTAURADO_ADMIN",
+      dados_json: { paymentId: id, reason },
+    });
+    return repository.findPayment(id);
+  });
+  return { payment: serializePayment(updated) };
+}
+
 export async function listAdminPayments(query = {}) {
   const search = String(query.search ?? "").trim();
   const status = String(query.status ?? "").trim().toUpperCase();
@@ -99,6 +224,7 @@ export async function listAdminPayments(query = {}) {
   const page = Math.max(Number(query.page) || 1, 1);
   const pageSize = Math.min(Math.max(Number(query.pageSize) || 30, 1), 100);
   const where = {
+    arquivado_admin_em: String(query.archived ?? "false") === "true" ? { not: null } : null,
     ...(status ? { status } : {}),
     ...(search
       ? {
@@ -118,6 +244,8 @@ export async function listAdminPayments(query = {}) {
 
   return {
     sandboxApprovalEnabled: sandboxApprovalEnabled(),
+    receiveGateway: (() => { try { return selectPaymentGateway("receive"); } catch { return null; } })(),
+    sicrediReceiveAvailable: gatewayAvailability("receive").SICREDI,
     pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
     payments: payments.map(serializePayment),
   };

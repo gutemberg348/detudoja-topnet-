@@ -1,6 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useEffect, useMemo } from "react";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { Image, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { AppButton } from "../components/AppButton";
 import { PageHeader } from "../components/PageHeader";
 import { ScreenContainer } from "../components/ScreenContainer";
@@ -38,6 +39,8 @@ export function CartScreen({ navigation, route }) {
   const routeCart = normalizeCart(route.params);
   const routeConversationId = route.params?.conversationId ?? null;
   const {
+    clearCart,
+    itemCount,
     items,
     removeItem,
     selectedItemCount,
@@ -48,6 +51,7 @@ export function CartScreen({ navigation, route }) {
     toggleItemSelected,
     updateItemQuantity,
   } = useCartStore();
+  const [confirmClearVisible, setConfirmClearVisible] = useState(false);
 
   useEffect(() => {
     if (!items.length && routeCart.items.length) {
@@ -69,6 +73,15 @@ export function CartScreen({ navigation, route }) {
     () => new Set(selectedItems.map((item) => String(item.storeId))).size,
     [selectedItems],
   );
+
+  function emptyCart() {
+    clearCart();
+    setConfirmClearVisible(false);
+  }
+
+  function browseProducts() {
+    navigation.navigate("Main", { screen: "Buscar" });
+  }
 
   function continuePurchase() {
     const checkoutGroups = groups
@@ -97,23 +110,37 @@ export function CartScreen({ navigation, route }) {
   }
 
   return (
+    <View style={styles.screen}>
     <ScreenContainer contentContainerStyle={styles.content} edges={["left", "right"]}>
       <PageHeader
-        subtitle="Escolha o que deseja comprar agora. Os outros itens continuam guardados."
+        action={items.length ? (
+          <Pressable
+            accessibilityLabel="Esvaziar carrinho"
+            accessibilityRole="button"
+            onPress={() => setConfirmClearVisible(true)}
+            style={({ pressed }) => [styles.clearAction, pressed && styles.pressed]}
+          >
+            <Ionicons color={colors.danger} name="trash-outline" size={17} />
+            <Text style={styles.clearActionText}>Esvaziar</Text>
+          </Pressable>
+        ) : null}
+        eyebrow="Suas escolhas"
+        subtitle={items.length
+          ? `${itemCount} ${itemCount === 1 ? "item" : "itens"} em ${groups.length} ${groups.length === 1 ? "loja" : "lojas"}`
+          : "Tudo pronto para sua próxima compra"}
         title="Carrinho"
       />
 
       {items.length ? (
         <>
           <View style={styles.selectionBar}>
-            <SelectionBox
-              checked={allSelected}
-              label={allSelected ? "Desmarcar tudo" : "Selecionar tudo"}
-              onPress={() => setAllSelected(!allSelected)}
-            />
-            <Text style={styles.selectionCount}>
-              {selectedItemCount} selecionado{selectedItemCount === 1 ? "" : "s"}
-            </Text>
+            <View style={styles.selectionCopy}>
+              <Text style={styles.selectionTitle}>Escolha o que levar</Text>
+              <Text style={styles.selectionHint}>Os demais produtos ficam guardados.</Text>
+            </View>
+            <SelectionBox checked={allSelected}
+              label={allSelected ? "Desmarcar" : "Marcar todos"}
+              onPress={() => setAllSelected(!allSelected)} />
           </View>
 
           <View style={styles.groups}>
@@ -132,51 +159,60 @@ export function CartScreen({ navigation, route }) {
       ) : (
         <View style={styles.emptyState}>
           <View style={styles.emptyIcon}>
-            <Ionicons color={colors.primaryDark} name="bag-handle-outline" size={30} />
+            <Ionicons color={colors.primaryDark} name="bag-handle-outline" size={38} />
           </View>
-          <Text style={styles.emptyTitle}>Seu carrinho esta vazio</Text>
-          <Text style={styles.emptyText}>Explore as lojas e adicione produtos para comprar.</Text>
+          <Text style={styles.emptyTitle}>Seu carrinho está vazio</Text>
+          <Text style={styles.emptyText}>Encontre algo que você goste e seus produtos aparecem aqui.</Text>
+          <AppButton icon="search-outline" onPress={browseProducts}
+            style={styles.emptyButton} title="Explorar produtos" />
         </View>
       )}
-
-      {items.length ? (
-        <View style={styles.summary}>
-          <View style={styles.summaryHeading}>
-            <View style={styles.summaryIcon}>
-              <Ionicons color={colors.primaryDark} name="checkmark-done-outline" size={20} />
-            </View>
-            <View style={styles.summaryHeadingCopy}>
-              <Text style={styles.summaryTitle}>Compra selecionada</Text>
-              <Text style={styles.summaryHint}>
-                {selectedStoreCount
-                  ? `${selectedStoreCount} loja${selectedStoreCount === 1 ? "" : "s"}; entrega calculada separadamente`
-                  : "Marque ao menos um produto para continuar"}
-              </Text>
-            </View>
-          </View>
-          <View style={styles.divider} />
-          <SummaryRow label="Produtos" value={formatarDinheiro(selectedSubtotalCents)} />
-          <SummaryRow label="Entrega" value="Por loja no checkout" />
-          <SummaryRow strong label="Subtotal selecionado" value={formatarDinheiro(selectedSubtotalCents)} />
-        </View>
-      ) : null}
-
-      <View style={styles.actions}>
-        <AppButton
-          disabled={!selectedItemCount}
-          icon="arrow-forward"
-          onPress={continuePurchase}
-          title={selectedStoreCount > 1
-            ? `Finalizar ${selectedStoreCount} lojas`
-            : "Continuar compra"}
-        />
-        <AppButton
-          onPress={() => navigation.navigate("Main", { screen: "Buscar" })}
-          title="Adicionar mais produtos"
-          variant="outline"
-        />
-      </View>
     </ScreenContainer>
+    {items.length ? (
+      <SafeAreaView edges={["bottom"]} style={styles.checkoutFooter}>
+        <View style={styles.footerTotalRow}>
+          <View style={styles.footerTotalCopy}>
+            <Text style={styles.footerLabel}>Subtotal selecionado</Text>
+            <Text style={styles.footerMeta}>
+              {selectedItemCount
+                ? `${selectedItemCount} ${selectedItemCount === 1 ? "item" : "itens"} · ${selectedStoreCount} ${selectedStoreCount === 1 ? "loja" : "lojas"}`
+                : "Marque pelo menos um produto"}
+            </Text>
+          </View>
+          <Text style={styles.footerAmount}>{formatarDinheiro(selectedSubtotalCents)}</Text>
+        </View>
+        <Text style={styles.deliveryNote}>Entrega e taxas são informadas no checkout.</Text>
+        <AppButton disabled={!selectedItemCount} icon="arrow-forward"
+          onPress={continuePurchase}
+          title={selectedStoreCount > 1 ? `Continuar com ${selectedStoreCount} lojas` : "Continuar compra"} />
+        <Pressable accessibilityRole="button" onPress={browseProducts}
+          style={({ pressed }) => [styles.browseAction, pressed && styles.pressed]}>
+          <Ionicons color={colors.primaryDark} name="add" size={18} />
+          <Text style={styles.browseActionText}>Adicionar mais produtos</Text>
+        </Pressable>
+      </SafeAreaView>
+    ) : null}
+    <Modal animationType="fade" onRequestClose={() => setConfirmClearVisible(false)}
+      transparent visible={confirmClearVisible}>
+      <View style={styles.modalBackdrop}>
+        <View accessibilityViewIsModal style={styles.confirmCard}>
+          <View style={styles.confirmIcon}>
+            <Ionicons color={colors.danger} name="trash-outline" size={25} />
+          </View>
+          <Text style={styles.confirmTitle}>Esvaziar carrinho?</Text>
+          <Text style={styles.confirmText}>
+            Os {itemCount} {itemCount === 1 ? "item" : "itens"} de todas as lojas serão removidos. Seus pedidos já feitos não mudam.
+          </Text>
+          <View style={styles.confirmActions}>
+            <AppButton onPress={() => setConfirmClearVisible(false)}
+              style={styles.confirmButton} title="Manter itens" variant="neutral" />
+            <AppButton onPress={emptyCart} style={styles.confirmButton}
+              title="Esvaziar" variant="danger" />
+          </View>
+        </View>
+      </View>
+    </Modal>
+    </View>
   );
 }
 
@@ -191,6 +227,7 @@ function StoreCartGroup({ group, onRemove, onStoreSelected, onToggleSelected, on
     <View style={styles.storeCard}>
       <View style={styles.storeHeader}>
         <Pressable
+          accessibilityLabel={`${allSelected ? "Desmarcar" : "Selecionar"} produtos de ${group.store?.name ?? "loja"}`}
           accessibilityRole="checkbox"
           accessibilityState={{ checked: allSelected }}
           onPress={() => onStoreSelected(!allSelected)}
@@ -211,11 +248,15 @@ function StoreCartGroup({ group, onRemove, onStoreSelected, onToggleSelected, on
         </View>
         <View style={styles.storeCopy}>
           <Text numberOfLines={1} style={styles.storeName}>{group.store?.name ?? "Loja"}</Text>
-          <Text style={styles.storeMeta}>
-            {delivery?.available
-              ? `Entrega ${formatarDinheiro(delivery.feeCents ?? 0)}`
-              : "Retirada disponivel"}
-          </Text>
+          <View style={styles.storeDeliveryRow}>
+            <Ionicons color={colors.textSecondary}
+              name={delivery?.available ? "bicycle-outline" : "bag-check-outline"} size={13} />
+            <Text style={styles.storeMeta}>
+              {delivery?.available
+                ? `Entrega ${formatarDinheiro(delivery.feeCents ?? 0)}`
+                : "Retirada disponível"}
+            </Text>
+          </View>
         </View>
         <View style={styles.storeSelectedBadge}>
           <Text style={styles.storeSelectedText}>{selected.length}/{group.items.length}</Text>
@@ -223,9 +264,10 @@ function StoreCartGroup({ group, onRemove, onStoreSelected, onToggleSelected, on
       </View>
 
       <View style={styles.storeItems}>
-        {group.items.map((item) => (
+        {group.items.map((item, index) => (
           <CartItem
             item={item}
+            isLast={index === group.items.length - 1}
             key={item.cartKey}
             onDecrease={() => onUpdateQuantity(item.cartKey, item.quantity - 1)}
             onIncrease={() => onUpdateQuantity(item.cartKey, item.quantity + 1)}
@@ -246,12 +288,14 @@ function StoreCartGroup({ group, onRemove, onStoreSelected, onToggleSelected, on
   );
 }
 
-function CartItem({ item, onDecrease, onIncrease, onRemove, onToggle }) {
+function CartItem({ item, isLast, onDecrease, onIncrease, onRemove, onToggle }) {
   const imageUrl = resolveMediaUrl(item.imageUrl);
 
   return (
-    <View style={[styles.itemCard, !item.selected && styles.itemCardUnselected]}>
+    <View style={[styles.itemCard, !isLast && styles.itemCardDivider,
+      !item.selected && styles.itemCardUnselected]}>
       <Pressable
+        accessibilityLabel={`${item.selected ? "Desmarcar" : "Selecionar"} ${item.name}`}
         accessibilityRole="checkbox"
         accessibilityState={{ checked: item.selected }}
         hitSlop={6}
@@ -273,18 +317,21 @@ function CartItem({ item, onDecrease, onIncrease, onRemove, onToggle }) {
       )}
       <View style={styles.itemCopy}>
         <Text numberOfLines={2} style={styles.itemName}>{item.name}</Text>
-        <Text style={styles.itemPrice}>{formatarDinheiro(item.priceCents)}</Text>
+        <Text style={styles.itemPrice}>{formatarDinheiro(item.priceCents)} <Text style={styles.unitLabel}>/ un.</Text></Text>
         <View style={styles.itemBottom}>
           <View style={styles.stepper}>
-            <Pressable onPress={onDecrease} style={styles.stepperButton}>
+            <Pressable accessibilityLabel={`Diminuir quantidade de ${item.name}`}
+              accessibilityRole="button" onPress={onDecrease} style={styles.stepperButton}>
               <Ionicons color={colors.primaryDark} name="remove" size={15} />
             </Pressable>
             <Text style={styles.stepperText}>{item.quantity}</Text>
-            <Pressable onPress={onIncrease} style={styles.stepperButton}>
+            <Pressable accessibilityLabel={`Aumentar quantidade de ${item.name}`}
+              accessibilityRole="button" onPress={onIncrease} style={styles.stepperButton}>
               <Ionicons color={colors.primaryDark} name="add" size={15} />
             </Pressable>
           </View>
-          <Pressable accessibilityLabel={`Remover ${item.name}`} onPress={onRemove} style={styles.removeButton}>
+          <Pressable accessibilityLabel={`Remover ${item.name}`} accessibilityRole="button"
+            onPress={onRemove} style={styles.removeButton}>
             <Ionicons color={colors.danger} name="trash-outline" size={17} />
           </Pressable>
         </View>
@@ -307,64 +354,68 @@ function SelectionBox({ checked, label, onPress }) {
   );
 }
 
-function SummaryRow({ label, strong = false, value }) {
-  return (
-    <View style={styles.summaryRow}>
-      <Text style={[styles.summaryLabel, strong && styles.summaryStrong]}>{label}</Text>
-      <Text style={[styles.summaryValue, strong && styles.summaryStrong]}>{value}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  actions: { gap: spacing.md },
-  content: { gap: spacing.xl, paddingBottom: spacing.xxxl },
-  divider: { backgroundColor: colors.border, height: 1 },
-  emptyIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 60, justifyContent: "center", width: 60 },
-  emptyState: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, gap: spacing.sm, minHeight: 220, justifyContent: "center", padding: spacing.xl },
-  emptyText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.small, textAlign: "center" },
-  emptyTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.h3 },
+  browseAction: { alignItems: "center", flexDirection: "row", gap: 5, justifyContent: "center", minHeight: 38 },
+  browseActionText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: typography.small },
+  checkoutFooter: { backgroundColor: colors.card, borderTopColor: colors.border, borderTopWidth: 1, gap: 8, paddingHorizontal: spacing.lg, paddingTop: spacing.md, ...shadowSoft },
+  clearAction: { alignItems: "center", backgroundColor: colors.dangerSoft, borderRadius: radius.round, flexDirection: "row", gap: 5, minHeight: 35, paddingHorizontal: 11 },
+  clearActionText: { color: colors.danger, fontFamily: fonts.bold, fontSize: typography.caption },
+  confirmActions: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md },
+  confirmButton: { flex: 1, paddingHorizontal: spacing.sm },
+  confirmCard: { backgroundColor: colors.card, borderRadius: 22, gap: spacing.sm, maxWidth: 400, padding: spacing.xl, width: "100%" },
+  confirmIcon: { alignItems: "center", backgroundColor: colors.dangerSoft, borderRadius: radius.round, height: 48, justifyContent: "center", marginBottom: 4, width: 48 },
+  confirmText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.label, lineHeight: 21 },
+  confirmTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.h2 },
+  content: { gap: spacing.lg, paddingBottom: spacing.xl },
+  deliveryNote: { color: colors.textMuted, fontFamily: fonts.regular, fontSize: 11 },
+  emptyButton: { alignSelf: "stretch", marginTop: spacing.md },
+  emptyIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: 27, height: 78, justifyContent: "center", marginBottom: spacing.sm, width: 78 },
+  emptyState: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.border, borderRadius: 22, borderWidth: 1, gap: spacing.sm, justifyContent: "center", marginTop: spacing.md, padding: spacing.xl, paddingVertical: spacing.xxxl },
+  emptyText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.label, lineHeight: 21, textAlign: "center" },
+  emptyTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.h3, textAlign: "center" },
+  footerAmount: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: typography.h2, textAlign: "right" },
+  footerLabel: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.label },
+  footerMeta: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption },
+  footerTotalCopy: { flex: 1, gap: 2 },
+  footerTotalRow: { alignItems: "center", flexDirection: "row", gap: spacing.md, justifyContent: "space-between" },
   groups: { gap: spacing.lg },
-  itemBottom: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: spacing.xs },
+  itemBottom: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: spacing.sm },
   itemCard: { alignItems: "center", flexDirection: "row", gap: spacing.sm, paddingVertical: spacing.md },
-  itemCardUnselected: { opacity: 0.58 },
+  itemCardDivider: { borderBottomColor: colors.border, borderBottomWidth: 1 },
+  itemCardUnselected: { opacity: 0.65 },
   itemCheckbox: { alignItems: "center", justifyContent: "center" },
   itemCopy: { flex: 1, gap: 3, minWidth: 0 },
-  itemImage: { borderRadius: radius.lg, height: 68, width: 68 },
-  itemImageFallback: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.lg, height: 68, justifyContent: "center", width: 68 },
+  itemImage: { borderRadius: 12, height: 72, width: 72 },
+  itemImageFallback: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: 12, height: 72, justifyContent: "center", width: 72 },
   itemName: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small, lineHeight: 18 },
   itemPrice: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: typography.label },
+  modalBackdrop: { alignItems: "center", backgroundColor: "rgba(15, 23, 19, 0.48)", flex: 1, justifyContent: "center", padding: spacing.xl },
   pressed: { opacity: 0.78 },
-  removeButton: { alignItems: "center", height: 32, justifyContent: "center", width: 32 },
-  selectionAction: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
-  selectionActionText: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small },
-  selectionBar: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", padding: spacing.md },
-  selectionCount: { color: colors.textSecondary, fontFamily: fonts.medium, fontSize: typography.caption },
-  stepper: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, flexDirection: "row", gap: spacing.sm, padding: 3 },
-  stepperButton: { alignItems: "center", backgroundColor: colors.card, borderRadius: radius.round, height: 27, justifyContent: "center", width: 27 },
+  removeButton: { alignItems: "center", backgroundColor: colors.dangerSoft, borderRadius: radius.round, height: 34, justifyContent: "center", width: 34 },
+  screen: { backgroundColor: colors.background, flex: 1 },
+  selectionAction: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.primaryLight, borderRadius: radius.round, borderWidth: 1, flexDirection: "row", gap: 5, minHeight: 38, paddingHorizontal: 10 },
+  selectionActionText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: typography.caption },
+  selectionBar: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: 16, flexDirection: "row", gap: spacing.sm, justifyContent: "space-between", padding: spacing.md },
+  selectionCopy: { flex: 1, gap: 2, minWidth: 0 },
+  selectionHint: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 11 },
+  selectionTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small },
+  stepper: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, flexDirection: "row", gap: spacing.xs, padding: 3 },
+  stepperButton: { alignItems: "center", backgroundColor: colors.card, borderRadius: radius.round, height: 29, justifyContent: "center", width: 29 },
   stepperText: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.caption, minWidth: 18, textAlign: "center" },
-  storeCard: { backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, overflow: "hidden", paddingHorizontal: spacing.md, ...shadowSoft },
+  storeCard: { backgroundColor: colors.card, borderColor: colors.border, borderRadius: 20, borderWidth: 1, overflow: "hidden", paddingHorizontal: spacing.md, ...shadowSoft },
   storeCopy: { flex: 1, gap: 2, minWidth: 0 },
+  storeDeliveryRow: { alignItems: "center", flexDirection: "row", gap: 4 },
   storeHeader: { alignItems: "center", borderBottomColor: colors.border, borderBottomWidth: 1, flexDirection: "row", gap: spacing.sm, paddingVertical: spacing.md },
-  storeItems: { gap: 0 },
-  storeLogo: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 42, justifyContent: "center", overflow: "hidden", width: 42 },
+  storeItems: { paddingBottom: 2 },
+  storeLogo: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 44, justifyContent: "center", overflow: "hidden", width: 44 },
   storeLogoImage: { height: "100%", width: "100%" },
-  storeMeta: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 10 },
-  storeName: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.small },
+  storeMeta: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 11 },
+  storeName: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.label },
   storeSelect: { alignItems: "center", justifyContent: "center" },
   storeSelectedBadge: { backgroundColor: colors.primarySoft, borderRadius: radius.round, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
-  storeSelectedText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 10 },
-  storeSummary: { alignItems: "center", borderTopColor: colors.border, borderTopWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingVertical: spacing.md },
+  storeSelectedText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 11 },
+  storeSummary: { alignItems: "center", backgroundColor: colors.cardMuted, borderRadius: 10, flexDirection: "row", justifyContent: "space-between", marginBottom: spacing.md, padding: spacing.md },
   storeSummaryLabel: { color: colors.textSecondary, fontFamily: fonts.medium, fontSize: typography.caption },
-  storeSummaryValue: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: typography.small },
-  summary: { backgroundColor: colors.card, borderColor: colors.primaryLight, borderRadius: 18, borderWidth: 1, gap: spacing.md, padding: spacing.lg, ...shadowSoft },
-  summaryHeading: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
-  summaryHeadingCopy: { flex: 1, gap: 2 },
-  summaryHint: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 10, lineHeight: 14 },
-  summaryIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 38, justifyContent: "center", width: 38 },
-  summaryLabel: { color: colors.textSecondary, fontFamily: fonts.medium, fontSize: typography.small },
-  summaryRow: { alignItems: "center", flexDirection: "row", gap: spacing.md, justifyContent: "space-between" },
-  summaryStrong: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.body },
-  summaryTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.small },
-  summaryValue: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small, textAlign: "right" },
+  storeSummaryValue: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: typography.label },
+  unitLabel: { color: colors.textMuted, fontFamily: fonts.regular, fontSize: typography.caption },
 });

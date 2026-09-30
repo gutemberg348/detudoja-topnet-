@@ -488,6 +488,15 @@ async function settleAsaasPayment(database, paymentId, event, gateway = "ASAAS")
     return { ...chargeSettlement, reversal };
   }
 
+  if (["CANCELADO", "FALHOU"].includes(nextStatus)) {
+    const walletRefund = await restorePaymentWalletCompositions(database, {
+      id: paymentId,
+    }, { reason: "Cobranca Pix encerrada antes da confirmacao." });
+    if (walletRefund.userIds.length) {
+      reversal = { ...reversal, walletUserIds: walletRefund.userIds };
+    }
+  }
+
   const order = await repository.findFirstOrder({
     include: orderInclude,
     where: { pagamento_id: paymentId },
