@@ -2,6 +2,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useState } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { CartAddButton } from "./CartAddButton";
+import { useCartFeedback } from "./CartFeedbackProvider";
 import { useCartStore } from "../stores/useCartStore";
 import { buildCartItem } from "../utils/checkout";
 import { resolveMediaUrl } from "../utils/media";
@@ -9,7 +10,8 @@ import { formatarDinheiro } from "../utils/money";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
 
 export function MarketplaceProductCard({ item, onPress, style, variant = "list" }) {
-  const { addItem } = useCartStore();
+  const { addItem, items, removeItem, updateItemQuantity } = useCartStore();
+  const { animateToCart } = useCartFeedback();
   const [imageFailed, setImageFailed] = useState(false);
   const product = item?.product ?? {};
   const store = item?.store ?? {};
@@ -18,6 +20,21 @@ export function MarketplaceProductCard({ item, onPress, style, variant = "list" 
   const soldOut = product.stockControlled && Number(product.stockQuantity ?? 0) <= 0;
   const cashbackPercent = Number(store.cashbackPercent ?? 0);
   const isGrid = variant === "grid";
+  const cartItem = items.find((candidate) => String(candidate.storeId) === String(store.id)
+    && String(candidate.id) === String(product.id));
+  const quantity = Number(cartItem?.quantity ?? 0);
+
+  function handleAdd(origin) {
+    if (!product.id || !store.id || quantity >= 99) return;
+    addItem(buildCartItem(product), store);
+    animateToCart(origin);
+  }
+
+  function handleDecrease() {
+    if (!cartItem) return;
+    if (quantity <= 1) removeItem(cartItem.cartKey);
+    else updateItemQuantity(cartItem.cartKey, quantity - 1);
+  }
 
   return (
     <View
@@ -66,7 +83,7 @@ export function MarketplaceProductCard({ item, onPress, style, variant = "list" 
             {product.shortDescription || product.description || "Disponivel para comprar pelo app."}
           </Text>
 
-          <View style={[styles.footer, isGrid && styles.footerGrid]}>
+          <View style={styles.footer}>
             <View style={styles.priceBlock}>
               {product.promotionalPriceCents ? (
                 <Text style={styles.oldPrice}>{formatarDinheiro(product.priceCents)}</Text>
@@ -84,13 +101,16 @@ export function MarketplaceProductCard({ item, onPress, style, variant = "list" 
       </Pressable>
 
       {!soldOut ? (
-        <CartAddButton
-          direction="down"
-          name={product.name}
-          onPress={() => addItem(buildCartItem(product), store)}
-          size={32}
-          style={isGrid ? styles.addButtonGrid : null}
-        />
+        <View style={isGrid ? styles.cartActionsGrid : null}>
+          <CartAddButton
+            name={product.name}
+            onDecrease={handleDecrease}
+            onPress={handleAdd}
+            quantity={quantity}
+            size={36}
+            style={isGrid && quantity > 0 ? styles.gridStepper : null}
+          />
+        </View>
       ) : null}
     </View>
   );
@@ -101,7 +121,12 @@ function formatPercent(value) {
 }
 
 const styles = StyleSheet.create({
-  addButtonGrid: { bottom: spacing.md, position: "absolute", right: spacing.md },
+  cartActionsGrid: {
+    alignItems: "flex-end",
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.md,
+  },
+  gridStepper: { width: "100%" },
   cashback: {
     alignItems: "center",
     flexDirection: "row",
@@ -169,7 +194,6 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginTop: 4,
   },
-  footerGrid: { paddingRight: 32 },
   image: { height: "100%", width: "100%" },
   imageFallback: {
     alignItems: "center",

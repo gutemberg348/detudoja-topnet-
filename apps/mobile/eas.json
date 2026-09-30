@@ -1,6 +1,7 @@
 {
   "build": {
     "preview": {
+      "environment": "preview",
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api-brasil.testes-techcode.shop"
@@ -10,6 +11,7 @@
       }
     },
     "production": {
+      "environment": "production",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api-brasil.testes-techcode.shop"
       },

@@ -1,109 +1,232 @@
-# Integracao Sicredi: recebimentos e pagamentos
+# Sicredi principal, Asaas como fallback
 
-Esta integracao precisa de **dois produtos distintos** do Sicredi. O teste
-`test-sicredi-multipag.sh` validou a autenticacao da API Multipag em Sandbox.
-Os clientes bancarios em `apps/api/src/modules/payments/sicredi/` ja preparam
-OAuth2/mTLS, cobranca e devolucao na API Pix, e envio/consulta de Pix no
-Multipag. **Ainda nao estao ligados aos fluxos financeiros do aplicativo**:
-Asaas continua sendo o gateway ativo. Nenhuma migration Sicredi foi aplicada.
+## Aprovar pelo admin e usar saldo no app durante os testes
 
-## Primeiro teste da API Pix de recebimento
+Implementado: **Pagamentos e estornos > Aprovar pagamento de teste**. Disponivel
+somente a `super_admin` e `financeiro`, com motivo e digitacao de
+`CONFIRMO_SANDBOX`. Nao e preciso pagar pelo banco para esta simulacao.
 
-Antes de testar, solicite a `integracoes_pix@sicredi.com.br` a liberacao de
-**homologacao da API Pix de recebimento**, informando o CNPJ do associado.
-Conforme o guia do Sicredi, as credenciais de homologacao desta API sao
-geradas pelo associado no Internet Banking em **Outros Servicos > Acesso a API
-Pix > Gerar Credenciais**, com o certificado assinado pelo Sicredi e o ambiente
-**Homologacao** selecionado. As credenciais geradas no Portal do Desenvolvedor
-para a API Pix sao de **producao**; as credenciais `SICREDI_MULTIPAG_*` sao de
-outro produto e nao devem ser copiadas para estas variaveis.
-
-Na VPS, abra `apps/api/.env` e acrescente as tres linhas abaixo, substituindo
-os textos entre `<...>` pelos valores reais de **homologacao da API Pix**.
-Nao copie os valores para o Git nem os envie no chat:
+No `apps/api/.env` da **instalacao de testes**, manter todos os gateways no
+Sandbox e acrescentar:
 
 ```dotenv
-SICREDI_PIX_AUTH_URL=<URL_COMPLETA_DO_TOKEN_PIX_HOMOLOGACAO>
-SICREDI_PIX_CLIENT_ID=<CLIENT_ID_PIX_HOMOLOGACAO>
-SICREDI_PIX_CLIENT_SECRET=<CLIENT_SECRET_PIX_HOMOLOGACAO>
+PAYMENTS_ENVIRONMENT=sandbox
+PAYMENTS_SANDBOX_MANUAL_APPROVAL_ENABLED=true
+SICREDI_MULTIPAG_ENV=sandbox
+SICREDI_PIX_ENV=sandbox
+# Se usar Asaas: ASAAS_API_URL=https://api-sandbox.asaas.com/v3
 ```
 
-`SICREDI_PIX_AUTH_URL` e a URL HTTPS completa para `POST /oauth/token`, nao a
-URL da API Multipag nem a URL Pix de producao. Confira-a na Collection da API
-Pix em **Portal do Desenvolvedor > APIs > Catalogo de APIs > APIs de
-Recebimentos > Documentacao**, ou no retorno de liberacao do Sicredi. O guia
-publica uma URL de **producao** como exemplo, nao uma URL de homologacao; nao
-use aquela URL neste teste. Para a autenticacao isolada, `SICREDI_PIX_API_URL`,
-chave Pix recebedora e paths de certificado nao precisam entrar no `.env`:
-o script monta certificado, chave privada e cadeia em somente leitura pelos
-argumentos abaixo. Confirme que o certificado usado foi liberado para a API
-Pix de recebimento; o sucesso anterior no Multipag nao comprova isso.
-
-Depois de publicar este codigo na VPS, no diretorio do projeto rode:
+Depois de publicar API + web-admin e aplicar as migrations pendentes:
 
 ```bash
-docker compose build api
-bash docker/test-sicredi-pix.sh \
-  /etc/detudoja/certificados/sicredi-multipag.cer \
-  /etc/detudoja/certificados/sicredi-multipag.key \
-  /etc/detudoja/certificados/sicredi-multipag-chain.cer \
-  cob.read
+cd /var/www/brasil/detudoja-topnet-
+docker compose -f docker-compose.yml -f docker-compose.sicredi.yml build api web-admin
+docker compose -f docker-compose.yml -f docker-compose.sicredi.yml run --rm api-migrate
+docker compose -f docker-compose.yml -f docker-compose.sicredi.yml up -d --force-recreate api web-admin
 ```
 
-O resultado esperado e `Autenticacao OAuth2/mTLS concluida`; o teste nao cria
-QR, cobranca, Pix de saida ou estorno. Se faltar credencial/URL, nao tente
-substituir pelas do Multipag: conclua primeiro a habilitacao da API Pix.
+Os comandos pressupõem codigo atualizado e backup/revisao do `.env`; nao
+alteram credenciais nem zeram a base. O override Sicredi exige os certificados
+montados conforme a secao de permissoes abaixo.
 
-Use `cob.write`, `pix.read` ou `pix.write` como quarto argumento para pedir
-apenas um token com aquele escopo. Receber um token nao prova que o Sicredi
-aceitara uma cobranca/devolucao especifica. Os testes de operacao virao com
-identificadores persistidos e conciliacao implementada.
+1. Criar **um pagamento novo** pelo checkout, cobranca (incluindo a iniciada por
+   QR permanente) ou deposito. O gateway precisa estar configurado para gerar
+   esse pagamento; a aprovacao manual nao cria cobranca/QR no banco.
+2. No admin, localizar o pagamento e clicar em **Aprovar pagamento de teste**.
+   Pagamentos antigos sem `gateway_ambiente=sandbox`, cancelados, pagos ou
+   internos nao recebem o botao. Aguardando pagamento e em conciliacao aceitam
+   confirmacao explicita de teste.
+3. O mesmo fluxo transacional do pagamento confirmado atualiza o pedido/chat,
+   confirma composicoes e credita depositos (liquido da taxa). O saldo entra nas
+   carteiras normais e pode ser usado em compras, nao e apenas uma exibicao.
+4. Concluir a compra/servico normalmente para calcular cashback, rede e ganhos.
+   As regras de bloqueio/liberacao continuam; aprovar Pix nao antecipa conclusao.
+5. Para testar estorno de uma compra aprovada manualmente: solicitar **Estornar**
+   ou cancelar pelo fluxo normal e depois **Confirmar estorno de teste** no admin.
+   Nenhuma devolucao ficticia e enviada ao banco; a confirmacao local usa o fluxo
+   normal de reversao. Depositos continuam sujeitos a analise, nao a estorno automatico.
 
-## Mapa do projeto
+Auditoria + metadados + evento idempotente sao gravados na mesma transacao do
+saldo. Repetir/cliques concorrentes nao creditam duas vezes. Callbacks tardios
+do banco nao desfazem uma simulacao manual. O admin identifica pagamentos simulados.
 
-| Fluxo atual | API Sicredi | Requisito para liberar |
+**Saque/repasse bancario nao e confirmado por esse botao.** O saldo permite
+exercitar a solicitacao no app, mas o envio depende do gateway Sandbox e a baixa
+exige resposta correspondente a sua referencia. O exemplo estatico Multipag nao
+liquida automaticamente transacoes reais do aplicativo.
+
+Ao migrar para producao, desligar a flag e usar **base limpa** apos backup e
+planejamento da limpeza. A API verifica a auditoria antes de iniciar os workers
+e recusa ambiente real enquanto houver simulacoes nesta base, mesmo removendo
+a flag. Nao basta apagar apenas os pagamentos: carteiras, ganhos, pedidos,
+reservas e movimentos tambem fazem parte dos dados de teste. Nenhuma limpeza
+automatica foi adicionada nem executada.
+
+Esta funcionalidade nao prova homologacao/liquidacao no Sicredi. Para gerar QR
+Sicredi de verdade ainda faltam as credenciais/URLs da API Pix se somente
+Multipag estiver configurado. Asaas Sandbox pode seguir como fallback de
+recebimento; o botao de teste suporta ambos, sempre respeitando o gateway salvo.
+
+Teste de banco descartavel: `test/sandbox-approval-ledger.test.js`, opt-in
+`SICREDI_DB_TESTS=true`, `DATABASE_URL` local com banco `sicredi_validation*`.
+
+O aplicativo agora tem roteamento por operacao: Sicredi e o principal quando
+habilitado/configurado, Asaas e a alternativa **antes do primeiro envio**.
+A migration `20260929190000_sicredi_gateway` adiciona o gateway, ambiente e
+dados de conciliacao. Aplicar na VPS antes de iniciar a nova API.
+Nao houve ativacao automatica de credenciais nem alteracao de arquivos .env reais.
+
+## O que passa pelo gateway
+
+| Fluxo | Sicredi | Regra |
 | --- | --- | --- |
-| Checkout de loja e complemento de saldo por Pix | API Pix Recebimento: cobranca imediata (`/cob/{txid}`), QR, consulta e webhook | Credenciais da **API Pix**, chave Pix recebedora e ambiente de homologacao liberado |
-| QR fixo e cobranca manual de loja/servico | API Pix Recebimento: uma cobranca imediata por tentativa de pagamento | Mesmos requisitos; QR interno fixo identifica a loja, nao substitui a cobranca bancaria |
-| Deposito em carteira por Pix | API Pix Recebimento: cobranca imediata, consulta e webhook | Mesmos requisitos |
-| Estorno de Pix recebido para origem | API Pix Recebimento: devolucao pelo `e2eid`, com consulta de resultado | Permissao `pix.write` e vinculo seguro entre recebimento, pagamento local e `e2eid` |
-| Saque do usuario e repasse presencial ao lojista | API Multipag: pagamento Pix via chave, consulta por `idTransacao` e webhook/conciliacao | Escopo `multipag.pix.pagar`, cooperativa, conta e documento pagador habilitados |
+| Checkout da loja, propostas de pedido | API Pix: PUT /cob/{txid} | QR/copia e cola do banco; valor conferido na confirmacao |
+| Cobrancas de loja, servicos e vendas presenciais | API Pix: /cob/{txid} | Inclui Pix complementar ao saldo onde o fluxo ja permite |
+| QR permanente da loja | Abre a loja/cobranca interna, que cria /cob/{txid} ao pagar | O QR fixo continua identificando a loja; nao e um BR Code estatico bancario |
+| Deposito em carteira | API Pix | Credita o liquido uma vez; politica de taxa existente mantida |
+| Devolucao para origem | API Pix: /pix/{e2eid}/devolucao/{id} | Sempre no banco do recebimento original |
+| Saques e repasses presenciais | Multipag: /v1/pagamentos/pix/chave | Referencia persistida antes do POST; SUCESSO confirma |
+| Cashback/pool/saldos internos | Banco de dados do aplicativo | Regras de calculo e bloqueio continuam; nao sao novos Pix |
 
-## Regra de liberacao
+Os clientes OAuth/mTLS dos dois produtos ja existem. O sucesso do teste
+Multipag **nao comprova** permissao de recebimento via /cob.
+Conforme [guia API Pix, secoes 3 e 8](https://developer.sicredi.com.br/api-portal/sites/default/files/Guia_tecnico_integracoes_APIPix_Sicredi_v1.9.5.pdf),
+recebimentos utilizam os escopos cob.read/cob.write/pix.read/pix.write e a
+chave recebedora. [Multipag](https://developers.sicredi.com.br/public/docs/getting-started-multipag)
+utiliza multipag.pix.pagar/consultar para saidas.
 
-1. Manter Asaas como gateway ativo enquanto os fluxos Sicredi nao estiverem
-   homologados. Nao alternar um pagamento ja criado entre gateways.
-2. Persistir o gateway escolhido, `txid`/`idTransacao` e dados de conciliacao
-   por transacao. Depois de falha de rede, **consultar pelo identificador**
-   antes de tentar criar outra cobranca ou transferencia.
-3. Considerar pagamento recebido somente apos consulta de status ou webhook
-   validado; uma cobranca criada e um Pix enviado para aprovacao ainda nao
-   significam liquidacao.
-4. Preservar suporte a estorno para origem e credito em saldo, inclusive
-   pagamentos mistos, antes de ativar o novo provedor no checkout.
-5. Testar no Sandbox todos os caminhos com reconciliacao e eventos repetidos;
-   migrar producao somente com credenciais e liberacao especificas de producao.
+## Seguranca do fallback
 
-## Pendencias externas atuais
+- A selecao considera habilitacao, configuracao e ambiente; nao e um teste de disponibilidade da rede.
+- Quando Sicredi nao esta habilitado/configurado para aquele fluxo, novas operacoes podem usar Asaas.
+- Depois de persistir o gateway, nunca se troca de banco por timeout, 401, 404, 429, 5xx ou reinicio.
+- Respostas incertas mantem reservas e entram em conciliacao pelo mesmo identificador.
+- Um HTTP 404 apos o envio **nao prova** que o Pix nao foi efetivado.
+- Webhooks Sicredi apenas provocam uma consulta autenticada ao banco; o corpo recebido nao autoriza credito.
+- TXID/idTransacao, valor e E2E sao conferidos. Webhook Asaas nao altera registros Sicredi.
+- Confirmacoes e devolucoes concorrentes possuem travas transacionais contra saldo duplicado.
+- Devolucao parcial, NAO_REALIZADO, cobranca nao identificada e respostas divergentes requerem revisao financeira.
+- O worker continua consultando registros Sicredi existentes mesmo desabilitando novas cobrancas.
+- Nao trocar o ambiente/conta de uma instalacao com operacoes pendentes. Use outro banco para homologacao.
 
-- A credencial `multipag-sandbox-client` e da API **Multipag**, nao da API Pix
-  de recebimento. Configurar no servidor as credenciais separadas de
-  homologacao da API Pix e as URLs recebidas do Sicredi; nao copiar seus
-  valores para o Git. Os nomes das variaveis constam em `apps/api/.env.example`.
-- Confirmar a chave Pix da conta recebedora que sera usada em `/cob/{txid}` e
-  no cadastro do webhook. Nao enviar Client Secret ou chave privada por chat.
-- Confirmar cooperativa, conta com digito e documento da conta pagadora que
-  fara saques/repasses via Multipag. Nao usar dados de exemplo da documentacao.
-- Verificar separadamente o escopo `multipag.pix.pagar`. O comando de teste
-  aceita `pagar` como quinto argumento e **so pede um token**; nao envia dinheiro.
-- Antes de ligar os clientes, montar os arquivos `.cer`, `.key` e cadeia no
-  container da API como somente leitura; o teste isolado ja faz isso, mas o
-  servico `api` do Compose ainda nao monta esses arquivos. Nao baixar as
-  chaves privadas do servidor para o repositorio.
-- A documentacao Sicredi da API Pix informa que o acesso de homologacao deve
-  ser solicitado a integracoes_pix@sicredi.com.br, informando o CNPJ do
-  associado. Nao presumir que a URL/credencial de Multipag sirva para Pix.
+## Configurar na VPS
 
-Fontes: [guia tecnico oficial da API Pix Sicredi](https://developer.sicredi.com.br/api-portal/sites/default/files/Guia_tecnico_integracoes_APIPix_Sicredi_v1.9.5.pdf),
-[guia Multipag](https://developers.sicredi.com.br/public/docs/getting-started-multipag),
-[Pix via chave no Multipag](https://developers.sicredi.com.br/public/reference/post_v1-pagamentos-pix-chave).
+Nao copie segredos para Git ou chat. Mantenha o Asaas configurado para o
+**mesmo ambiente** escolhido. Exemplo para uma instalacao de testes isolada:
+
+```dotenv
+PAYMENTS_PRIMARY_GATEWAY=SICREDI
+PAYMENTS_FALLBACK_GATEWAY=ASAAS
+PAYMENTS_ENVIRONMENT=sandbox
+SICREDI_APP_SANDBOX_ENABLED=true
+
+SICREDI_MULTIPAG_ENV=sandbox
+SICREDI_MULTIPAG_TRANSFER_ENABLED=true
+SICREDI_MULTIPAG_CERT_PATH=/run/sicredi/sicredi-multipag.cer
+SICREDI_MULTIPAG_KEY_PATH=/run/sicredi/sicredi-multipag.key
+SICREDI_MULTIPAG_CHAIN_PATH=/run/sicredi/sicredi-multipag-chain.cer
+# Manter CLIENT_ID/CLIENT_SECRET ja cadastrados.
+# Preencher CONTA/COOPERATIVA/DOCUMENTO com os dados habilitados pelo banco.
+
+SICREDI_PIX_ENV=sandbox
+SICREDI_PIX_ENABLED=false
+# So mudar para true depois de configurar e autenticar:
+# SICREDI_PIX_API_URL, SICREDI_PIX_AUTH_URL
+# SICREDI_PIX_CLIENT_ID, SICREDI_PIX_CLIENT_SECRET, SICREDI_PIX_RECEIVING_KEY
+# Se os certificados forem os mesmos, os paths Multipag sao reutilizados.
+```
+
+Com PIX_ENABLED=false, checkout/QR/depositos usam Asaas se disponivel.
+Para receber pelo Sicredi, configurar TODOS os campos Pix e habilitar.
+URLs de homologacao devem vir do Sicredi; o codigo nao inventa essas URLs.
+O [guia oficial Pix](https://developer.sicredi.com.br/api-portal/sites/default/files/Guia_tecnico_integracoes_APIPix_Sicredi_v1.9.5.pdf)
+publica https://api-pix.sicredi.com.br/api/v2 e /oauth/token **para producao**.
+Nao reutilizar essas URLs no teste de homologacao.
+
+O Sandbox Multipag tem dados estaticos. O exemplo 0910F3HT1 nao quita
+saques DTJ-SAQUE-* nem repasses DTJ-REPASSE-* do aplicativo. Esses casos
+podem continuar em conciliacao no Sandbox. Nao substitua suas referencias
+pelas do exemplo para forcar SUCESSO. Validar ciclo completo em ambiente
+liberado pelo banco antes de produzir.
+
+## Certificados e deploy
+
+O override monta /etc/detudoja/certificados em /run/sicredi como somente leitura.
+A API usa usuario node (UID/GID 1000), diferente dos smoke tests isolados root.
+Conferir os arquivos antes de ajustar permissao. Nao recriar/apagar a chave.
+
+```bash
+cd /var/www/brasil/detudoja-topnet-
+ls -l /etc/detudoja/certificados/sicredi-multipag.cer /etc/detudoja/certificados/sicredi-multipag.key /etc/detudoja/certificados/sicredi-multipag-chain.cer
+chown root:1000 /etc/detudoja/certificados
+chmod 750 /etc/detudoja/certificados
+chown root:1000 /etc/detudoja/certificados/sicredi-multipag.cer /etc/detudoja/certificados/sicredi-multipag.key /etc/detudoja/certificados/sicredi-multipag-chain.cer
+chmod 640 /etc/detudoja/certificados/sicredi-multipag.cer /etc/detudoja/certificados/sicredi-multipag.key /etc/detudoja/certificados/sicredi-multipag-chain.cer
+```
+
+Depois de backup do banco, git pull e revisao do .env:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.sicredi.yml build api
+docker compose -f docker-compose.yml -f docker-compose.sicredi.yml run --rm --no-deps api npm run check:gateways -w apps/api
+docker compose -f docker-compose.yml -f docker-compose.sicredi.yml run --rm api-migrate
+docker compose -f docker-compose.yml -f docker-compose.sicredi.yml up -d api
+docker compose -f docker-compose.yml -f docker-compose.sicredi.yml logs --tail=100 api
+```
+
+O check e local: imprime provedor escolhido e verifica leitura/matching de
+certificado/chave, sem exibir segredos, autenticar, cobrar ou enviar dinheiro.
+Se houver erro, corrigir antes do up. Ele nao confirma escopos nem homologacao.
+
+Autenticacao Pix sem gerar cobranca:
+
+```bash
+bash docker/test-sicredi-pix.sh /etc/detudoja/certificados/sicredi-multipag.cer /etc/detudoja/certificados/sicredi-multipag.key /etc/detudoja/certificados/sicredi-multipag-chain.cer cob.read
+```
+
+Repetir com cob.write, pix.read e pix.write. Depois testar checkout e deposito
+com usuarios de teste, confirmar pelo banco, consultar duas vezes, cancelar
+para origem e acompanhar devolucao. Tambem testar Pix + saldo e devolucao da
+composicao. Nao iniciar com saldo/usuarios reais.
+
+## Webhooks
+
+Polling a cada ciclo de 15 segundos (lotes de 25) funciona sem cadastrar callback.
+Webhooks reduzem a espera; a resposta do banco, nao o payload publico, confirma.
+
+- Multipag: POST /api/webhooks/sicredi/multipag.
+  Gerar SICREDI_MULTIPAG_WEBHOOK_TOKEN aleatorio com 32+ caracteres.
+  Cadastrar a URL e o mesmo valor em authorizationCallback no Sicredi;
+  e comparado ao header Authorization. Cadastro disponivel em producao.
+- Pix recebimento: cadastrar webhookURL como
+  https://SEU-DOMINIO/api/webhooks/sicredi/pix/SEGREDO;
+  o banco acrescenta /pix ao notificar. Configurar SEGREDO em
+  SICREDI_PIX_WEBHOOK_TOKEN (aleatorio, 32+ caracteres).
+  Usar TLS 443; configurar a cadeia de confianca do webhook Sicredi no proxy.
+  Proteger a URL: nao inserir em analytics, nao registrar em access logs
+  do Nginx/CDN (access_log off na location /api/webhooks/sicredi/pix/).
+  A API mascara o segmento secreto em seus logs. Nao usar o Client Secret
+  OAuth como token do webhook.
+
+Cadastro conforme [webhooks Multipag](https://developers.sicredi.com.br/public/docs/webhook)
+e [guia Pix, secao 10](https://developer.sicredi.com.br/api-portal/sites/default/files/Guia_tecnico_integracoes_APIPix_Sicredi_v1.9.5.pdf).
+O codigo nao registra callbacks no banco automaticamente.
+
+## Rollback e validacao
+
+PAYMENTS_PRIMARY_GATEWAY=ASAAS direciona **novas** operacoes ao Asaas.
+Recrie o container com o mesmo override, sem apagar colunas ou certificados.
+Registros Sicredi existentes continuam no Sicredi; mantenha as credenciais
+para consultas/devolucoes. Nunca recrie como Asaas uma operacao incerta.
+
+Testes locais sem banco/banco simulado:
+```bash
+cd apps/api
+node --import ./test.setup.js --test test/payment-gateway.test.js test/sicredi-clients.test.js test/sicredi-multipag-sandbox.test.js test/sicredi-payment-service.test.js
+```
+
+Testes de ledger: test/sicredi-ledger.test.js exige SICREDI_DB_TESTS=true e
+DATABASE_URL local com nome sicredi_validation*. Somente banco descartavel.
+Cobrem deposito/estorno idempotentes, timeout sem reenvio, isolamento de
+webhooks e confirmacao/devolucao concorrentes de saque e repasse.

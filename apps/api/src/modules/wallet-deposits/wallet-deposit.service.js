@@ -1,7 +1,8 @@
 import { emitWalletUpdated } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
 import { creditUserWallet, ensureUserWallets } from "../wallet/wallet.service.js";
-import { createAsaasPixPayment, getAsaasPixQrCode, isAsaasEnabled } from "../payments/asaas.client.js";
+import { createAsaasPixPayment, getAsaasPixQrCode } from "../payments/asaas.client.js";
+import { isPixGatewayEnabled as isAsaasEnabled, selectPaymentGateway, gatewayEnvironment } from "../payments/payment-gateway.js";
 import { ensureAsaasCustomer } from "../payments/asaas-customer.service.js";
 import { calculateWalletDepositAmounts } from "./wallet-deposit.config.js";
 import { createWalletDepositRepository, walletDepositRepository } from "./wallet-deposit.repository.js";
@@ -102,7 +103,8 @@ export async function createWalletDeposit(userId, { amountCents, idempotencyKey 
       if (existing) return { created: false, deposit: existing };
 
       const payment = await repository.createDepositPayment({
-        gateway: "ASAAS",
+        gateway: selectPaymentGateway(),
+        gateway_ambiente: gatewayEnvironment(),
         metodo_principal: "PIX",
         status: "AGUARDANDO_PAGAMENTO",
         usuario_pagador_id: userId,
@@ -133,7 +135,16 @@ export async function createWalletDeposit(userId, { amountCents, idempotencyKey 
   }
 
   let deposit = result.deposit;
-  if (result.created) {
+  if (result.created && deposit.pagamento.gateway === "SICREDI") {
+    const { createPendingAsaasPix, failPendingAsaasPayment } = await import("../payments/asaas.service.js");
+    try {
+      await createPendingAsaasPix({ description: "Recarga da carteira Saldo Pix", paymentId: deposit.pagamento_id, userId });
+    } catch (error) {
+      await failPendingAsaasPayment(deposit.pagamento_id);
+      throw error;
+    }
+  }
+  if (result.created && deposit.pagamento.gateway === "ASAAS") {
     let remotePayment = null;
     try {
       const customerId = await ensureAsaasCustomer(userId);
@@ -214,7 +225,7 @@ export async function settleWalletDepositPayment(database, paymentId, event) {
     await repository.updatePaymentCompositions({ data: { status: "CONFIRMADO" }, where: { pagamento_id: paymentId, tipo_origem: "PIX" } });
     await creditUserWallet({
       database,
-      description: "Deposito Pix confirmado pelo Asaas",
+      description: "Deposito Pix confirmado pelo gateway de origem",
       origin: "DEPOSITO_PIX",
       originId: deposit.id,
       userId: deposit.usuario_id,

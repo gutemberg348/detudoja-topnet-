@@ -39,7 +39,8 @@ async function asaasRequest(path, options = {}) {
       ?? payload?.message
       ?? "O Asaas recusou a solicitacao de pagamento";
     const error = new AppError(message, 502);
-    error.providerRejected = true;
+    error.providerStateUnknown = response.status >= 500 || [408, 429].includes(response.status);
+    error.providerRejected = !error.providerStateUnknown;
     error.providerStatusCode = response.status;
     throw error;
   }

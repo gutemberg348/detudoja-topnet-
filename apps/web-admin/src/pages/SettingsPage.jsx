@@ -309,7 +309,7 @@ function WithdrawalsWorkspace({ form, isSaving, onChange, onSubmit }) {
         <div>
           <p className="eyebrow">Tesouraria</p>
           <h2>Politica de saques Pix</h2>
-          <p>O bruto e reservado na carteira; a taxa e descontada e somente o liquido segue ao Asaas.</p>
+          <p>O bruto e reservado na carteira; a taxa e descontada e somente o liquido segue ao gateway.</p>
         </div>
         <span className="settings-main__count">Configuracao global</span>
       </header>
@@ -317,7 +317,7 @@ function WithdrawalsWorkspace({ form, isSaving, onChange, onSubmit }) {
       <form className="withdrawal-settings" onSubmit={onSubmit}>
         <div className="withdrawal-settings__switches">
           <label><input checked={form.enabled} onChange={(event) => onChange((current) => ({ ...current, enabled: event.target.checked }))} type="checkbox" /><span><strong>Saques ativos</strong><small>Permite novas solicitacoes no aplicativo.</small></span></label>
-          <label><input checked={form.manualApproval} onChange={(event) => onChange((current) => ({ ...current, manualApproval: event.target.checked }))} type="checkbox" /><span><strong>Aprovacao manual</strong><small>Financeiro revisa antes de enviar ao Asaas.</small></span></label>
+          <label><input checked={form.manualApproval} onChange={(event) => onChange((current) => ({ ...current, manualApproval: event.target.checked }))} type="checkbox" /><span><strong>Aprovacao manual</strong><small>Financeiro revisa antes de enviar ao gateway.</small></span></label>
         </div>
         <div className="withdrawal-settings__grid">
           {fields.map((field) => (

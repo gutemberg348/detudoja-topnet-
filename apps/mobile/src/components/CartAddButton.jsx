@@ -1,12 +1,25 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useRef } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { cartPressOrigin } from "../utils/cart-feedback";
 import { colors, radius, shadowSoft } from "../utils/theme";
 
 export function CartAddButton({ name = "produto", onDecrease, onPress, quantity = 0, size = 34, style }) {
+  const buttonRef = useRef(null);
+  const pressOriginRef = useRef(null);
+  function captureOrigin(event) {
+    pressOriginRef.current = cartPressOrigin(event);
+  }
   function add(event) {
-    onPress?.({
-      pageX: event?.nativeEvent?.pageX,
-      pageY: event?.nativeEvent?.pageY,
+    const origin = cartPressOrigin(event) ?? pressOriginRef.current;
+    pressOriginRef.current = null;
+    if (origin || !buttonRef.current) {
+      onPress?.(origin);
+      return;
+    }
+    // Accessibility/keyboard activation may not contain a touch location.
+    buttonRef.current.measureInWindow((x, y, width, height) => {
+      onPress?.({ pageX: x + width / 2, pageY: y + height / 2 });
     });
   }
 
@@ -35,9 +48,12 @@ export function CartAddButton({ name = "produto", onDecrease, onPress, quantity 
         </Text>
         <Pressable
           accessibilityLabel={`Adicionar mais um ${name}`}
+          ref={buttonRef}
+          collapsable={false}
           accessibilityRole="button"
           hitSlop={5}
           onPress={add}
+          onPressIn={captureOrigin}
           style={({ pressed }) => [styles.stepperAction, pressed && styles.pressed]}
         >
           <Ionicons color={colors.card} name="add" size={Math.round(size * 0.5)} />
@@ -50,9 +66,12 @@ export function CartAddButton({ name = "produto", onDecrease, onPress, quantity 
     <View style={[styles.shell, { height: size, width: size }, style]}>
       <Pressable
         accessibilityLabel={`Adicionar ${name} ao carrinho`}
+        ref={buttonRef}
+        collapsable={false}
         accessibilityRole="button"
         hitSlop={7}
         onPress={add}
+        onPressIn={captureOrigin}
         style={({ pressed }) => [
           styles.button,
           pressed && styles.pressed,

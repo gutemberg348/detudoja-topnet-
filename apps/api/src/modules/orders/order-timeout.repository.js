@@ -9,7 +9,7 @@ export function createOrderTimeoutRepository(database = prisma) {
         select: { id: true, pedido_loja: { select: { id: true } } },
         take: 10,
         where: {
-          gateway: "ASAAS",
+          gateway: { in: ["ASAAS", "SICREDI"] },
           pedido_loja: { is: { status: "CANCELADO" } },
           status: "EM_DISPUTA",
         },

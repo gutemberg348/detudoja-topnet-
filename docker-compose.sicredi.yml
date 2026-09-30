@@ -1,0 +1,11 @@
+# Add with -f docker-compose.yml -f docker-compose.sicredi.yml on the VPS.
+# These paths do not exist on developer PCs. Never copy the private key to Git.
+services:
+  api:
+    volumes:
+      - type: bind
+        source: /etc/detudoja/certificados
+        target: /run/sicredi
+        read_only: true
+        bind:
+          create_host_path: false

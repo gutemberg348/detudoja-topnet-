@@ -1,4 +1,5 @@
 import { reconcilePendingAsaasPayments } from "./asaas.service.js";
+import { reconcilePendingSicrediPayments } from "./sicredi/sicredi.payment.service.js";
 import {
   recordComponentFailure,
   recordComponentStarting,
@@ -13,8 +14,13 @@ let running = null;
 async function runReconciliationCycle() {
   if (running) return running;
 
-  running = reconcilePendingAsaasPayments()
-    .then((result) => recordComponentSuccess("asaas-payment-reconciliation", result))
+  running = Promise.all([reconcilePendingAsaasPayments(), reconcilePendingSicrediPayments()])
+    .then(([asaas, sicredi]) => {
+      const result = { asaas, sicredi };
+      if (asaas.failed.length || sicredi.failed.length) {
+        recordComponentFailure("asaas-payment-reconciliation", new Error("Ha pagamentos aguardando conciliacao do gateway"), result);
+      } else recordComponentSuccess("asaas-payment-reconciliation", result);
+    })
     .catch((error) => recordComponentFailure("asaas-payment-reconciliation", error))
     .finally(() => { running = null; });
 

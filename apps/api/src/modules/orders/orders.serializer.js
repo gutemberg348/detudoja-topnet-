@@ -96,7 +96,7 @@ export function serializeOrder(order, { audience = "customer" } = {}) {
           availableAt: cancellationAvailableAt.toISOString(),
           canRefundToBalance: canCancelPaidOrder,
           canRefundToOriginal: canCancelPaidOrder,
-          originalDestination: order.pagamento?.gateway === "ASAAS"
+          originalDestination: ["ASAAS", "SICREDI"].includes(order.pagamento?.gateway)
             ? "PIX_ORIGEM"
             : "CARTEIRAS_ORIGEM",
         }

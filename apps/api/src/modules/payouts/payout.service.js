@@ -8,13 +8,15 @@ import { sendExpoPushToUsers } from "../notifications/notifications.service.js";
 import {
   createAsaasPixTransfer,
   getAsaasTransfer,
-  isAsaasEnabled,
   listAsaasTransfers,
 } from "../payments/asaas.client.js";
 import {
   createPayoutRepository,
   payoutRepository,
 } from "./payout.repository.js";
+
+import { isPixGatewayEnabled, selectPaymentGateway, gatewayEnvironment } from "../payments/payment-gateway.js";
+import { createSicrediTransfer, getSicrediTransfer } from "../payments/sicredi/sicredi.transfer.service.js";
 
 const payoutInclude = {
   conta_bancaria: true,
@@ -233,6 +235,12 @@ async function restoreFailedPayout(payoutId, reason, nextStatus = "FALHOU") {
 
     if (!payout || !["PROCESSANDO", "EM_RECONCILIACAO"].includes(payout.status)) return null;
 
+    const claimed = await repository.updatePayouts({
+      data: { status: nextStatus },
+      where: { id: payout.id, status: { in: ["PROCESSANDO", "EM_RECONCILIACAO"] } },
+    });
+    if (claimed.count !== 1) return null;
+
     const wallet = await repository.findWallet({
       include: { tipo_carteira: true },
       where: { tipo_carteira: { codigo: "vendas" }, usuario_id: payout.usuario_id },
@@ -294,6 +302,12 @@ async function confirmPayout(payoutId, transfer = {}) {
       throw new AppError("Repasse Pix nao esta em estado confirmavel", 409);
     }
 
+    const claimed = await repository.updatePayouts({
+      data: { status: "PAGO" },
+      where: { id: payout.id, status: { in: ["PROCESSANDO", "EM_RECONCILIACAO"] } },
+    });
+    if (claimed.count !== 1) return null;
+
     const paidAt = new Date();
     await repository.updateReceivable({
       data: { pago_em: paidAt, status: "PAGO" },
@@ -320,7 +334,7 @@ async function confirmPayout(payoutId, transfer = {}) {
   return confirmed;
 }
 
-export async function submitPendingPayout(payoutId) {
+export async function submitPendingPayout(payoutId, { sendTransfer = createSicrediTransfer } = {}) {
   const claimed = await payoutRepository.updatePayouts({
     data: { status: "PROCESSANDO", tentativas: { increment: 1 } },
     where: { id: payoutId, status: "PENDENTE" },
@@ -328,9 +342,9 @@ export async function submitPendingPayout(payoutId) {
   if (claimed.count !== 1) return null;
 
   const payout = await payoutRepository.findPayout({ include: payoutInclude, where: { id: payoutId } });
-
+  let dispatched = false;
   try {
-    const transfer = await createAsaasPixTransfer({
+    const transfer = payout.gateway === "SICREDI" ? await sendTransfer(payout) : await createAsaasPixTransfer({
       description: `Repasse presencial Brasil Cashback ${payout.referencia_externa}`,
       externalReference: payout.referencia_externa,
       operationType: "PIX",
@@ -338,23 +352,24 @@ export async function submitPendingPayout(payoutId) {
       pixAddressKeyType: transferTypeByPixType[payout.tipo_chave],
       value: asaasValue(payout.valor_centavos),
     });
+    dispatched = true;
     const status = String(transfer.status ?? "PENDING").toUpperCase();
 
-    await payoutRepository.updatePayout({
+    await payoutRepository.updatePayouts({
       data: {
         enviado_em: new Date(),
         gateway_transferencia_id: transfer.id,
         status: "PROCESSANDO",
       },
-      where: { id: payout.id },
+      where: { id: payout.id, status: { in: ["PROCESSANDO", "EM_RECONCILIACAO"] } },
     });
 
     return status === "DONE" ? confirmPayout(payout.id, transfer) : transfer;
   } catch (error) {
-    if (error.providerStateUnknown) {
-      await payoutRepository.updatePayout({
+    if (dispatched || payout.gateway === "SICREDI" || error.providerStateUnknown) {
+      await payoutRepository.updatePayouts({
         data: { motivo_falha: error.message, status: "EM_RECONCILIACAO" },
-        where: { id: payout.id },
+        where: { id: payout.id, status: { in: ["PROCESSANDO", "EM_RECONCILIACAO"] } },
       });
       return null;
     }
@@ -384,7 +399,7 @@ async function findUnknownPayoutTransfer(payout) {
   return null;
 }
 
-export async function reconcilePayout(payoutId) {
+export async function reconcilePayout(payoutId, { lookupTransfer = getSicrediTransfer } = {}) {
   const payout = await payoutRepository.findPayout({
     where: { id: payoutId },
   });
@@ -401,7 +416,7 @@ export async function reconcilePayout(payoutId) {
   });
 
   try {
-    const transfer = payout.gateway_transferencia_id
+    const transfer = payout.gateway === "SICREDI" ? await lookupTransfer(payout) : payout.gateway_transferencia_id
       ? await getAsaasTransfer(payout.gateway_transferencia_id)
       : await findUnknownPayoutTransfer(payout);
     if (!transfer) return null;
@@ -427,16 +442,16 @@ export async function reconcilePayout(payoutId) {
     }
 
     if (payout.status === "EM_RECONCILIACAO") {
-      await payoutRepository.updatePayout({
+      await payoutRepository.updatePayouts({
         data: { motivo_falha: null, status: "PROCESSANDO" },
-        where: { id: payout.id },
+        where: { id: payout.id, status: "EM_RECONCILIACAO" },
       });
     }
     return transfer;
   } catch (error) {
-    await payoutRepository.updatePayout({
+    await payoutRepository.updatePayouts({
       data: { motivo_falha: error.message, status: "EM_RECONCILIACAO" },
-      where: { id: payout.id },
+      where: { id: payout.id, status: { in: ["PROCESSANDO", "EM_RECONCILIACAO"] } },
     });
     return null;
   }
@@ -490,6 +505,10 @@ export async function reserveImmediatePixPayout(database, transactionId) {
 
   const created = await repository.createPayout({
       data: {
+        // Wallet-only purchases remain possible with payouts disabled. The
+        // queue will return the reservation to the sales wallet without sending.
+        gateway: isPixGatewayEnabled("transfer") ? selectPaymentGateway("transfer") : "ASAAS",
+        gateway_ambiente: gatewayEnvironment(),
         chave_pix_destino: account.chave_pix,
         conta_bancaria_id: account.id,
         documento_titular: account.documento_titular,
@@ -534,9 +553,9 @@ export async function queueImmediatePixPayout(transactionId) {
 
   if (!payout) return null;
   emitWalletUpdated({ transactionId, userIds: [payout.usuario_id] });
-  if (!isAsaasEnabled()) {
+  if (!isPixGatewayEnabled("transfer")) {
     await payoutRepository.updatePayouts({ data: { status: "PROCESSANDO" }, where: { id: payout.id, status: "PENDENTE" } });
-    await restoreFailedPayout(payout.id, "Gateway Asaas nao esta habilitado");
+    await restoreFailedPayout(payout.id, "Gateway Pix nao esta habilitado");
     return payout;
   }
   await submitPendingPayout(payout.id);
@@ -569,7 +588,7 @@ export async function processAsaasTransferWebhook(payload) {
 
     return {
       duplicate: Boolean(gatewayEvent.processado_em),
-      payout: gatewayEvent.processado_em ? null : payout,
+      payout: gatewayEvent.processado_em || (payout && payout.gateway !== "ASAAS") ? null : payout,
     };
   });
 
@@ -601,7 +620,7 @@ export async function processAsaasTransferWebhook(payload) {
 }
 
 export async function processPendingPayouts({ batchSize = 25 } = {}) {
-  if (!isAsaasEnabled()) return { processed: 0 };
+  // Reconcile persisted operations even when creation is disabled.
   const reconcileBefore = new Date(Date.now() - 30_000);
   const [pending, processing] = await Promise.all([
     payoutRepository.findPendingPayouts({

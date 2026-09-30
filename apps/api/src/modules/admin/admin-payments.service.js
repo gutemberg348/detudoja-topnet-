@@ -13,7 +13,9 @@ import { serializeOrder, serializeOrderMessage } from "../orders/orders.serializ
 import {
   refreshAsaasRefundPayment,
   requestAsaasPaymentRefund,
+  processVerifiedPaymentEvent,
 } from "../payments/asaas.service.js";
+import { assertSandboxApproval, sandboxApprovalEnabled } from "../payments/sandbox-approval.js";
 import {
   creditPaymentRefundToBalance,
   restorePaymentWalletCompositions,
@@ -33,6 +35,7 @@ const paymentStatuses = new Set([
   "ESTORNADO",
   "FALHOU",
   "EM_DISPUTA",
+  "EM_RECONCILIACAO",
 ]);
 
 function cents(value) {
@@ -50,6 +53,13 @@ function serializePayment(payment) {
   return {
     createdAt: payment.criado_em.toISOString(),
     gateway: payment.gateway,
+    gatewayEnvironment: payment.gateway_ambiente,
+    sandboxSimulated: Boolean(payment.gateway_dados_json?.sandboxManualApproval),
+    sandboxApprovable: sandboxApprovalEnabled() && payment.gateway_ambiente === "sandbox"
+      && ["ASAAS", "SICREDI"].includes(payment.gateway) && Number(payment.valor_pago_pix_centavos) > 0
+      && ["AGUARDANDO_PAGAMENTO", "EM_RECONCILIACAO"].includes(payment.status),
+    sandboxRefundable: sandboxApprovalEnabled() && payment.gateway_ambiente === "sandbox"
+      && Boolean(payment.gateway_dados_json?.sandboxManualApproval) && payment.status === "EM_DISPUTA",
     id: payment.id,
     method: payment.metodo_principal,
     orderCode: payment.pedido_loja?.codigo ?? null,
@@ -70,7 +80,7 @@ function serializePayment(payment) {
       && deadline.getTime() > Date.now()
       && payment.transacao_comercial?.status !== "LIQUIDADA",
     refundDeadline: deadline?.toISOString() ?? null,
-    refundDestination: payment.gateway === "ASAAS" ? "PIX_ORIGEM" : "CARTEIRAS_ORIGEM",
+    refundDestination: ["ASAAS", "SICREDI"].includes(payment.gateway) ? "PIX_ORIGEM" : "CARTEIRAS_ORIGEM",
     settlementStatus: payment.transacao_comercial?.status ?? null,
     status: payment.status,
     store: payment.loja ? { id: payment.loja.id, name: payment.loja.nome } : null,
@@ -107,9 +117,24 @@ export async function listAdminPayments(query = {}) {
   ]);
 
   return {
+    sandboxApprovalEnabled: sandboxApprovalEnabled(),
     pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
     payments: payments.map(serializePayment),
   };
+}
+
+export async function approveAdminSandboxPayment(adminId, paymentId, { reason, action }) {
+  const id = parsePositiveId(paymentId, "Pagamento invalido");
+  const payment = await adminPaymentsRepository.findPayment(id);
+  const event = action === "refund" ? "PAYMENT_REFUNDED" : "PAYMENT_RECEIVED";
+  assertSandboxApproval(payment, event);
+  await processVerifiedPaymentEvent({
+    id: `sandbox-manual:${payment.gateway}:${id}:${event}`,
+    event,
+    simulation: { manual: true, adminId, reason },
+    payment: { id: payment.gateway_pagamento_id, externalReference: `DTJ:PAYMENT:${id}` },
+  }, payment.gateway, { sandboxApproval: { adminId, reason } });
+  return { payment: serializePayment(await adminPaymentsRepository.findPayment(id)), simulated: true };
 }
 
 async function refundInternalPayment(repository, database, payment, adminId, reason) {
@@ -176,18 +201,18 @@ async function createCustomerCancellationMessage(repository, payment, destinatio
   return repository.createOrderMessage({
     mensagem: toBalance
       ? "Cancelamento confirmado. O valor total foi creditado no seu Saldo Pix do aplicativo."
-      : payment.gateway === "ASAAS"
-        ? "Cancelamento confirmado. Solicitamos ao Asaas o estorno para a conta Pix de origem. A confirmacao aparecera aqui quando o gateway concluir."
+      : ["ASAAS", "SICREDI"].includes(payment.gateway)
+        ? "Cancelamento confirmado. Solicitamos ao banco o estorno para a conta Pix de origem. A confirmacao aparecera aqui quando o gateway concluir."
         : "Cancelamento confirmado. O valor voltou para as carteiras usadas no pagamento.",
     metadata_json: {
       kind: "customer-refund",
       paymentId: payment.id,
       refundDestination: destination,
-      status: toBalance || payment.gateway !== "ASAAS" ? "ESTORNADO" : "EM_DISPUTA",
+      status: toBalance || !["ASAAS", "SICREDI"].includes(payment.gateway) ? "ESTORNADO" : "EM_DISPUTA",
     },
     origem: "SISTEMA",
     pedido_id: payment.pedido_loja.id,
-    titulo: toBalance || payment.gateway !== "ASAAS"
+    titulo: toBalance || !["ASAAS", "SICREDI"].includes(payment.gateway)
       ? "Cancelado e devolvido"
       : "Estorno solicitado",
   });
@@ -218,7 +243,7 @@ export async function refundCustomerOrderPayment(userId, orderId, {
 
   const reason = "Cancelamento solicitado pelo cliente porque a loja nao aceitou o pedido no prazo.";
 
-  if (normalizedDestination === "ORIGINAL" && payment.gateway === "ASAAS") {
+  if (normalizedDestination === "ORIGINAL" && ["ASAAS", "SICREDI"].includes(payment.gateway)) {
     const canceledPayment = await adminPaymentsRepository.transaction(async (repository) => {
       const currentPayment = await repository.findPayment(payment.id);
       if (!canCustomerCancelPaidOrder(currentPayment, userId)) return null;
@@ -423,7 +448,7 @@ export async function refundUnattendedOrderPayment(paymentId, {
     return { processed: false, reason: "NOT_ELIGIBLE" };
   }
 
-  if (payment.gateway === "ASAAS") {
+  if (["ASAAS", "SICREDI"].includes(payment.gateway)) {
     const canceledPayment = await adminPaymentsRepository.transaction(async (repository) => {
       const currentPayment = await repository.findPayment(parsedPaymentId);
       if (!canRefundUnattendedOrder(currentPayment)) {
@@ -512,7 +537,7 @@ export async function refundUnattendedServicePayment(paymentId, {
     return { processed: false, reason: "NOT_ELIGIBLE" };
   }
 
-  if (payment.gateway === "ASAAS") {
+  if (["ASAAS", "SICREDI"].includes(payment.gateway)) {
     const canceledPayment = await adminPaymentsRepository.transaction(async (repository) => {
       const currentPayment = await repository.findPayment(parsedPaymentId);
       if (!canRefundUnattendedService(currentPayment)) return null;
@@ -583,12 +608,14 @@ export async function refundAdminPayment(adminId, paymentId, { reason }) {
     );
   }
 
-  if (payment.gateway === "ASAAS") {
+  if (["ASAAS", "SICREDI"].includes(payment.gateway)) {
     await adminPaymentsRepository.assertSettlementReversible(payment.id);
     await requestAsaasPaymentRefund(payment.id, { reason });
 
     return {
-      message: "Estorno Pix solicitado ao Asaas. Os ganhos serao revertidos quando o gateway confirmar a devolucao.",
+      message: payment.gateway_dados_json?.sandboxManualApproval
+        ? "Estorno de teste solicitado. Confirme a simulacao no admin para reverter os ganhos. Nenhuma devolucao foi enviada ao banco."
+        : "Estorno Pix solicitado ao banco. Os ganhos serao revertidos quando o gateway confirmar a devolucao.",
       payment: serializePayment(await adminPaymentsRepository.findPayment(payment.id)),
     };
   }
@@ -631,8 +658,8 @@ export async function refreshAdminAsaasRefundPayment(paymentId) {
 
   return {
     message: payment.status === "ESTORNADO"
-      ? "Estorno confirmado pelo Asaas"
-      : "O Asaas ainda esta processando o estorno",
+      ? "Estorno confirmado pelo banco"
+      : "O banco ainda esta processando o estorno",
     payment: serializePayment(payment),
   };
 }

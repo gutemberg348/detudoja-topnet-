@@ -29,6 +29,8 @@ import {
   refundAsaasPayment,
 } from "./asaas.client.js";
 import { restorePaymentWalletCompositions } from "./payment-refund-wallet.service.js";
+import { isExternalPixGateway } from "./payment-gateway.js";
+import { recordSandboxApproval, sandboxApprovalEnabled } from "./sandbox-approval.js";
 
 const orderInclude = {
   _count: {
@@ -98,7 +100,7 @@ function asaasReferenceTarget(reference) {
 function serializePendingAsaasPayment(payment) {
   return {
     expiresAt: payment.expira_em?.toISOString() ?? null,
-    gateway: "ASAAS",
+    gateway: payment.gateway,
     id: payment.id,
     pixCopyPaste: payment.copia_cola_pix,
     qrImageDataUrl: payment.qr_code,
@@ -134,6 +136,11 @@ export function shouldUseAsaasPix({ pixComplementCents, walletUsedCents }) {
 }
 
 export async function createPendingAsaasPix({ description, paymentId, userId }) {
+  const selected = await asaasRepository.findPayment({ where: { id: paymentId } });
+  if (selected?.gateway === "SICREDI") {
+    const { createPendingSicrediPix } = await import("./sicredi/sicredi.payment.service.js");
+    return createPendingSicrediPix({ description, paymentId, userId });
+  }
   const payment = await asaasRepository.findPayment({
     select: {
       copia_cola_pix: true,
@@ -213,13 +220,17 @@ export async function failPendingAsaasPayment(paymentId) {
   const result = await asaasRepository.transaction(async (database) => {
     const repository = createAsaasRepository(database);
     const payment = await repository.findPayment({
-      select: { id: true },
+      select: { id: true, gateway: true, gateway_pagamento_id: true },
       where: { id: paymentId },
     });
 
     if (!payment) {
       return null;
     }
+
+    // A committed Sicredi TXID means a PUT may have reached the bank. A local
+    // failure cannot release stock/reservations before bank reconciliation.
+    if (payment.gateway === "SICREDI" && payment.gateway_pagamento_id) return null;
 
     const claimed = await repository.updatePayments({
       data: { status: "FALHOU" },
@@ -346,13 +357,14 @@ export async function reconcilePendingAsaasPayment(paymentId) {
     return { reconciled: false, state: "WAITING_FOR_GATEWAY" };
   }
 
-  await asaasRepository.updatePayment({
+  const linked = await asaasRepository.updatePayments({
     data: {
       gateway_pagamento_id: remotePayment.id,
       status: "AGUARDANDO_PAGAMENTO",
     },
-    where: { id: payment.id },
+    where: { id: payment.id, status: "EM_RECONCILIACAO" },
   });
+  if (linked.count !== 1) return { reconciled: false, state: "NOT_PENDING" };
 
   const gatewayStatus = String(remotePayment.status ?? "PENDING").toUpperCase();
   const event = eventForAsaasPaymentStatus(gatewayStatus);
@@ -401,7 +413,7 @@ export async function reconcilePendingAsaasPayments({ batchSize = 25 } = {}) {
   return { failed, reconciled, scanned: payments.length, waiting };
 }
 
-async function settleAsaasPayment(database, paymentId, event) {
+async function settleAsaasPayment(database, paymentId, event, gateway = "ASAAS") {
   const repository = createAsaasRepository(database);
   const nextStatus = mapPaymentStatus(event);
 
@@ -447,7 +459,7 @@ async function settleAsaasPayment(database, paymentId, event) {
   let reversal = null;
   if (nextStatus === "ESTORNADO") {
     reversal = await reverseCommercialSettlement(database, paymentId, {
-      reason: "Estorno Pix confirmado pelo Asaas.",
+      reason: "Estorno Pix confirmado pelo gateway de origem.",
     });
     const paymentWithCompositions = await database.pagamento.findUnique({
       include: { composicoes: true },
@@ -516,7 +528,7 @@ async function settleAsaasPayment(database, paymentId, event) {
     const message = await repository.createOrderMessage({
       data: {
         mensagem: "Pix confirmado. Aguarde a loja aceitar o pedido para iniciar o atendimento.",
-        metadata_json: { gateway: "ASAAS", kind: "payment", status: "RECEBIDO" },
+        metadata_json: { gateway, kind: "payment", status: "RECEBIDO" },
         origem: "SISTEMA",
         pedido_id: order.id,
         titulo: "Pagamento confirmado",
@@ -547,7 +559,7 @@ async function settleAsaasPayment(database, paymentId, event) {
     ? await repository.createOrderMessage({
         data: {
           mensagem: "O estorno Pix foi confirmado. Os valores e ganhos vinculados a esta compra foram revertidos.",
-          metadata_json: { gateway: "ASAAS", kind: "refund", status: "ESTORNADO" },
+          metadata_json: { gateway, kind: "refund", status: "ESTORNADO" },
           origem: "SISTEMA",
           pedido_id: order.id,
           titulo: "Estorno confirmado",
@@ -560,6 +572,21 @@ async function settleAsaasPayment(database, paymentId, event) {
 }
 
 export async function requestAsaasPaymentRefund(paymentId, { reason }) {
+  const selected = await asaasRepository.findPayment({ where: { id: Number(paymentId) } });
+  if (selected?.gateway_dados_json?.sandboxManualApproval) {
+    if (!sandboxApprovalEnabled() || selected.gateway_ambiente !== "sandbox") throw new AppError("Estorno simulado requer Sandbox habilitado", 403);
+    const deposit = await asaasRepository.findFirstWalletDeposit({ where: { pagamento_id: selected.id } });
+    if (deposit) throw new AppError("Depositos exigem analise antes da devolucao", 409);
+    const claimed = await asaasRepository.updatePayments({
+      data: { status: "EM_DISPUTA" }, where: { id: selected.id, status: { in: ["PAGO", "LIQUIDADO"] } },
+    });
+    if (claimed.count !== 1) throw new AppError("Estorno ja solicitado ou pagamento indisponivel", 409);
+    return { gatewayStatus: "SANDBOX_AWAITING_MANUAL_REFUND" };
+  }
+  if (selected?.gateway === "SICREDI") {
+    const { requestSicrediRefund } = await import("./sicredi/sicredi.payment.service.js");
+    return requestSicrediRefund(selected.id);
+  }
   const payment = await asaasRepository.findPayment({
     select: {
       deposito_carteira: { select: { id: true } },
@@ -597,6 +624,7 @@ export async function requestAsaasPaymentRefund(paymentId, { reason }) {
       description: `Estorno Brasil Cashback do pagamento ${payment.id}: ${reason}`,
     });
   } catch (error) {
+    if (error.providerStateUnknown) return { gatewayStatus: "RECONCILING" };
     await asaasRepository.updatePayments({
       data: { status: payment.status },
       where: { id: payment.id, status: "EM_DISPUTA" },
@@ -606,6 +634,12 @@ export async function requestAsaasPaymentRefund(paymentId, { reason }) {
 }
 
 export async function refreshAsaasRefundPayment(paymentId) {
+  const selected = await asaasRepository.findPayment({ where: { id: Number(paymentId) } });
+  if (selected?.gateway_dados_json?.sandboxManualApproval) return { gatewayStatus: "SANDBOX_MANUAL" };
+  if (selected?.gateway === "SICREDI") {
+    const { reconcileSicrediPayment } = await import("./sicredi/sicredi.payment.service.js");
+    return reconcileSicrediPayment(selected.id);
+  }
   const payment = await asaasRepository.findPayment({
     select: {
       gateway: true,
@@ -650,12 +684,18 @@ export async function cancelPendingAsaasOrderPayment(userId, orderId) {
     where: { id: Number(orderId), usuario_id: userId },
   });
 
-  if (!order?.pagamento || order.pagamento.gateway !== "ASAAS") {
+  if (!order?.pagamento || !isExternalPixGateway(order.pagamento.gateway)) {
     return false;
   }
 
   if (order.pagamento.status !== "AGUARDANDO_PAGAMENTO") {
     throw new AppError("A cobranca Pix nao pode mais ser cancelada diretamente", 409);
+  }
+
+  if (order.pagamento.gateway === "SICREDI") {
+    const { cancelSicrediPayment } = await import("./sicredi/sicredi.payment.service.js");
+    await cancelSicrediPayment(order.pagamento.id);
+    return true;
   }
 
   await deleteAsaasPayment(order.pagamento.gateway_pagamento_id);
@@ -669,13 +709,21 @@ export async function cancelPendingAsaasOrderPayment(userId, orderId) {
 }
 
 export async function processAsaasWebhook(payload) {
+  return processVerifiedPaymentEvent(payload, "ASAAS");
+}
+
+// Sicredi callers must first query the authenticated bank API. The only local
+// exception is explicit, audited Sandbox approval supplied as an internal option
+// (never read from webhook payloads).
+export async function processVerifiedPaymentEvent(payload, gateway, { sandboxApproval } = {}) {
+  if (!isExternalPixGateway(gateway)) throw new AppError("Gateway invalido", 400);
   const eventId = String(payload?.id ?? "").trim();
   const event = String(payload?.event ?? "").trim();
   const remotePaymentId = String(payload?.payment?.id ?? "").trim();
   const externalReference = String(payload?.payment?.externalReference ?? "").trim();
   const referenceTarget = asaasReferenceTarget(externalReference);
 
-  if (event.startsWith("TRANSFER_")) {
+  if (gateway === "ASAAS" && event.startsWith("TRANSFER_")) {
     const withdrawalResult = await processAsaasWithdrawalWebhook(payload);
     return withdrawalResult.handled
       ? withdrawalResult
@@ -691,21 +739,29 @@ export async function processAsaasWebhook(payload) {
     const paymentByGatewayId = remotePaymentId
       ? await repository.findFirstPayment({
           select: { gateway_pagamento_id: true, id: true },
-          where: { gateway: "ASAAS", gateway_pagamento_id: remotePaymentId },
+          where: { gateway, gateway_pagamento_id: remotePaymentId },
         })
       : null;
     const paymentByReference = referenceTarget?.type === "PAYMENT"
       ? await repository.findFirstPayment({
           select: { gateway_pagamento_id: true, id: true },
-          where: { gateway: "ASAAS", id: referenceTarget.id },
+          where: { gateway, id: referenceTarget.id },
         })
       : referenceTarget?.type === "WALLET_DEPOSIT"
         ? (await repository.findFirstWalletDeposit({
             select: { pagamento: { select: { gateway_pagamento_id: true, id: true } } },
-            where: { id: referenceTarget.id },
+            where: { id: referenceTarget.id, pagamento: { is: { gateway } } },
           }))?.pagamento ?? null
         : null;
     const payment = paymentByGatewayId ?? paymentByReference;
+
+    if (payment && !sandboxApproval) {
+      // Once a test is manually settled, a delayed sandbox bank callback must
+      // not undo its local ledger or its refund simulation.
+      await database.$queryRaw`SELECT id FROM pagamentos WHERE id = ${payment.id} FOR UPDATE`;
+      const current = await repository.findPayment({ where: { id: payment.id }, select: { gateway_dados_json: true } });
+      if (current?.gateway_dados_json?.sandboxManualApproval) return { duplicate: false, simulated: true };
+    }
 
     if (payment && remotePaymentId && !payment.gateway_pagamento_id) {
       await repository.updatePayment({
@@ -717,7 +773,7 @@ export async function processAsaasWebhook(payload) {
     try {
       await repository.createGatewayEvent({
         data: {
-          gateway: "ASAAS",
+          gateway,
           gateway_evento_id: eventId,
           pagamento_id: payment?.id ?? null,
           payload_json: payload,
@@ -732,11 +788,15 @@ export async function processAsaasWebhook(payload) {
       throw error;
     }
 
+    if (sandboxApproval) {
+      await recordSandboxApproval(database, payment?.id, sandboxApproval, event);
+    }
+
     const walletDepositSettlement = payment
       ? await settleWalletDepositPayment(database, payment.id, event)
       : null;
     const settled = walletDepositSettlement ?? (payment
-      ? await settleAsaasPayment(database, payment.id, event)
+      ? await settleAsaasPayment(database, payment.id, event, gateway)
       : null);
 
     await repository.updateGatewayEvent({
@@ -795,6 +855,10 @@ export async function refreshPendingAsaasWalletDeposit(userId, depositId) {
     || !["AGUARDANDO_PAGAMENTO", "EM_RECONCILIACAO"].includes(deposit.pagamento.status)
   ) {
     throw new AppError("Este deposito nao esta aguardando pagamento", 409);
+  }
+  if (deposit.pagamento.gateway === "SICREDI") {
+    const { reconcileSicrediPayment } = await import("./sicredi/sicredi.payment.service.js");
+    return reconcileSicrediPayment(deposit.pagamento.id);
   }
   if (deposit.pagamento.gateway !== "ASAAS") {
     throw new AppError("Pagamento Asaas nao disponivel para consulta", 409);
@@ -874,6 +938,13 @@ export async function refreshPendingAsaasOrderPayment(userId, orderId) {
       order: serializeOrder(currentFullOrder),
       paymentConfirmed: ["PAGO", "LIQUIDADO"].includes(currentFullOrder.pagamento?.status),
     };
+  }
+
+  if (currentOrder.pagamento.gateway === "SICREDI") {
+    const { reconcileSicrediPayment } = await import("./sicredi/sicredi.payment.service.js");
+    const result = await reconcileSicrediPayment(currentOrder.pagamento.id);
+    const updated = await asaasRepository.findUniqueOrder({ include: orderInclude, where: { id: currentOrder.id } });
+    return { ...result, order: serializeOrder(updated), paymentConfirmed: ["PAGO", "LIQUIDADO"].includes(updated.pagamento?.status) };
   }
 
   if (

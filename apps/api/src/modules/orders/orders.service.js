@@ -28,7 +28,7 @@ import {
   failPendingAsaasPayment,
   shouldUseAsaasPix,
 } from "../payments/asaas.service.js";
-import { isAsaasEnabled } from "../payments/asaas.client.js";
+import { isPixGatewayEnabled as isAsaasEnabled, isExternalPixGateway, selectPaymentGateway, gatewayEnvironment } from "../payments/payment-gateway.js";
 import {
   allocateUserWalletsForPayment,
   debitUserWallet,
@@ -675,7 +675,8 @@ export async function createCheckoutOrder(userId, data, { idempotencyKey = null 
               : []),
           ],
         },
-        gateway: useAsaasPix ? "ASAAS" : "INTERNO",
+        gateway: useAsaasPix ? selectPaymentGateway() : "INTERNO",
+        gateway_ambiente: useAsaasPix ? gatewayEnvironment() : null,
         loja_id: store.id,
         metodo_principal: method,
         pago_em: useAsaasPix ? null : new Date(),
@@ -986,7 +987,12 @@ export async function cancelCustomerOrder(userId, orderId, { refundDestination =
   }
 
   if (
-    currentOrder.pagamento?.gateway === "ASAAS"
+    isExternalPixGateway(currentOrder.pagamento?.gateway)
+    && currentOrder.pagamento.status === "EM_RECONCILIACAO"
+  ) throw new AppError("Aguarde a conciliacao do Pix antes de cancelar o pedido", 409);
+
+  if (
+    isExternalPixGateway(currentOrder.pagamento?.gateway)
     && currentOrder.pagamento.status === "AGUARDANDO_PAGAMENTO"
   ) {
     await cancelPendingAsaasOrderPayment(userId, currentOrder.id);
@@ -1278,7 +1284,8 @@ export async function payCustomerOrderProposal(userId, orderId, proposalId, data
               : []),
           ],
         },
-        gateway: useAsaasPix ? "ASAAS" : "INTERNO",
+        gateway: useAsaasPix ? selectPaymentGateway() : "INTERNO",
+        gateway_ambiente: useAsaasPix ? gatewayEnvironment() : null,
         loja_id: currentOrder.loja_id,
         metodo_principal: method,
         pago_em: paymentConfirmedAt,

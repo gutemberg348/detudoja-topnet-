@@ -10,6 +10,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { AppState, Keyboard, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { GlobalIncomingServiceAlert } from "./src/components/GlobalIncomingServiceAlert";
+import { CartFeedbackProvider, useCartFeedback } from "./src/components/CartFeedbackProvider";
 import { AppNavigator, navigationRef } from "./src/navigation/AppNavigator";
 import { heartbeatSellerServices } from "./src/services/service-chats.api";
 import {
@@ -62,7 +63,9 @@ export function App() {
     <SafeAreaProvider>
       <AuthStoreProvider>
         <CartStoreProvider>
-          <AppContent />
+          <CartFeedbackProvider>
+            <AppContent />
+          </CartFeedbackProvider>
         </CartStoreProvider>
       </AuthStoreProvider>
     </SafeAreaProvider>
@@ -152,6 +155,7 @@ const routesWithoutFloatingCart = new Set([
 
 function GlobalCartButton({ activeRouteName }) {
   const { itemCount } = useCartStore();
+  const { setCartTarget, onCartLayout } = useCartFeedback();
   const { session } = useAuthStore();
   const [keyboardVisible, setKeyboardVisible] = useState(false);
 
@@ -172,7 +176,10 @@ function GlobalCartButton({ activeRouteName }) {
   ) return null;
 
   return (
-    <Pressable
+      <Pressable
+        ref={setCartTarget}
+        collapsable={false}
+      onLayout={onCartLayout}
       accessibilityLabel={`Abrir carrinho com ${itemCount} itens`}
       onPress={() => navigationRef.isReady() && navigationRef.navigate("Cart")}
       style={({ pressed }) => [styles.globalCart, pressed && styles.globalCartPressed]}

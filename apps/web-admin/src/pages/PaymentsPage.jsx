@@ -4,12 +4,14 @@ import {
   getAdminPayments,
   refreshAdminRefund,
   refundAdminPayment,
+  approveSandboxPayment,
 } from "../services/admin.api";
 
 const statusLabels = {
   AGUARDANDO_PAGAMENTO: "Aguardando",
   CANCELADO: "Cancelado",
   EM_DISPUTA: "Estorno solicitado",
+  EM_RECONCILIACAO: "Em conciliacao",
   ESTORNADO: "Estornado",
   FALHOU: "Falhou",
   LIQUIDADO: "Liquidado",
@@ -44,6 +46,10 @@ export function PaymentsPage({ accessToken, canRefundPayments = false }) {
   const [refundReason, setRefundReason] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
+  const [sandboxEnabled, setSandboxEnabled] = useState(false);
+  const [sandboxPayment, setSandboxPayment] = useState(null);
+  const [sandboxReason, setSandboxReason] = useState("");
+  const [sandboxConfirmation, setSandboxConfirmation] = useState("");
 
   const load = useCallback(async () => {
     setError("");
@@ -51,6 +57,7 @@ export function PaymentsPage({ accessToken, canRefundPayments = false }) {
     try {
       const response = await getAdminPayments(accessToken, { search, status });
       setPayments(response.payments ?? []);
+      setSandboxEnabled(Boolean(response.sandboxApprovalEnabled));
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel carregar os pagamentos.");
     } finally {
@@ -100,10 +107,27 @@ export function PaymentsPage({ accessToken, canRefundPayments = false }) {
       await refreshAdminRefund(accessToken, payment.id);
       await load();
     } catch (requestError) {
-      setError(requestError.message ?? "Nao foi possivel consultar o Asaas.");
+      setError(requestError.message ?? "Nao foi possivel consultar o gateway.");
     } finally {
       setProcessingId(null);
     }
+  }
+
+  async function approveSandbox(event) {
+    event.preventDefault();
+    if (!sandboxPayment || processingId) return;
+    setProcessingId(sandboxPayment.id);
+    setError("");
+    try {
+      await approveSandboxPayment(accessToken, sandboxPayment.id, {
+        action: sandboxPayment.sandboxRefundable ? "refund" : "pay",
+        confirmation: sandboxConfirmation.trim(), reason: sandboxReason.trim(),
+      });
+      setSandboxPayment(null);
+      await load();
+    } catch (requestError) {
+      setError(requestError.message ?? "Nao foi possivel aprovar o teste.");
+    } finally { setProcessingId(null); }
   }
 
   return (
@@ -123,7 +147,7 @@ export function PaymentsPage({ accessToken, canRefundPayments = false }) {
         <WalletCards size={21} />
         <div>
           <strong>Regra operacional</strong>
-          <p>O estorno devolve para a origem registrada. Carteiras retornam na hora; Pix fica em processamento ate a confirmacao do Asaas. Ganhos vinculados sao revertidos junto.</p>
+          <p>O estorno devolve para a origem registrada. Carteiras retornam na hora; Pix fica em processamento ate a confirmacao do gateway. Ganhos vinculados sao revertidos junto.</p>
         </div>
       </section>
 
@@ -139,6 +163,11 @@ export function PaymentsPage({ accessToken, canRefundPayments = false }) {
           ))}
         </select>
       </div>
+
+      {sandboxEnabled ? <section className="payments-policy"><CircleAlert size={21} /><div>
+        <strong>Sandbox: aprovacao manual de testes habilitada</strong>
+        <p>A aprovacao movimenta saldos, pedidos e ganhos no sistema. Nao representa dinheiro recebido no banco. Esta base nao pode ser usada em producao.</p>
+      </div></section> : null}
 
       {error ? <div className="form-error">{error}</div> : null}
       <section className="data-section data-section--flush">
@@ -159,9 +188,14 @@ export function PaymentsPage({ accessToken, canRefundPayments = false }) {
                     <td><span className="payment-value">{money(payment.totalCents)}</span><span className="table-secondary">Saldo {money(payment.walletCents)} · Pix {money(payment.pixCents)}</span></td>
                     <td><span className={`status-badge status-badge--${statusTone(payment.status)}`}>{statusLabels[payment.status] ?? payment.status}</span></td>
                     <td>
-                      {canRefundPayments && payment.status === "EM_DISPUTA" ? (
+                      {payment.sandboxSimulated ? <span className="table-secondary">Simulado pelo admin · Sandbox</span> : null}
+                      {canRefundPayments && (payment.sandboxApprovable || payment.sandboxRefundable) ? (
+                        <button className="button button--secondary" disabled={Boolean(processingId)} type="button" onClick={() => {
+                          setSandboxPayment(payment); setSandboxReason(""); setSandboxConfirmation(""); setError("");
+                        }}>{payment.sandboxRefundable ? "Confirmar estorno de teste" : "Aprovar pagamento de teste"}</button>
+                      ) : canRefundPayments && payment.status === "EM_DISPUTA" ? (
                         <button className="button button--secondary" disabled={processingId === payment.id} onClick={() => refreshRefund(payment)} type="button">
-                          <RefreshCw className={processingId === payment.id ? "spin" : ""} size={15} /> Consultar Asaas
+                          <RefreshCw className={processingId === payment.id ? "spin" : ""} size={15} /> Consultar gateway
                         </button>
                       ) : canRefundPayments ? (
                         <button
@@ -182,6 +216,24 @@ export function PaymentsPage({ accessToken, canRefundPayments = false }) {
           </div>
         )}
       </section>
+
+      {sandboxPayment ? <div className="modal-backdrop">
+        <section className="modal refund-modal" role="dialog" aria-modal="true" aria-labelledby="sandbox-payment-title">
+          <div className="modal__header"><h2 id="sandbox-payment-title">Confirmar {sandboxPayment.sandboxRefundable ? "estorno" : "pagamento"} de teste</h2>
+            <button className="icon-button" type="button" disabled={Boolean(processingId)} onClick={() => setSandboxPayment(null)} aria-label="Fechar"><X size={19} /></button>
+          </div>
+          <div className="refund-summary"><span>Pagamento #{sandboxPayment.id} · {sandboxPayment.gateway} · Sandbox</span><strong>{money(sandboxPayment.totalCents)}</strong></div>
+          <p>O fluxo normal sera executado, incluindo saldo e atualizacoes no app. Nenhum recebimento ou estorno bancario real e comprovado por esta acao.</p>
+          <form className="refund-form" onSubmit={approveSandbox}>
+            <label>Motivo do teste<textarea required minLength={8} maxLength={500} value={sandboxReason} onChange={(event) => setSandboxReason(event.target.value)} /></label>
+            <label>Digite CONFIRMO_SANDBOX<input required value={sandboxConfirmation} onChange={(event) => setSandboxConfirmation(event.target.value)} autoComplete="off" /></label>
+            {error ? <div className="form-error">{error}</div> : null}
+            <button className="button button--primary" type="submit" disabled={Boolean(processingId) || sandboxConfirmation.trim() !== "CONFIRMO_SANDBOX" || sandboxReason.trim().length < 8}>
+              {processingId ? "Processando..." : "Confirmar simulacao"}
+            </button>
+          </form>
+        </section>
+      </div> : null}
 
       {refundPayment ? (
         <div className="modal-backdrop" onMouseDown={closeRefund}>
@@ -211,8 +263,10 @@ export function PaymentsPage({ accessToken, canRefundPayments = false }) {
             <div className="refund-destination">
               <CircleAlert size={18} />
               <p>
-                {refundPayment.refundDestination === "PIX_ORIGEM"
-                  ? "O Asaas recebera a solicitacao de devolucao para o Pix de origem. A baixa final depende da confirmacao do gateway."
+                {refundPayment.sandboxSimulated
+                  ? "Este pagamento foi aprovado manualmente no Sandbox. Solicite o estorno e depois confirme o estorno de teste no painel; nenhum dinheiro sera enviado pelo banco."
+                  : refundPayment.refundDestination === "PIX_ORIGEM"
+                  ? "O gateway recebera a solicitacao de devolucao para o Pix de origem. A baixa final depende da confirmacao do gateway."
                   : "O valor volta imediatamente para as mesmas carteiras usadas pelo cliente."}
                 {refundPayment.settlementStatus === "LIQUIDADA"
                   ? " Os recebiveis, cashback, indicacoes, rede e receita da plataforma tambem serao revertidos na mesma operacao."

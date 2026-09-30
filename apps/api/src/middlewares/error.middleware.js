@@ -1,4 +1,5 @@
 import { logError } from "../config/logger.js";
+import { safeRequestPath } from "../utils/safe-request-path.js";
 
 export function errorMiddleware(error, req, res, _next) {
   const statusCode = error.statusCode ?? 500;
@@ -6,7 +7,7 @@ export function errorMiddleware(error, req, res, _next) {
   if (statusCode >= 500) {
     logError("http.unhandled_error", error, {
       method: req.method,
-      path: req.path,
+      path: safeRequestPath(req.path),
       requestId: req.requestId ?? null,
       statusCode,
     });

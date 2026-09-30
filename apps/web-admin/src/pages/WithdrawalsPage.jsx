@@ -102,7 +102,7 @@ export function WithdrawalsPage({ accessToken, canManageWithdrawals = false }) {
         <div>
           <p className="eyebrow">TESOURARIA</p>
           <h1>Saques Pix</h1>
-          <p>Analise as reservas, envie o valor liquido e acompanhe a confirmacao do Asaas.</p>
+          <p>Analise as reservas, envie o valor liquido e acompanhe a confirmacao do gateway.</p>
         </div>
         <button className="button button--secondary" disabled={isLoading} onClick={load} type="button">
           <RefreshCw className={isLoading ? "spin" : ""} size={16} /> Atualizar

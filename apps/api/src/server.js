@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { env } from "./config/env.js";
 import { prisma } from "./config/prisma.js";
+import { assertSandboxLedgerIsolation } from "./modules/payments/sandbox-approval.js";
 import { closeRedis, initializeRedis } from "./config/redis.js";
 import { log, logError } from "./config/logger.js";
 import {
@@ -80,6 +81,7 @@ async function shutdown(signal) {
 async function startServer() {
   recordComponentStarting("api");
   await prisma.$connect();
+  await assertSandboxLedgerIsolation(prisma);
   await initializeRedis();
 
   // The HTTP middleware is loaded after Redis so rate limiting is shared by all API instances.

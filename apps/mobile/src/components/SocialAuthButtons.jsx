@@ -5,7 +5,9 @@ import * as WebBrowser from "expo-web-browser";
 import { useEffect, useRef, useState } from "react";
 import { Platform, StyleSheet, Text, View } from "react-native";
 import { ApiError } from "../services/api";
+import { signInWithNativeGoogle } from "../services/google-sign-in";
 import { useAuthStore } from "../stores/useAuthStore";
+import { googleErrorMessage } from "../utils/google-auth";
 import { colors, spacing, typography } from "../utils/theme";
 import { AppButton } from "./AppButton";
 
@@ -31,18 +33,19 @@ export function SocialAuthButtons({ action = "Entrar" }) {
   const [message, setMessage] = useState("");
   const [isAppleAvailable, setIsAppleAvailable] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const handledGoogleToken = useRef(null);
+  const loginInProgress = useRef(false);
   const currentGoogleClientId = Platform.select({
     android: googleClientIds.android,
     ios: googleClientIds.ios,
     web: googleClientIds.web,
     default: googleClientIds.web,
   }) ?? "";
-  const [googleRequest, googleResponse, promptGoogle] = Google.useIdTokenAuthRequest({
+  const [googleRequest, , promptGoogle] = Google.useIdTokenAuthRequest({
     androidClientId: googleClientIds.android || "google-client-id-pendente",
     iosClientId: googleClientIds.ios || "google-client-id-pendente",
     redirectUri: googleRedirectUri,
     selectAccount: true,
+    shouldAutoExchangeCode: false,
     webClientId: googleClientIds.web || "google-client-id-pendente",
   });
 
@@ -76,38 +79,48 @@ export function SocialAuthButtons({ action = "Entrar" }) {
     }
   }
 
-  useEffect(() => {
-    if (googleResponse?.type !== "success") return;
-
-    const idToken = googleResponse.params?.id_token
-      ?? googleResponse.authentication?.idToken;
-
-    if (!idToken || handledGoogleToken.current === idToken) return;
-    handledGoogleToken.current = idToken;
-    finishSocialLogin({ idToken, provider: "GOOGLE" });
-  }, [googleResponse]);
-
   async function handleGooglePress() {
+    if (loginInProgress.current) return;
     setMessage("");
 
-    if (!currentGoogleClientId) {
+    if (Platform.OS === "web" && !currentGoogleClientId) {
       setMessage("Configure os IDs OAuth do Google para liberar este acesso.");
       return;
     }
 
-    if (!googleRequest) {
+    if (Platform.OS === "web" && !googleRequest) {
       setMessage("Preparando o login Google. Tente novamente em alguns segundos.");
       return;
     }
 
+    loginInProgress.current = true;
+    setIsSubmitting(true);
     try {
-      await promptGoogle();
-    } catch {
-      setMessage("Nao foi possivel abrir o login Google.");
+      let idToken;
+      if (Platform.OS !== "web") {
+        idToken = await signInWithNativeGoogle();
+      } else {
+        const result = await promptGoogle();
+        if (["cancel", "dismiss"].includes(result.type)) return;
+        if (result.type !== "success") {
+          throw Object.assign(new Error("Google authorization failed"), {
+            code: result.error?.code ?? result.params?.error,
+          });
+        }
+        idToken = result.params?.id_token ?? result.authentication?.idToken;
+        if (!idToken) throw Object.assign(new Error("Missing identity"), { code: "GOOGLE_TOKEN_MISSING" });
+      }
+      if (idToken) await socialLogin({ idToken, provider: "GOOGLE" });
+    } catch (error) {
+      setMessage(error instanceof ApiError ? error.message : googleErrorMessage(error));
+    } finally {
+      loginInProgress.current = false;
+      setIsSubmitting(false);
     }
   }
 
   async function handleApplePress() {
+    if (loginInProgress.current) return;
     setMessage("");
 
     if (Platform.OS !== "ios" || !isAppleAvailable) {
@@ -115,6 +128,8 @@ export function SocialAuthButtons({ action = "Entrar" }) {
       return;
     }
 
+    loginInProgress.current = true;
+    setIsSubmitting(true);
     try {
       const credential = await AppleAuthentication.signInAsync({
         requestedScopes: [
@@ -141,6 +156,9 @@ export function SocialAuthButtons({ action = "Entrar" }) {
       if (error?.code !== "ERR_REQUEST_CANCELED") {
         setMessage("Nao foi possivel concluir o login Apple.");
       }
+    } finally {
+      loginInProgress.current = false;
+      setIsSubmitting(false);
     }
   }
 

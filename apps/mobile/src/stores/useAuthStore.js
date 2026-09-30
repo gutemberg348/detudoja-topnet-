@@ -21,6 +21,7 @@ import {
 } from "../services/auth.api";
 import { disconnectRealtimeSocket } from "../services/realtime";
 import { unregisterExpoPushToken } from "../services/notifications.api";
+import { signOutNativeGoogle } from "../services/google-sign-in";
 
 const accessTokenKey = "detudoja.mobile.accessToken";
 const refreshTokenKey = "detudoja.mobile.refreshToken";
@@ -308,6 +309,7 @@ export function AuthStoreProvider({ children }) {
     await clearTokens();
     sessionRef.current = null;
     setSession(null);
+    await signOutNativeGoogle();
   }
 
   const updateSessionUser = useCallback((user) => {

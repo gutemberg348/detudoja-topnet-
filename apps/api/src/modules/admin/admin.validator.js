@@ -325,3 +325,8 @@ export const updateAdminStoreSchema = z
     whatsapp: z.string().trim().max(30).optional().or(z.literal("")),
   })
   .refine((data) => Object.keys(data).length > 0, "Informe ao menos um campo");
+export const sandboxPaymentApprovalSchema = z.object({
+  action: z.enum(["pay", "refund"]),
+  confirmation: z.literal("CONFIRMO_SANDBOX"),
+  reason: z.string().trim().min(8).max(500),
+}).strict();

@@ -387,6 +387,7 @@ enum GatewayPagamento {
   PAGARME
   MERCADO_PAGO
   ASAAS
+  SICREDI
   OUTRO
 }
 
@@ -1722,6 +1723,8 @@ model Pagamento {
   status                        StatusPagamento  @default(PENDENTE)
   gateway                       GatewayPagamento @default(INTERNO)
   gateway_pagamento_id          String?          @db.VarChar(255)
+  gateway_ambiente              String?          @db.VarChar(20)
+  gateway_dados_json            Json?
   qr_code                       String?
   copia_cola_pix                String?
   expira_em                     DateTime?        @db.Timestamptz(3)
@@ -2169,6 +2172,7 @@ model Saque {
   documento_titular      String?          @db.VarChar(18)
   gateway                GatewayPagamento @default(ASAAS)
   gateway_saque_id       String?          @unique @db.VarChar(255)
+  gateway_ambiente       String?          @db.VarChar(20)
   tentativas             Int              @default(0)
   aprovado_por_admin_id  Int?
   recusado_por_admin_id  Int?
@@ -2232,6 +2236,7 @@ model RepassePix {
   status                   StatusRepassePix @default(PENDENTE)
   gateway                  GatewayPagamento @default(ASAAS)
   gateway_transferencia_id String?          @unique @db.VarChar(255)
+  gateway_ambiente         String?          @db.VarChar(20)
   referencia_externa       String           @unique @db.VarChar(120)
   tentativas               Int              @default(0)
   motivo_falha             String?

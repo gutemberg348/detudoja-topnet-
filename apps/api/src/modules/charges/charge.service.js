@@ -34,7 +34,7 @@ import {
   reserveImmediatePixPayout,
   submitPendingPayout,
 } from "../payouts/payout.service.js";
-import { isAsaasEnabled } from "../payments/asaas.client.js";
+import { isPixGatewayEnabled as isAsaasEnabled, isExternalPixGateway, selectPaymentGateway, gatewayEnvironment } from "../payments/payment-gateway.js";
 import { storePermissionAccessWhere } from "../store-staff/store-permissions.js";
 
 const QR_EXPIRATION_MINUTES = 30;
@@ -305,7 +305,7 @@ function serializePermanentStore(store) {
 }
 
 function serializePendingGatewayPayment(payment) {
-  if (!payment || payment.gateway !== "ASAAS") return null;
+  if (!payment || !isExternalPixGateway(payment.gateway)) return null;
 
   return {
     expiresAt: payment.expira_em?.toISOString() ?? null,
@@ -1069,7 +1069,8 @@ export async function payCharge(userId, rawCode, {
     }
     const payment = await repository.createPayment({
       data: {
-        gateway: pixCents > 0 ? "ASAAS" : "INTERNO",
+        gateway: pixCents > 0 ? selectPaymentGateway() : "INTERNO",
+        gateway_ambiente: pixCents > 0 ? gatewayEnvironment() : null,
         loja_id: charge.loja_id,
         metodo_principal: pixCents > 0
           ? allocations.length > 0 ? "MISTO" : "PIX"
