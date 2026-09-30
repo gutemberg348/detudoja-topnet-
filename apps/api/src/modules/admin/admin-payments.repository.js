@@ -96,7 +96,12 @@ export function createAdminPaymentsRepository(database = prisma) {
       return database.pagamento.findUnique({
         include: {
           ...paymentInclude,
+          loja: { select: { id: true, nome: true, lojista: { select: { usuario: { select: { id: true, nome: true, email: true } } } } } },
+          vendedor: { select: { usuario: { select: { id: true, nome: true, email: true } } } },
           itens: { orderBy: { id: "asc" } },
+          eventos_gateway: { orderBy: { criado_em: "asc" }, select: {
+            id: true, tipo_evento: true, criado_em: true, processado_em: true,
+          } },
           deposito_carteira: { include: { carteira: { include: { tipo_carteira: true } } } },
           eventos_financeiros: { orderBy: { criado_em: "asc" }, select: {
             id: true, tipo_evento: true, descricao: true, criado_em: true,
@@ -124,7 +129,15 @@ export function createAdminPaymentsRepository(database = prisma) {
           carteira: { include: { tipo_carteira: { select: { nome: true } } } },
         },
         orderBy: { criado_em: "asc" },
-        take: 100,
+      });
+    },
+
+    findPaymentAudits(paymentId) {
+      return database.auditoriaAdministrativa.findMany({
+        where: { dados_json: { path: ["paymentId"], equals: paymentId } },
+        select: { id: true, acao: true, criado_em: true, dados_json: true,
+          administrador: { select: { id: true, nome: true } } },
+        orderBy: { criado_em: "asc" },
       });
     },
 

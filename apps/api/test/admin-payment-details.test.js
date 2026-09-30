@@ -28,13 +28,15 @@ function paymentRow() {
     valor_pago_saldo_centavos: 2000n,
     usuario_pagador: { id: 1, nome: "Cliente", email: "cliente@example.test" },
     usuario_pagador_id: 1,
-    loja: { id: 2, nome: "Loja" },
+    loja: { id: 2, nome: "Loja", lojista: { usuario: { id: 9, nome: "Lojista", email: "loja@example.test" } } },
     pedido_loja: { id: 3, codigo: "PED-3", status: "RECEBIDO" },
     itens: [{ id: 4, nome_item: "Produto", quantidade: 1,
       valor_unitario_centavos: 10000n, valor_total_centavos: 10000n }],
     composicoes: [{ id: 5, tipo_origem: "SALDO", valor_centavos: 2000n,
       status: "CONFIRMADO", carteira: { tipo_carteira: { nome: "Saldo Pix" } } }],
     deposito_carteira: null,
+    eventos_gateway: [{ id: 12, tipo_evento: "PAYMENT_RECEIVED", criado_em: new Date("2026-09-30T10:03:00Z"),
+      processado_em: new Date("2026-09-30T10:03:01Z"), payload_json: { secret: "not-for-the-panel" } }],
     eventos_financeiros: [{ id: 6, tipo_evento: "PAGAMENTO_APROVADO", descricao: "Confirmado",
       criado_em: new Date("2026-09-30T10:03:00Z") }],
     transacao_comercial: {
@@ -43,6 +45,7 @@ function paymentRow() {
       taxa_processamento_centavos: 100n, cashback_prioritario_centavos: 300n,
       valor_liquido_lojista_centavos: 8900n, valor_pool_recompensas_centavos: 200n,
       valor_empresa_centavos: 500n,
+      base_comissao_centavos: 9500n, valor_entrega_lojista_centavos: 500n, percentual_taxa_plataforma: "10.0000",
       recebiveis: [{ id: 8, tipo_recebedor: "LOJISTA", status: "BLOQUEADO",
         valor_bruto_centavos: 9000n, valor_liquido_centavos: 8900n,
         disponivel_em: null, pago_em: null,
@@ -58,6 +61,10 @@ function paymentRow() {
 test("detalhe financeiro exibe destinatarios e centavos sem publicar dados brutos do gateway", async () => {
   const original = adminPaymentsRepository.findPaymentDetails;
   const originalWalletEntries = adminPaymentsRepository.findWalletEntriesForTransaction;
+  const originalAudits = adminPaymentsRepository.findPaymentAudits;
+  adminPaymentsRepository.findPaymentAudits = async () => [{ id: 21, acao: "PAGAMENTO_SANDBOX_SIMULADO",
+    criado_em: new Date("2026-09-30T10:03:00Z"), administrador: { id: 7, nome: "Financeiro" },
+    dados_json: { reason: "Teste completo", event: "PAYMENT_RECEIVED", secret: "not-for-the-panel" } }];
   adminPaymentsRepository.findPaymentDetails = async () => paymentRow();
   adminPaymentsRepository.findWalletEntriesForTransaction = async () => [{
     id: 11, origem: "CASHBACK", tipo_lancamento: "CREDITO", status: "PENDENTE",
@@ -69,16 +76,25 @@ test("detalhe financeiro exibe destinatarios e centavos sem publicar dados bruto
     const details = await getAdminPaymentDetails(42);
     assert.equal(details.payment.gateway, "ASAAS");
     assert.equal(details.payment.totalCents, 10000);
+    assert.equal(details.recipient.id, 9);
+    assert.equal(details.adminEvents[0].actor.nome, "Financeiro");
+    assert.equal(details.adminEvents[0].reason, "Teste completo");
+    assert.equal(details.recipient.email, "loja@example.test");
+    assert.equal(details.settlement.commissionBaseCents, 9500);
+    assert.equal(details.settlement.deliveryCents, 500);
+    assert.equal(details.settlement.feePercent, 10);
+    assert.equal(details.gatewayEvents[0].processedAt, "2026-09-30T10:03:01.000Z");
     assert.equal(details.sources[0].walletType, "Saldo Pix");
     assert.equal(details.settlement.receivables[0].recipient.nome, "Lojista");
     assert.equal(details.settlement.rewards[0].recipient.nome, "Cliente");
     assert.equal(details.settlement.transfer, null);
     assert.equal(details.walletEntries[0].recipient.nome, "Cliente");
     assert.equal(details.walletEntries[0].amountCents, 300);
-    assert.doesNotMatch(JSON.stringify(details), /gateway_dados_json|copia_cola_pix|qr_code/);
+    assert.doesNotMatch(JSON.stringify(details), /gateway_dados_json|copia_cola_pix|qr_code|not-for-the-panel|payload_json/);
   } finally {
     adminPaymentsRepository.findPaymentDetails = original;
     adminPaymentsRepository.findWalletEntriesForTransaction = originalWalletEntries;
+    adminPaymentsRepository.findPaymentAudits = originalAudits;
   }
 });
 

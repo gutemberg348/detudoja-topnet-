@@ -11,18 +11,26 @@ for (const capability of ["receive", "transfer"]) {
   let selected = "INDISPONIVEL";
   try { selected = selectPaymentGateway(capability); } catch { process.exitCode = 1; }
   console.log("[gateways]", { fluxo: capability === "receive" ? "checkout/QR/depositos" : "saques/repasses", selected, configured: available });
-  if (capability === "receive" && !available.SICREDI) {
-    const required = ["PAYMENTS_ENVIRONMENT", "SICREDI_PIX_ENV", "SICREDI_PIX_API_URL",
-      "SICREDI_PIX_AUTH_URL", "SICREDI_PIX_CLIENT_ID", "SICREDI_PIX_CLIENT_SECRET",
-      "SICREDI_PIX_RECEIVING_KEY", "SICREDI_PIX_CERT_PATH", "SICREDI_PIX_KEY_PATH"];
+  if (!available.SICREDI) {
+    const transfer = capability === "transfer";
+    const config = transfer ? sicrediMultipagConfigFromEnv() : sicrediPixConfigFromEnv();
+    const required = transfer
+      ? ["PAYMENTS_ENVIRONMENT", "SICREDI_MULTIPAG_CLIENT_ID", "SICREDI_MULTIPAG_CLIENT_SECRET",
+        "SICREDI_MULTIPAG_CONTA", "SICREDI_MULTIPAG_COOPERATIVA", "SICREDI_MULTIPAG_DOCUMENTO"]
+      : ["PAYMENTS_ENVIRONMENT", "SICREDI_PIX_ENV", "SICREDI_PIX_API_URL",
+        "SICREDI_PIX_AUTH_URL", "SICREDI_PIX_CLIENT_ID", "SICREDI_PIX_CLIENT_SECRET",
+        "SICREDI_PIX_RECEIVING_KEY"];
     const missing = required.filter((key) => !String(process.env[key] ?? "").trim());
-    const config = sicrediPixConfigFromEnv();
-    console.log("[gateways] Pix recebimento Sicredi indisponivel:", {
+    if (!config.mtls.certPath) missing.push(transfer
+      ? "SICREDI_MULTIPAG_CERT_PATH" : "SICREDI_PIX_CERT_PATH ou SICREDI_MULTIPAG_CERT_PATH");
+    if (!config.mtls.keyPath) missing.push(transfer
+      ? "SICREDI_MULTIPAG_KEY_PATH" : "SICREDI_PIX_KEY_PATH ou SICREDI_MULTIPAG_KEY_PATH");
+    console.log(`[gateways] Sicredi ${transfer ? "Multipag transferencias" : "Pix recebimento"} indisponivel:`, {
       missingVariables: missing,
-      pixEnabled: process.env.SICREDI_PIX_ENABLED === "true",
+      enabled: transfer ? config.transferEnabled : process.env.SICREDI_PIX_ENABLED === "true",
       sandboxAppEnabled: gatewayEnvironment() !== "sandbox" || process.env.SICREDI_APP_SANDBOX_ENABLED === "true",
-      sameEnvironment: process.env.SICREDI_PIX_ENV === gatewayEnvironment(),
-      validEnvironmentUrls: sicrediEndpointsMatchEnvironment(config, gatewayEnvironment(), "receive"),
+      sameEnvironment: (transfer ? process.env.SICREDI_MULTIPAG_ENV || "sandbox" : process.env.SICREDI_PIX_ENV) === gatewayEnvironment(),
+      validEnvironmentUrls: sicrediEndpointsMatchEnvironment(config, gatewayEnvironment(), capability),
     });
   }
   if (selected === "SICREDI") {

@@ -104,7 +104,10 @@ export async function getAdminPaymentDetails(paymentId) {
   const payment = await adminPaymentsRepository.findPaymentDetails(id);
   if (!payment) throw new AppError("Pagamento nao encontrado", 404);
   const settlement = payment.transacao_comercial;
-  const walletEntries = await adminPaymentsRepository.findWalletEntriesForTransaction(settlement?.id);
+  const [walletEntries, audits] = await Promise.all([
+    adminPaymentsRepository.findWalletEntriesForTransaction(settlement?.id),
+    adminPaymentsRepository.findPaymentAudits(id),
+  ]);
   return {
     payment: {
       ...serializePayment(payment),
@@ -112,7 +115,10 @@ export async function getAdminPaymentDetails(paymentId) {
       expiresAt: asIso(payment.expira_em),
       canceledAt: asIso(payment.cancelado_em),
       refundedAt: asIso(payment.estornado_em),
+      cardCents: cents(payment.valor_pago_cartao_centavos),
     },
+    recipient: payment.deposito_carteira ? payment.usuario_pagador
+      : payment.loja?.lojista?.usuario ?? payment.vendedor?.usuario ?? null,
     items: payment.itens.map((item) => ({
       id: item.id, name: item.nome_item, quantity: item.quantidade,
       unitCents: cents(item.valor_unitario_centavos), totalCents: cents(item.valor_total_centavos),
@@ -126,6 +132,7 @@ export async function getAdminPaymentDetails(paymentId) {
       walletType: payment.deposito_carteira.carteira?.tipo_carteira?.nome ?? null,
       creditedCents: cents(payment.deposito_carteira.valor_liquido_centavos),
       creditedAt: asIso(payment.deposito_carteira.creditado_em),
+      feeCents: cents(payment.deposito_carteira.taxa_processamento_centavos),
     } : null,
     settlement: settlement ? {
       id: settlement.id, status: settlement.status,
@@ -137,20 +144,26 @@ export async function getAdminPaymentDetails(paymentId) {
       sellerNetCents: cents(settlement.valor_liquido_lojista_centavos),
       rewardsPoolCents: cents(settlement.valor_pool_recompensas_centavos),
       companyCents: cents(settlement.valor_empresa_centavos),
+      commissionBaseCents: cents(settlement.base_comissao_centavos),
+      deliveryCents: cents(settlement.valor_entrega_lojista_centavos),
+      feePercent: Number(settlement.percentual_taxa_plataforma ?? 0),
       receivables: settlement.recebiveis.map((item) => ({
         id: item.id, type: item.tipo_recebedor, status: item.status,
         grossCents: cents(item.valor_bruto_centavos), netCents: cents(item.valor_liquido_centavos),
         availableAt: asIso(item.disponivel_em), paidAt: asIso(item.pago_em),
+        blockedAt: asIso(item.bloqueado_em), blockReason: item.motivo_bloqueio,
         recipient: item.usuario_recebedor,
       })),
       rewards: settlement.recompensas.map((item) => ({
         id: item.id, type: item.tipo_recompensa, status: item.status,
         amountCents: cents(item.valor_centavos), recipient: item.usuario_beneficiado,
         releasedAt: asIso(item.liberado_em), reversedAt: asIso(item.estornado_em),
+        description: item.motivo, createdAt: asIso(item.criado_em),
       })),
       platformEntries: settlement.lancamentos_plataforma.map((item) => ({
         id: item.id, account: item.conta_plataforma?.nome, accountType: item.conta_plataforma?.tipo_conta,
         type: item.tipo_lancamento, status: item.status, amountCents: cents(item.valor_centavos),
+        description: item.descricao, at: asIso(item.criado_em),
       })),
       transfer: settlement.repasse_pix ? {
         id: settlement.repasse_pix.id, gateway: settlement.repasse_pix.gateway,
@@ -162,11 +175,20 @@ export async function getAdminPaymentDetails(paymentId) {
     events: payment.eventos_financeiros.map((item) => ({
       id: item.id, type: item.tipo_evento, description: item.descricao, at: asIso(item.criado_em),
     })),
+    gatewayEvents: (payment.eventos_gateway ?? []).map((item) => ({
+      id: item.id, type: item.tipo_evento, at: asIso(item.criado_em), processedAt: asIso(item.processado_em),
+    })),
+    adminEvents: audits.map((item) => ({
+      id: item.id, type: item.acao, at: asIso(item.criado_em), actor: item.administrador,
+      reason: typeof item.dados_json?.reason === "string" ? item.dados_json.reason : null,
+      event: typeof item.dados_json?.event === "string" ? item.dados_json.event : null,
+    })),
     walletEntries: walletEntries.map((item) => ({
       id: item.id, origin: item.origem, type: item.tipo_lancamento, status: item.status,
       amountCents: cents(item.valor_centavos), recipient: item.usuario,
       walletType: item.carteira?.tipo_carteira?.nome ?? null,
       description: item.descricao, at: asIso(item.criado_em),
+      releasedAt: asIso(item.liberado_em), reversedAt: asIso(item.estornado_em),
     })),
   };
 }
@@ -229,6 +251,8 @@ export async function listAdminPayments(query = {}) {
     ...(search
       ? {
           OR: [
+            ...(/^#?\d+$/.test(search) && Number(search.replace("#", "")) <= 2147483647
+              ? [{ id: Number(search.replace("#", "")) }] : []),
             { pedido_loja: { codigo: { contains: search, mode: "insensitive" } } },
             { usuario_pagador: { email: { contains: search, mode: "insensitive" } } },
             { usuario_pagador: { nome: { contains: search, mode: "insensitive" } } },
