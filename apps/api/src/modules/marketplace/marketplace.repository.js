@@ -224,7 +224,7 @@ export const marketplaceRepository = {
     return { categories, products, serviceTypes, stores };
   },
 
-  async querySearchMatches(patterns) {
+  async querySearchMatches(patterns, servicePatterns = patterns) {
     const [categories, stores, products, serviceTypes] = await Promise.all([
       prisma.$queryRawUnsafe(
         `SELECT id FROM categorias_loja
@@ -273,7 +273,7 @@ export const marketplaceRepository = {
            AND slug <> 'entregador'
            AND (${normalizedSql("nome")} LIKE ANY($1::text[])
              OR ${normalizedSql("descricao")} LIKE ANY($1::text[]))`,
-        patterns,
+        servicePatterns,
       ),
     ]);
 

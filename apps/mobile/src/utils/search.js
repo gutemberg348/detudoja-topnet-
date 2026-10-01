@@ -20,6 +20,13 @@ export function getSearchTerms(value = "", { includeWords = true } = {}) {
   const singular = words.map(singularizeSearchWord).join(" ");
   const terms = new Set([normalized, singular]);
 
+  if (/\b(?:moto taxi|mototaxi|taxi|taxista)\b/.test(normalized)) {
+    terms.add("mototaxi");
+    terms.add("moto taxi");
+    terms.add("motoboy");
+  }
+  if (/\bmoto boy\b/.test(normalized)) terms.add("motoboy");
+
   if (includeWords && words.length > 1) {
     words
       .filter((word) => word.length >= 3 && !searchStopWords.has(word))
@@ -36,6 +43,18 @@ export function matchesSearchText(value, search) {
   const normalizedValue = normalizeSearchText(value);
 
   return getSearchTerms(search).some((term) => normalizedValue.includes(term));
+}
+
+export function serviceSearchScore(service, search) {
+  const label = normalizeSearchText(service.name);
+  const description = normalizeSearchText(service.description);
+  const query = normalizeSearchText(search);
+  if (label === query || label.replaceAll(" ", "") === query.replaceAll(" ", "")) return 0;
+  if (label.startsWith(query)) return 1;
+  if (label.includes(query)) return 2;
+  if (description.includes(query)) return 3;
+  if (getSearchTerms(query).some((term) => label.includes(term))) return 4;
+  return 5;
 }
 
 const searchStopWords = new Set([

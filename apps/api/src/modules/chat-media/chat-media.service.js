@@ -24,6 +24,23 @@ const acceptedAudio = new Set([
   "audio/x-m4a",
 ]);
 
+// Android's MPEG-4 recorder can use the generic `isom` brand in an .m4a.
+// file-type then reports video/mp4 even when the container has only audio.
+export function isAudioOnlyMp4(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 20 || buffer.toString("ascii", 4, 8) !== "ftyp") return false;
+  let hasAudio = false;
+  for (let index = 4; index + 16 <= buffer.length; index += 1) {
+    if (buffer.toString("ascii", index, index + 4) !== "hdlr") continue;
+    const boxStart = index - 4;
+    const boxSize = buffer.readUInt32BE(boxStart);
+    if (boxSize < 20 || boxStart + boxSize > buffer.length) continue;
+    const handler = buffer.toString("ascii", index + 12, index + 16);
+    if (handler === "vide") return false;
+    if (handler === "soun") hasAudio = true;
+  }
+  return hasAudio;
+}
+
 function normalizedKind(value) {
   const kind = String(value ?? "").trim().toUpperCase();
   return attachmentKinds.has(kind) ? kind : null;
@@ -93,7 +110,9 @@ export async function savePrivateChatAttachment(file, data, { conversationId, sc
 
   if (!file?.buffer) throw new AppError("Selecione o arquivo que deseja enviar", 400);
   const detected = await fileTypeFromBuffer(file.buffer);
-  const mimeType = detected?.mime;
+  const mimeType = type === "AUDIO" && detected?.mime === "video/mp4" && isAudioOnlyMp4(file.buffer)
+    ? "audio/mp4"
+    : detected?.mime;
   const accepted = type === "IMAGE" ? acceptedImages : type === "VIDEO" ? acceptedVideos : acceptedAudio;
   if (!mimeType || !accepted.has(mimeType)) throw new AppError("Formato de arquivo nao aceito neste chat", 400);
 
@@ -104,7 +123,7 @@ export async function savePrivateChatAttachment(file, data, { conversationId, sc
   const targetDirectory = path.resolve(chatPrivateRoot, relativeDirectory);
   await mkdir(targetDirectory, { recursive: true });
 
-  const extension = type === "IMAGE" ? "webp" : detected.ext;
+  const extension = type === "IMAGE" ? "webp" : type === "AUDIO" && mimeType === "audio/mp4" ? "m4a" : detected.ext;
   const filename = `${randomUUID()}.${extension}`;
   const storageKey = path.join(relativeDirectory, filename);
   const absolutePath = safeStoragePath(storageKey);

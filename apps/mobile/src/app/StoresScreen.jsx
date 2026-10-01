@@ -28,7 +28,7 @@ import { getServiceTypes } from "../services/service-chats.api";
 import { getCurrentUserAddresses, updateCurrentUser } from "../services/users.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { resolveMediaUrl } from "../utils/media";
-import { matchesSearchText, normalizeSearchText } from "../utils/search";
+import { matchesSearchText, normalizeSearchText, serviceSearchScore } from "../utils/search";
 import { serviceIconName } from "../utils/service-icons";
 import {
   colors,
@@ -104,10 +104,12 @@ export function StoresScreen({ navigation, route }) {
       return [];
     }
 
-    return serviceTypes.filter((serviceType) => (
-      matchesSearchText(serviceType.name, term)
-      || matchesSearchText(serviceType.description, term)
-    ));
+    return serviceTypes
+      .filter((serviceType) => (
+        matchesSearchText(serviceType.name, term)
+        || matchesSearchText(serviceType.description, term)
+      ))
+      .sort((left, right) => serviceSearchScore(left, term) - serviceSearchScore(right, term));
   }, [resultMode, search, serviceTypes]);
   const showServiceResults = hasSearch || resultMode === "services";
   const showStoreResults = hasSearch || resultMode === "stores";

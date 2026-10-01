@@ -11,10 +11,10 @@
     "packages/*"
   ],
   "overrides": {
-    "expo": "57.0.23",
-    "expo-image-picker": "57.0.18",
-    "expo-location": "57.0.18",
-    "expo-notifications": "57.0.19",
+    "expo": "57.0.26",
+    "expo-image-picker": "57.0.20",
+    "expo-location": "57.0.20",
+    "expo-notifications": "57.0.21",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native-safe-area-context": "5.7.0",
@@ -25,6 +25,7 @@
   "scripts": {
     "dev:api": "npm run dev -w apps/api",
     "dev:mobile": "npm run start -w apps/mobile",
+    "build:android:preview": "npm run build:android:preview -w apps/mobile",
     "dev:web": "npm run dev -w apps/web-admin",
     "build:web": "npm run build -w apps/web-admin",
     "start:api": "npm run start -w apps/api",

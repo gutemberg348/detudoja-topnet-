@@ -4,7 +4,8 @@ import { File, Paths } from "expo-file-system";
 import * as MediaLibrary from "expo-media-library";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Animated, Image, Linking, Modal, Platform, Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Animated, Image, Linking, Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { resolveMediaUrl } from "../utils/media";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
 
@@ -151,14 +152,14 @@ function ImageAttachment({ accessToken, attachment }) {
         <Image resizeMode="cover" source={media.source} style={styles.image} />
         <View style={styles.imageExpand}><Ionicons color={colors.card} name="expand-outline" size={16} /></View>
       </Pressable>
-      <Modal animationType="fade" onRequestClose={() => setOpen(false)} statusBarTranslucent transparent visible={open}>
+      <Modal animationType="fade" onRequestClose={() => setOpen(false)} transparent visible={open}>
         <SafeAreaView style={styles.viewer}>
           <View style={styles.viewerHeader}>
-            <Pressable accessibilityLabel="Fechar foto" onPress={() => setOpen(false)} style={styles.viewerAction}>
+            <Pressable accessibilityLabel="Fechar foto" accessibilityRole="button" hitSlop={10} onPress={() => setOpen(false)} style={styles.viewerAction}>
               <Ionicons color={colors.card} name="close" size={26} />
             </Pressable>
             <Text style={styles.viewerTitle}>Foto da conversa</Text>
-            <Pressable accessibilityLabel="Baixar foto" disabled={saving} onPress={saveImage} style={styles.viewerAction}>
+            <Pressable accessibilityLabel="Baixar foto" accessibilityRole="button" disabled={saving} hitSlop={10} onPress={saveImage} style={styles.viewerAction}>
               {saving ? <ActivityIndicator color={colors.card} size="small" /> : <Ionicons color={colors.card} name="download-outline" size={23} />}
             </Pressable>
           </View>

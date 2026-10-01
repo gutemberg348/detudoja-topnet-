@@ -1,10 +1,12 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder, useAudioRecorderState } from "expo-audio";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Animated, BackHandler, Image, Keyboard, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Animated, BackHandler, Image, Keyboard, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useReducedMotion } from "../hooks/useReducedMotion";
 import { colors, fonts, radius, spacing, typography } from "../utils/theme";
 
@@ -52,6 +54,20 @@ function formatRecordingTime(durationMillis) {
   return `${minutes}:${String(totalSeconds % 60).padStart(2, "0")}`;
 }
 
+async function waitForPosition(positionPromise) {
+  let timeout;
+  try {
+    return await Promise.race([
+      positionPromise,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("A localizacao demorou. Ative o GPS e tente novamente.")), 20_000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export function ChatComposer({
   accessory = null, attachmentsEnabled = true, disabled = false, draft,
   extraActions = [], maxLength = 2000, onAttachmentError, onBlur,
@@ -69,6 +85,11 @@ export function ChatComposer({
   const [preparing, setPreparing] = useState(false);
   const [recordingVisible, setRecordingVisible] = useState(false);
   const [uploadingAudio, setUploadingAudio] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraBusy, setCameraBusy] = useState(false);
+  const [locationLoading, setLocationLoading] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const cameraRef = useRef(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState = useAudioRecorderState(recorder, 250);
   const cancelRecordingRef = useRef(false);
@@ -195,37 +216,45 @@ export function ChatComposer({
   }
 
   async function capturePhoto() {
-    setPreparing(true);
     try {
-      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      const permission = cameraPermission?.granted ? cameraPermission : await requestCameraPermission();
       if (!permission.granted) throw new Error("Permita o uso da camera para tirar uma foto no chat.");
-      const result = await ImagePicker.launchCameraAsync({
-        allowsEditing: false,
-        cameraType: ImagePicker.CameraType.back,
-        mediaTypes: ["images"],
-        quality: 0.86,
-      });
-      if (!result.canceled && result.assets?.[0]) {
-        await useSelectedMedia(result.assets[0], "IMAGE");
-      }
+      setActionsOpen(false);
+      setCameraOpen(true);
     } catch (error) {
       reportError(error, "Nao foi possivel abrir a camera.");
+    }
+  }
+
+  async function takePhoto() {
+    if (cameraBusy || !cameraRef.current) return;
+    setCameraBusy(true);
+    try {
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.68, skipProcessing: false });
+      if (!photo?.uri) throw new Error("Nao foi possivel salvar a foto. Tente novamente.");
+      await useSelectedMedia(photo, "IMAGE");
+      setCameraOpen(false);
+    } catch (error) {
+      reportError(error, "Nao foi possivel tirar a foto.");
     } finally {
-      setPreparing(false);
+      setCameraBusy(false);
     }
   }
 
   async function selectLocation() {
     setPreparing(true);
+    setLocationLoading(true);
+    setActionsOpen(false);
     try {
       const permission = await Location.requestForegroundPermissionsAsync();
       if (!permission.granted) throw new Error("Permita o uso da localizacao para compartilhar onde voce esta.");
-      const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const cached = await Location.getLastKnownPositionAsync({ maxAge: 60_000, requiredAccuracy: 100 });
+      const current = cached ?? await waitForPosition(Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
       setAttachment({ label: "Ponto GPS atual", latitude: current.coords.latitude, longitude: current.coords.longitude, type: "LOCATION" });
-      setActionsOpen(false);
     } catch (error) {
       reportError(error, "Nao foi possivel obter sua localizacao.");
     } finally {
+      setLocationLoading(false);
       setPreparing(false);
     }
   }
@@ -375,6 +404,33 @@ export function ChatComposer({
   return (
     <View style={[styles.composer, style, keyboardVisible && styles.composerWithKeyboard]}>
       {accessory}
+      {locationLoading ? (
+        <View accessibilityLiveRegion="polite" style={styles.locationStatus}>
+          <ActivityIndicator color={colors.primaryDark} size="small" />
+          <View style={styles.locationStatusCopy}>
+            <Text style={styles.locationStatusTitle}>Buscando sua localizacao...</Text>
+            <Text style={styles.locationStatusHint}>Aguarde enquanto encontramos seu ponto no mapa.</Text>
+          </View>
+        </View>
+      ) : null}
+      <Modal animationType="slide" onRequestClose={() => { if (!cameraBusy) setCameraOpen(false); }} visible={cameraOpen}>
+        <SafeAreaView style={styles.cameraScreen}>
+          <View style={styles.cameraHeader}>
+            <Pressable accessibilityLabel="Fechar camera" disabled={cameraBusy} hitSlop={12} onPress={() => setCameraOpen(false)} style={styles.cameraClose}>
+              <Ionicons color={colors.card} name="close" size={26} />
+            </Pressable>
+            <Text style={styles.cameraTitle}>Foto para o chat</Text>
+            <View style={styles.cameraClose} />
+          </View>
+          {cameraOpen && cameraPermission?.granted ? <CameraView facing="back" ref={cameraRef} style={styles.cameraPreview} /> : null}
+          <View style={styles.cameraFooter}>
+            <Text style={styles.cameraHint}>Enquadre e toque para fotografar</Text>
+            <Pressable accessibilityLabel="Tirar foto" accessibilityRole="button" disabled={cameraBusy} onPress={takePhoto} style={styles.cameraShutter}>
+              {cameraBusy ? <ActivityIndicator color={colors.primaryDark} /> : <View style={styles.cameraShutterInner} />}
+            </Pressable>
+          </View>
+        </SafeAreaView>
+      </Modal>
       {trayVisible ? (
         <Animated.View
           accessibilityElementsHidden={!actionsOpen}
@@ -490,6 +546,19 @@ function AttachmentAction({ backgroundColor = colors.primarySoft, color = colors
 }
 
 const styles = StyleSheet.create({
+  cameraClose: { alignItems: "center", height: 44, justifyContent: "center", width: 44 },
+  cameraFooter: { alignItems: "center", gap: spacing.md, paddingBottom: spacing.lg, paddingTop: spacing.md },
+  cameraHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  cameraHint: { color: "rgba(255,255,255,0.76)", fontFamily: fonts.medium, fontSize: typography.caption },
+  cameraPreview: { borderRadius: radius.lg, flex: 1, overflow: "hidden" },
+  cameraScreen: { backgroundColor: "#081510", flex: 1 },
+  cameraShutter: { alignItems: "center", backgroundColor: colors.card, borderRadius: 38, height: 76, justifyContent: "center", width: 76 },
+  cameraShutterInner: { backgroundColor: colors.primaryDark, borderRadius: 31, height: 62, width: 62 },
+  cameraTitle: { color: colors.card, fontFamily: fonts.bold, fontSize: typography.body },
+  locationStatus: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  locationStatusCopy: { flex: 1, gap: 2 },
+  locationStatusHint: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption },
+  locationStatusTitle: { color: colors.primaryDark, fontFamily: fonts.semiBold, fontSize: typography.caption },
   action: { alignItems: "center", gap: 7, paddingVertical: 6, width: "25%" },
   actionIcon: { alignItems: "center", borderRadius: 17, height: 48, justifyContent: "center", width: 48 },
   actionText: { color: colors.textSecondary, fontFamily: fonts.medium, fontSize: 11, textAlign: "center" },

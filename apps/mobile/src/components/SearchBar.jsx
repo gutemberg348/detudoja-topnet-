@@ -25,7 +25,7 @@ export function SearchBar({
   const blurTimeoutRef = useRef(null);
   const { height: windowHeight } = useWindowDimensions();
   const visibleSuggestions = focused && (loading || suggestions.length > 0 || recentSuggestions.length > 0);
-  const rowHeight = expandedSuggestions ? 78 : 68;
+  const rowHeight = expandedSuggestions ? 82 : 72;
   const maximumListHeight = expandedSuggestions
     ? Math.min(390, Math.max(280, windowHeight * 0.46))
     : 244;
@@ -138,13 +138,15 @@ export function SearchBar({
               </ScrollView>
             </View>
           ) : null}
-          <View style={styles.suggestionsHeader}>
-            <Text style={styles.suggestionsTitle}>
-              {value.trim() ? "Resultados rapidos" : initialSuggestionsTitle}
-            </Text>
-            {loading ? <ActivityIndicator color={colors.primaryDark} size="small" /> : null}
-          </View>
-          <ScrollView
+          {loading || suggestions.length ? (
+            <View style={styles.suggestionsHeader}>
+              <Text style={styles.suggestionsTitle}>
+                {value.trim() ? "Resultados rapidos" : initialSuggestionsTitle}
+              </Text>
+              {loading ? <ActivityIndicator color={colors.primaryDark} size="small" /> : null}
+            </View>
+          ) : null}
+          {suggestions.length ? <ScrollView
             bounces={false}
             contentContainerStyle={styles.suggestionsContent}
             keyboardShouldPersistTaps="always"
@@ -155,7 +157,7 @@ export function SearchBar({
             showsVerticalScrollIndicator
             style={[styles.suggestionsScroll, { height: suggestionListHeight, maxHeight: maximumListHeight }]}
           >
-            {suggestions.map((suggestion, index) => {
+            {suggestions.map((suggestion) => {
               const label = suggestion.label ?? suggestion.name ?? String(suggestion);
               const key = [
                 suggestion.type ?? "result",
@@ -172,7 +174,6 @@ export function SearchBar({
                   onPress={() => selectSuggestion(suggestion)}
                   style={({ pressed }) => [
                     styles.suggestion,
-                    index < suggestions.length - 1 && styles.suggestionDivider,
                     pressed && styles.suggestionPressed,
                   ]}
                 >
@@ -194,7 +195,7 @@ export function SearchBar({
                 </Pressable>
               );
             })}
-          </ScrollView>
+          </ScrollView> : null}
         </View>
       ) : null}
     </View>
@@ -340,28 +341,28 @@ const styles = StyleSheet.create({
   },
   inputCompact: { minHeight: 50 },
   recentAvatar: {
-    borderColor: colors.primaryLight,
+    borderColor: colors.border,
     borderWidth: 1,
-    height: 62,
-    width: 62,
+    height: 64,
+    width: 64,
   },
   recentItem: {
     alignItems: "center",
-    borderRadius: radius.md,
-    gap: spacing.xs,
-    paddingVertical: spacing.xs,
-    width: 76,
+    borderRadius: radius.lg,
+    gap: 7,
+    paddingVertical: spacing.sm,
+    width: 82,
   },
   recentLabel: {
     color: colors.textPrimary,
     fontFamily: fonts.medium,
-    fontSize: 11,
-    lineHeight: 14,
+    fontSize: 12,
+    lineHeight: 16,
     textAlign: "center",
   },
   recentsContent: {
-    gap: spacing.sm,
-    paddingBottom: spacing.sm,
+    gap: spacing.md,
+    paddingBottom: spacing.md,
     paddingHorizontal: spacing.md,
   },
   recentsHeading: {
@@ -369,8 +370,7 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
   },
   recentsSection: {
-    borderBottomColor: colors.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingTop: spacing.xs,
   },
   recentsTitle: {
     color: colors.textPrimary,
@@ -400,10 +400,12 @@ const styles = StyleSheet.create({
   },
   suggestion: {
     alignItems: "center",
+    borderRadius: radius.lg,
     flexDirection: "row",
     gap: spacing.md,
-    minHeight: 76,
-    paddingHorizontal: spacing.lg,
+    marginHorizontal: spacing.sm,
+    minHeight: 72,
+    paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
   suggestionCopy: {
@@ -411,15 +413,15 @@ const styles = StyleSheet.create({
     gap: 4,
     minWidth: 0,
   },
-  suggestionDivider: { borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth },
   suggestionIcon: {
     alignItems: "center",
     borderRadius: 999,
     height: 44,
     justifyContent: "center",
+    overflow: "hidden",
     width: 44,
   },
-  suggestionImage: { height: "100%", width: "100%" },
+  suggestionImage: { borderRadius: 999, height: "100%", width: "100%" },
   suggestionKind: { borderRadius: radius.round, paddingHorizontal: 7, paddingVertical: 3 },
   suggestionKindText: { fontFamily: fonts.bold, fontSize: 9, fontWeight: "700", textTransform: "uppercase" },
   suggestionMeta: {
@@ -448,7 +450,7 @@ const styles = StyleSheet.create({
   suggestions: {
     backgroundColor: colors.card,
     borderColor: colors.border,
-    borderRadius: radius.lg,
+    borderRadius: 24,
     borderWidth: 1,
     elevation: 18,
     left: 0,
@@ -461,16 +463,14 @@ const styles = StyleSheet.create({
     ...shadow,
   },
   suggestionsContent: {
-    paddingVertical: 2,
+    paddingVertical: spacing.xs,
   },
   suggestionsHeader: {
     alignItems: "center",
-    backgroundColor: colors.cardMuted,
-    borderBottomColor: colors.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    backgroundColor: colors.card,
     flexDirection: "row",
     justifyContent: "space-between",
-    minHeight: 36,
+    minHeight: 40,
     paddingHorizontal: spacing.lg,
   },
   suggestionsTitle: {

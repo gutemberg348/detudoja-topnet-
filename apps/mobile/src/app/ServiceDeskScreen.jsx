@@ -44,6 +44,7 @@ export function ServiceDeskScreen({ navigation }) {
   const { session } = useAuthStore();
   const [conversations, setConversations] = useState([]);
   const [accountAddress, setAccountAddress] = useState(null);
+  const [availabilityError, setAvailabilityError] = useState("");
   const [courierRequests, setCourierRequests] = useState([]);
   const [courierError, setCourierError] = useState("");
   const [courierDashboard, setCourierDashboard] = useState(null);
@@ -65,10 +66,6 @@ export function ServiceDeskScreen({ navigation }) {
   const [acceptingRequestId, setAcceptingRequestId] = useState(null);
   const [services, setServices] = useState([]);
 
-  const activeServices = useMemo(
-    () => services.filter((service) => service.available),
-    [services],
-  );
   const catalogServices = useMemo(
     () => services.filter((service) => !service.enabled),
     [services],
@@ -86,6 +83,11 @@ export function ServiceDeskScreen({ navigation }) {
     () => registeredServices.filter((service) => !service.requiresCourierProfile),
     [registeredServices],
   );
+  const mainAvailabilityServices = courierProfile
+    ? services.filter((service) => service.requiresCourierProfile)
+    : registeredServices;
+  const mainAvailabilityOnline = mainAvailabilityServices.some((service) => service.available);
+  const activeMainServices = mainAvailabilityServices.filter((service) => service.available);
   const courierConversations = useMemo(
     () => conversations.filter((conversation) => (
       conversation.serviceType?.operationalType === "ENTREGA_LOCAL"
@@ -211,6 +213,43 @@ export function ServiceDeskScreen({ navigation }) {
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel atualizar a disponibilidade.");
     } finally {
+      setSavingServiceId(null);
+    }
+  }
+
+  async function toggleMainAvailability(available) {
+    if (!session?.accessToken || savingServiceId || !mainAvailabilityServices.length) return;
+    const needsCourierProfile = available && mainAvailabilityServices.find(
+      (service) => !service.available && service.requiresCourierProfile && !courierProfile,
+    );
+    if (needsCourierProfile) {
+      setPendingCourierService(needsCourierProfile);
+      setCourierError("");
+      setCourierModalOpen(true);
+      return;
+    }
+    const missingPrice = available && mainAvailabilityServices.find(
+      (service) => !service.available && service.mode === "PRECO_FIXO" && !service.priceCents,
+    );
+    if (missingPrice) {
+      setFixedPriceError("");
+      setFixedPriceService(missingPrice);
+      return;
+    }
+    setAvailabilityError("");
+    setSavingServiceId("main-availability");
+    try {
+      for (const service of mainAvailabilityServices) {
+        if (service.available === available) continue;
+        await updateSellerService(session.accessToken, {
+          available,
+          serviceTypeId: service.id,
+        });
+      }
+    } catch (requestError) {
+      setAvailabilityError(requestError.message ?? "Nao foi possivel atualizar sua disponibilidade.");
+    } finally {
+      await load({ silent: true });
       setSavingServiceId(null);
     }
   }
@@ -371,7 +410,7 @@ export function ServiceDeskScreen({ navigation }) {
   return (
     <ScreenContainer contentContainerStyle={styles.content}>
       <PageHeader
-        action={<StatusPill activeCount={activeServices.length} courierStatus={courierDashboard?.operationalStatus} />}
+        action={<StatusPill activeCount={activeMainServices.length} courierStatus={courierDashboard?.operationalStatus} />}
         eyebrow={courierProfile ? "Area do entregador" : "Prestador de servicos"}
         subtitle={courierProfile
           ? "Corrida atual, novas chamadas e disponibilidade em um unico lugar."
@@ -387,14 +426,46 @@ export function ServiceDeskScreen({ navigation }) {
           <View style={styles.summary}>
             <View style={styles.summaryIcon}><Ionicons color={colors.card} name="radio-outline" size={22} /></View>
             <View style={styles.summaryCopy}>
-              <Text style={styles.summaryTitle}>{activeServices.length ? "Recebendo chamados" : "Voce esta offline"}</Text>
+              <Text style={styles.summaryTitle}>{activeMainServices.length ? "Recebendo chamados" : "Voce esta offline"}</Text>
               <Text style={styles.summaryText}>
-                {activeServices.length
-                  ? `${activeServices.map((service) => service.name).join(" e ")} aparece para clientes e lojas.`
+                {activeMainServices.length
+                  ? `${activeMainServices.map((service) => service.name).join(" e ")} aparece para clientes e lojas.`
                   : "Ative ao menos um servico para aparecer nas buscas."}
               </Text>
             </View>
           </View>
+
+          {mainAvailabilityServices.length ? (
+            <View style={[styles.mainAvailability, mainAvailabilityOnline && styles.mainAvailabilityOnline]}>
+              <View style={styles.mainAvailabilityIcon}>
+                <Ionicons color={colors.primaryDark} name={courierProfile ? "bicycle-outline" : "radio-outline"} size={26} />
+              </View>
+              <View style={styles.mainAvailabilityCopy}>
+                <Text style={styles.mainAvailabilityTitle}>
+                  {mainAvailabilityOnline ? "Voce esta online" : "Ficar online agora"}
+                </Text>
+                <Text style={styles.mainAvailabilityHint}>
+                  {courierProfile
+                    ? "Receber chamadas de corrida"
+                    : "Receber chamados dos seus servicos"}
+                </Text>
+              </View>
+              {savingServiceId === "main-availability" ? (
+                <ActivityIndicator color={colors.primaryDark} size="large" />
+              ) : (
+                <Switch
+                  accessibilityLabel={mainAvailabilityOnline ? "Ficar offline" : "Ficar online"}
+                  disabled={Boolean(savingServiceId)}
+                  onValueChange={toggleMainAvailability}
+                  style={styles.mainAvailabilitySwitch}
+                  thumbColor={colors.card}
+                  trackColor={{ false: colors.borderStrong, true: colors.primary }}
+                  value={mainAvailabilityOnline}
+                />
+              )}
+            </View>
+          ) : null}
+          {availabilityError ? <Text style={styles.mainAvailabilityError}>{availabilityError}</Text> : null}
 
           {!hasRegisteredServices ? (
             <>
@@ -919,6 +990,14 @@ function CourierDispatchScope({ acceptsPlatformCalls, canUseTeamOnly, isBusy, is
 }
 
 const styles = StyleSheet.create({
+  mainAvailability: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.md, minHeight: 90, padding: spacing.md, ...shadowSoft },
+  mainAvailabilityOnline: { backgroundColor: colors.primarySoft, borderColor: colors.primaryLight },
+  mainAvailabilityIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 52, justifyContent: "center", width: 52 },
+  mainAvailabilityCopy: { flex: 1, gap: 4, minWidth: 0 },
+  mainAvailabilityTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.label },
+  mainAvailabilityHint: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption, lineHeight: 18 },
+  mainAvailabilityError: { color: colors.danger, fontFamily: fonts.medium, fontSize: typography.caption },
+  mainAvailabilitySwitch: { transform: [{ scaleX: 1.2 }, { scaleY: 1.2 }] },
   acceptButton: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.lg, flexDirection: "row", gap: spacing.sm, justifyContent: "center", minHeight: 46, paddingHorizontal: spacing.md },
   acceptButtonText: { color: colors.card, flex: 1, fontFamily: fonts.bold, fontSize: typography.small, textAlign: "center" },
   catalogCard: { backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, gap: spacing.md, padding: spacing.md, ...shadowSoft },

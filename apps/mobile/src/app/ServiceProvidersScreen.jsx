@@ -10,7 +10,6 @@ import {
   Text,
   View,
 } from "react-native";
-import { AppButton } from "../components/AppButton";
 import { AccountAddressRequirementModal } from "../components/AccountAddressRequirementModal";
 import { PageHeader } from "../components/PageHeader";
 import { ScreenContainer } from "../components/ScreenContainer";
@@ -32,6 +31,7 @@ import { useAuthStore } from "../stores/useAuthStore";
 import { resolveMediaUrl } from "../utils/media";
 import { formatarDinheiro } from "../utils/money";
 import { serviceIconName } from "../utils/service-icons";
+import { getCurrentUserAddresses } from "../services/users.api";
 import {
   colors,
   fonts,
@@ -52,6 +52,7 @@ export function ServiceProvidersScreen({ navigation, route }) {
   const [addressRequirementOpen, setAddressRequirementOpen] = useState(false);
   const [courierAvailable, setCourierAvailable] = useState(false);
   const [courierRequest, setCourierRequest] = useState(null);
+  const [serviceLocation, setServiceLocation] = useState(null);
   const [sellers, setSellers] = useState([]);
   const courierPulse = useRef(new Animated.Value(0)).current;
   const isCourier = segment?.operationalType === "ENTREGA_LOCAL";
@@ -59,6 +60,22 @@ export function ServiceProvidersScreen({ navigation, route }) {
   const serviceName = segment?.name ?? "Servico";
   const serviceNameLower = serviceName.toLocaleLowerCase("pt-BR");
   const serviceIcon = serviceIconName(segment?.iconName, "navigate-outline");
+  const cityLabel = serviceLocation?.city
+    ? `${serviceLocation.city}${serviceLocation.state ? ` - ${serviceLocation.state}` : ""}`
+    : "sua cidade";
+
+  useEffect(() => {
+    if (!isCourier || !session?.accessToken) return undefined;
+    let active = true;
+    getCurrentUserAddresses(session.accessToken).then((response) => {
+      if (!active) return;
+      const address = (response.addresses ?? []).find((item) => item.cidade && item.estado);
+      setServiceLocation(response.marketplaceLocation ?? (address
+        ? { city: address.cidade, state: address.estado }
+        : null));
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [isCourier, session?.accessToken]);
 
   const load = useCallback(
     async ({ silent = false } = {}) => {
@@ -276,33 +293,37 @@ export function ServiceProvidersScreen({ navigation, route }) {
 
   return (
     <ScreenContainer contentContainerStyle={styles.content}>
-      <PageHeader
-        eyebrow={isCourier ? "Chamada em tempo real" : "Negociacao por chat"}
-        subtitle={
-          isCourier
-            ? `Abra uma chamada de ${serviceNameLower}. Um profissional livre aceita e entra no chat com voce.`
-            : "Escolha quem esta atendendo agora. Combine detalhes, fotos e valor na conversa."
-        }
-        title={
-          isCourier ? `Chamar ${serviceNameLower}` : `${serviceName} online`
-        }
-      />
+      {isCourier ? (
+        <View style={styles.courierHero}>
+          <View style={styles.courierCity}>
+            <Ionicons color="#C7F5DC" name="location-outline" size={16} />
+            <Text numberOfLines={1} style={styles.courierCityText}>{cityLabel}</Text>
+          </View>
+          <View style={styles.courierHeroBody}>
+            <View style={styles.courierHeroIcon}>
+              <Ionicons color={colors.primaryDark} name={serviceIcon} size={29} />
+            </View>
+            <View style={styles.copy}>
+              <Text style={styles.courierHeroEyebrow}>CHAMADA NA SUA CIDADE</Text>
+              <Text style={styles.courierHeroTitle}>Chamar {serviceNameLower}</Text>
+            </View>
+          </View>
+          <Text style={styles.courierHeroText}>
+            Enviamos sua chamada aos profissionais livres. Quem aceitar abre um chat para combinar os detalhes com voce.
+          </Text>
+        </View>
+      ) : (
+        <PageHeader
+          eyebrow="Negociacao por chat"
+          subtitle="Escolha quem esta atendendo agora. Combine detalhes, fotos e valor na conversa."
+          title={`${serviceName} online`}
+        />
+      )}
 
       {isCourier ? (
-        <View style={styles.courierNotice}>
-          <View style={styles.noticeIcon}>
-            <Ionicons
-              color={colors.card}
-              name="shield-checkmark-outline"
-              size={19}
-            />
-          </View>
-          <View style={styles.copy}>
-            <Text style={styles.noticeTitle}>Chamada protegida</Text>
-            <Text style={styles.noticeText}>
-              A identidade do profissional aparece somente depois que ele aceitar sua chamada.
-            </Text>
-          </View>
+        <View style={styles.courierSafety}>
+          <Ionicons color={colors.primaryDark} name="shield-checkmark-outline" size={19} />
+          <Text style={styles.courierSafetyText}>Voce ve quem aceitou antes de combinar o atendimento no chat.</Text>
         </View>
       ) : null}
 
@@ -510,29 +531,40 @@ export function ServiceProvidersScreen({ navigation, route }) {
             <View style={styles.copy}>
               <Text style={styles.availabilityLabel}>
                 {courierAvailable
-                  ? "SERVICO DISPONIVEL"
-                  : "SERVICO INDISPONIVEL"}
+                  ? `DISPONIVEL EM ${cityLabel.toLocaleUpperCase("pt-BR")}`
+                  : "AGUARDANDO PROFISSIONAIS"}
               </Text>
               <Text style={styles.availabilityTitle}>
                 {courierAvailable
-                  ? `${serviceName} sob demanda`
+                  ? `${serviceName} perto de voce`
                   : `Nenhum profissional de ${serviceNameLower} livre agora`}
               </Text>
               <Text style={styles.availabilityText}>
                 {courierAvailable
-                  ? "Envie sua chamada. Quem aceitar entra no chat para combinar tudo com voce."
-                  : "Quando um profissional ficar livre, esta tela atualiza automaticamente."}
+                  ? "A chamada vai para quem esta online na sua cidade."
+                  : "A disponibilidade e atualizada automaticamente."}
               </Text>
             </View>
           </View>
-          <AppButton
+          <Pressable
+            accessibilityLabel={`Chamar ${serviceNameLower} em ${cityLabel}`}
             disabled={!courierAvailable}
-            icon={serviceIcon}
-            loading={openingId === "courier"}
             onPress={callCourier}
-            style={styles.courierCallAction}
-            title={`Chamar ${serviceNameLower}`}
-          />
+            style={({ pressed }) => [
+              styles.courierCallAction,
+              !courierAvailable && styles.courierCallActionDisabled,
+              pressed && styles.pressed,
+            ]}
+          >
+            <View style={styles.courierCallIcon}>
+              {openingId === "courier" ? <ActivityIndicator color={colors.card} /> : <Ionicons color={colors.card} name={serviceIcon} size={24} />}
+            </View>
+            <View style={styles.copy}>
+              <Text style={styles.courierCallTitle}>Chamar {serviceNameLower}</Text>
+              <Text numberOfLines={1} style={styles.courierCallSubtitle}>Encontrar profissional em {cityLabel}</Text>
+            </View>
+            <Ionicons color={colors.card} name="arrow-forward" size={22} />
+          </Pressable>
         </View>
       ) : null}
       {!loading && !isCourier && !error && sellers.length ? (
@@ -795,17 +827,21 @@ const styles = StyleSheet.create({
   copy: { flex: 1, gap: 5, minWidth: 0 },
   courierCard: { borderColor: colors.primaryLight, ...shadowSoft },
   courierActionArea: { gap: spacing.md },
-  courierCallAction: { minHeight: 58 },
-  courierNotice: {
-    alignItems: "center",
-    backgroundColor: colors.primarySoft,
-    borderColor: colors.primaryLight,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: spacing.md,
-    padding: spacing.md,
-  },
+  courierCallAction: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.lg, flexDirection: "row", gap: spacing.md, minHeight: 82, paddingHorizontal: spacing.lg, ...shadowSoft },
+  courierCallActionDisabled: { backgroundColor: colors.textMuted },
+  courierCallIcon: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.17)", borderRadius: radius.round, height: 46, justifyContent: "center", width: 46 },
+  courierCallTitle: { color: colors.card, fontFamily: fonts.extraBold, fontSize: typography.label },
+  courierCallSubtitle: { color: "#D1FAE5", fontFamily: fonts.medium, fontSize: typography.caption },
+  courierHero: { backgroundColor: "#073F32", borderRadius: 26, gap: spacing.lg, overflow: "hidden", padding: spacing.xl, ...shadowSoft },
+  courierHeroBody: { alignItems: "center", flexDirection: "row", gap: spacing.md },
+  courierHeroIcon: { alignItems: "center", backgroundColor: "#E7FFF2", borderRadius: radius.lg, height: 56, justifyContent: "center", width: 56 },
+  courierHeroEyebrow: { color: "#B7E9D1", fontFamily: fonts.bold, fontSize: 10 },
+  courierHeroTitle: { color: colors.card, fontFamily: fonts.extraBold, fontSize: typography.h2 },
+  courierHeroText: { color: "#D4F2E5", fontFamily: fonts.regular, fontSize: typography.caption, lineHeight: 20 },
+  courierCity: { alignItems: "center", alignSelf: "flex-start", backgroundColor: "rgba(255,255,255,0.13)", borderRadius: radius.round, flexDirection: "row", gap: 6, maxWidth: "100%", paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  courierCityText: { color: colors.card, fontFamily: fonts.bold, fontSize: typography.caption },
+  courierSafety: { alignItems: "center", flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.xs },
+  courierSafetyText: { color: colors.textSecondary, flex: 1, fontFamily: fonts.medium, fontSize: typography.caption, lineHeight: 18 },
   description: {
     color: colors.textSecondary,
     fontFamily: fonts.regular,
@@ -868,25 +904,6 @@ const styles = StyleSheet.create({
     fontSize: typography.small,
   },
   nameLine: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
-  noticeIcon: {
-    alignItems: "center",
-    backgroundColor: colors.primaryDark,
-    borderRadius: radius.round,
-    height: 40,
-    justifyContent: "center",
-    width: 40,
-  },
-  noticeText: {
-    color: colors.textSecondary,
-    fontFamily: fonts.regular,
-    fontSize: typography.caption,
-    lineHeight: 17,
-  },
-  noticeTitle: {
-    color: colors.textPrimary,
-    fontFamily: fonts.bold,
-    fontSize: typography.small,
-  },
   online: {
     alignItems: "center",
     backgroundColor: colors.primarySoft,

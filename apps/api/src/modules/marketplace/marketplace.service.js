@@ -40,23 +40,37 @@ async function findMarketplaceSearchMatches(search) {
   }
 
   const primaryPatterns = buildSearchPatterns(normalizedSearch);
-  const primaryMatches = await queryMarketplaceSearchMatches(primaryPatterns);
+  const primaryMatches = await queryMarketplaceSearchMatches(
+    primaryPatterns,
+    buildServiceSearchPatterns(normalizedSearch, primaryPatterns),
+  );
 
   if (hasMarketplaceMatches(primaryMatches) || !normalizedSearch.includes(" ")) {
     return primaryMatches;
   }
 
+  const fallbackPatterns = buildSearchPatterns(normalizedSearch, { includeWords: true });
   return queryMarketplaceSearchMatches(
-    buildSearchPatterns(normalizedSearch, { includeWords: true }),
+    fallbackPatterns,
+    buildServiceSearchPatterns(normalizedSearch, fallbackPatterns),
   );
 }
 
-async function queryMarketplaceSearchMatches(patterns) {
+async function queryMarketplaceSearchMatches(patterns, servicePatterns = patterns) {
   return getOrSetJsonCache({
-    key: createCacheKey("marketplace-search-matches", patterns),
-    load: () => marketplaceRepository.querySearchMatches(patterns),
+    key: createCacheKey("marketplace-search-matches", { patterns, servicePatterns }),
+    load: () => marketplaceRepository.querySearchMatches(patterns, servicePatterns),
     ttlSeconds: 90,
   });
+}
+
+function buildServiceSearchPatterns(search, patterns) {
+  const aliases = /\b(?:moto taxi|mototaxi|taxi|taxista)\b/.test(search)
+    ? ["mototaxi", "moto taxi", "motoboy"]
+    : /\bmoto boy\b/.test(search)
+      ? ["motoboy"]
+      : [];
+  return [...new Set([...patterns, ...aliases.map((alias) => `%${alias}%`)])];
 }
 
 function buildSearchPatterns(search, { includeWords = false } = {}) {
@@ -394,7 +408,10 @@ export async function listMarketplaceSuggestions(userId, query = {}) {
     label: serviceType.nome,
     type: "service",
   }));
-  const groups = [storeSuggestions, productSuggestions, categorySuggestions, serviceSuggestions]
+  const transportSearch = /\b(?:moto taxi|mototaxi|taxi|taxista|motoboy|moto boy)\b/.test(normalizedSearch);
+  const groups = (transportSearch
+    ? [serviceSuggestions, storeSuggestions, productSuggestions, categorySuggestions]
+    : [storeSuggestions, productSuggestions, categorySuggestions, serviceSuggestions])
     .map((group) => rankSuggestions(group, normalizedSearch));
   const suggestions = interleaveSuggestions(groups, limit)
     .map(serializeSuggestion);
@@ -414,7 +431,7 @@ function rankSuggestions(suggestions, search) {
 function suggestionScore(suggestion, search) {
   const label = normalizeName(suggestion.label);
   const description = normalizeName(suggestion.description);
-  if (label === search) return 0;
+  if (label === search || (suggestion.type === "service" && label.replaceAll(" ", "") === search.replaceAll(" ", ""))) return 0;
   if (label.startsWith(search)) return 1;
   if (label.includes(search)) return 2;
   if (description.startsWith(search)) return 3;

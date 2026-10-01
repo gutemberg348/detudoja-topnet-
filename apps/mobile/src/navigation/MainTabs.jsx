@@ -351,11 +351,6 @@ export function MainTabs() {
     const socket = getRealtimeSocket(session.accessToken);
     const refreshStoreChats = (payload = {}) => {
       if (payload.reason === "customer-journey") return;
-      if (payload.message) {
-        const isSellerReply = payload.message.author === "store";
-        const isSupportRequest = payload.message.content?.kind === "SUPPORT";
-        if (!isSellerReply && !isSupportRequest) return;
-      }
       scheduleStoreChatNotificationLoad();
     };
 

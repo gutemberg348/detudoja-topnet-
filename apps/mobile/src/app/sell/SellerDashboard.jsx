@@ -23,6 +23,13 @@ const payoutStatusCopy = {
   PROCESSANDO: "Pix em envio",
 };
 
+const staffRoleLabels = {
+  ATENDENTE: "Atendente",
+  CAIXA: "Caixa",
+  FINANCEIRO: "Financeiro",
+  GERENTE: "Gerente",
+};
+
 export function SellerDashboard({
   charges,
   payoutAccount,
@@ -84,6 +91,7 @@ export function SellerDashboard({
     },
     new Map(),
   );
+  const staffStores = stores.filter((store) => store.access?.isOwner === false);
   const priorityStore = stores.find(
     (store) => countNewStoreOrders(store, new Set(["NEGOCIANDO", "RECEBIDO"])) > 0,
   );
@@ -107,7 +115,11 @@ export function SellerDashboard({
             <Text style={styles.guideButtonText}>Guia</Text>
           </Pressable>
         </View>
-        <Text style={styles.heroSubtitle}>Seus comercios e servicos, cada um no seu lugar.</Text>
+        <Text style={styles.heroSubtitle}>
+          {staffStores.length
+            ? `Voce atende ${staffStores.length} ${staffStores.length === 1 ? "loja" : "lojas"} como funcionario. Conversas e pedidos dessas lojas aparecem aqui.`
+            : "Seus comercios e servicos, cada um no seu lugar."}
+        </Text>
 
         {hasBothOperations ? (
           <>
@@ -380,35 +392,52 @@ export function SellerDashboard({
 }
 
 function CommerceSection({ onCreateStore, onOpenStore, storeChatUnreadByStore, stores }) {
+  const ownedStores = stores.filter((store) => store.access?.isOwner !== false);
+  const staffStores = stores.filter((store) => store.access?.isOwner === false);
+  const renderStore = (store) => (
+    <StoreRow
+      chatUnreadCount={storeChatUnreadByStore.get(Number(store.id)) ?? 0}
+      key={store.id}
+      onPress={onOpenStore}
+      store={store}
+    />
+  );
   return (
     <>
-      <SectionHeading
-        action={stores.length ? "Nova loja" : "Criar loja"}
-        icon="storefront-outline"
-        imageUrl={stores[0]?.logoUrl}
-        onPress={onCreateStore}
-        subtitle={stores.length ? "Pedidos, produtos e equipe de cada loja" : "Cadastre seu primeiro comercio"}
-        title="Meus comercios"
-      />
-      {stores.length ? (
-        <View style={styles.list}>
-          {stores.map((store) => (
-            <StoreRow
-              chatUnreadCount={storeChatUnreadByStore.get(Number(store.id)) ?? 0}
-              key={store.id}
-              onPress={onOpenStore}
-              store={store}
+      {ownedStores.length || !staffStores.length ? (
+        <>
+          <SectionHeading
+            action={ownedStores.length ? "Nova loja" : "Criar loja"}
+            icon="storefront-outline"
+            imageUrl={ownedStores[0]?.logoUrl}
+            onPress={onCreateStore}
+            subtitle={ownedStores.length ? "Pedidos, produtos e equipe de cada loja" : "Cadastre seu primeiro comercio"}
+            title="Meus comercios"
+          />
+          {ownedStores.length ? (
+            <View style={styles.list}>{ownedStores.map(renderStore)}</View>
+          ) : (
+            <OperationStartCard
+              icon="storefront-outline"
+              onPress={onCreateStore}
+              text="Crie sua vitrine, cadastre produtos e comece a receber pedidos."
+              title="Criar minha loja"
             />
-          ))}
-        </View>
-      ) : (
-        <OperationStartCard
-          icon="storefront-outline"
-          onPress={onCreateStore}
-          text="Crie sua vitrine, cadastre produtos e comece a receber pedidos."
-          title="Criar minha loja"
-        />
-      )}
+          )}
+        </>
+      ) : null}
+      {staffStores.length ? (
+        <>
+          <View style={styles.staffHeading}>
+            <View style={styles.sectionIcon}><Ionicons color={colors.primaryDark} name="people-outline" size={19} /></View>
+            <View style={styles.sectionCopy}>
+              <Text style={styles.sectionTitle}>Lojas onde trabalho</Text>
+              <Text style={styles.sectionSubtitle}>Atendimento conforme suas permissoes</Text>
+            </View>
+          </View>
+          <View style={styles.list}>{staffStores.map(renderStore)}</View>
+        </>
+      ) : null}
     </>
   );
 }
@@ -682,6 +711,11 @@ function StoreRow({ chatUnreadCount, onPress, store }) {
         <View style={styles.storeTitleLine}>
           <Text numberOfLines={1} style={styles.rowTitle}>{store.name}</Text>
         </View>
+        {store.access?.isOwner === false ? (
+          <Text style={styles.staffRole}>
+            Funcionario · {staffRoleLabels[store.access.role] ?? "Equipe da loja"}
+          </Text>
+        ) : null}
         <Text numberOfLines={1} style={styles.rowMeta}>
           {store.category?.name ?? "Sem categoria"} · {isOpen ? "recebendo pedidos" : "pedidos pausados"}
         </Text>
@@ -816,6 +850,8 @@ const styles = StyleSheet.create({
   sectionActionText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: typography.caption, fontWeight: "700" },
   sectionCopy: { flex: 1, gap: 2, minWidth: 0 },
   sectionHeading: { alignItems: "center", flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm },
+  staffHeading: { alignItems: "center", flexDirection: "row", gap: spacing.sm, marginTop: spacing.md },
+  staffRole: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 11 },
   sectionIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 38, justifyContent: "center", width: 38 },
   operationLogo: { borderRadius: radius.round, height: "100%", width: "100%" },
   sectionSubtitle: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption },

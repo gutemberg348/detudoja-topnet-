@@ -76,6 +76,12 @@ export function StoreManagerPanel({
   const canCreateCharges = isOwner || access?.permissions?.createCharges === true;
   const canManageOrders = isOwner || access?.permissions?.manageOrders === true;
   const canUseStoreChats = isOwner || access?.permissions?.storeChats === true;
+  const staffRole = {
+    ATENDENTE: "Atendente",
+    CAIXA: "Caixa",
+    FINANCEIRO: "Financeiro",
+    GERENTE: "Gerente",
+  }[access?.role] ?? "Equipe da loja";
 
   useEffect(() => {
     if (store?.id) {
@@ -188,7 +194,7 @@ export function StoreManagerPanel({
           </View>
           <View style={styles.managerBadge}>
             <Text style={styles.managerBadgeText}>
-              Lojista {merchantStatus}
+              {isOwner ? `Lojista ${merchantStatus}` : `Funcionario · ${staffRole}`}
             </Text>
           </View>
           <View style={styles.managerBadge}>
