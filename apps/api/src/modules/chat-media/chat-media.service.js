@@ -13,6 +13,8 @@ const attachmentKinds = new Set(["IMAGE", "VIDEO", "AUDIO", "LOCATION"]);
 const acceptedImages = new Set(["image/avif", "image/jpeg", "image/png", "image/webp"]);
 const acceptedVideos = new Set(["video/mp4", "video/quicktime", "video/webm"]);
 const acceptedAudio = new Set([
+  "audio/3gpp",
+  "audio/3gpp2",
   "audio/aac",
   "audio/flac",
   "audio/m4a",
@@ -29,8 +31,9 @@ const acceptedAudio = new Set([
 export function isAudioOnlyMp4(buffer) {
   if (!Buffer.isBuffer(buffer) || buffer.length < 20 || buffer.toString("ascii", 4, 8) !== "ftyp") return false;
   let hasAudio = false;
-  for (let index = 4; index + 16 <= buffer.length; index += 1) {
-    if (buffer.toString("ascii", index, index + 4) !== "hdlr") continue;
+  const boxType = Buffer.from("hdlr");
+  for (let index = buffer.indexOf(boxType, 4); index !== -1; index = buffer.indexOf(boxType, index + 4)) {
+    if (index + 16 > buffer.length) break;
     const boxStart = index - 4;
     const boxSize = buffer.readUInt32BE(boxStart);
     if (boxSize < 20 || boxStart + boxSize > buffer.length) continue;
@@ -39,6 +42,13 @@ export function isAudioOnlyMp4(buffer) {
     if (handler === "soun") hasAudio = true;
   }
   return hasAudio;
+}
+
+export function normalizeAudioMimeType(detectedMimeType, buffer) {
+  if (detectedMimeType === "video/mp4" && isAudioOnlyMp4(buffer)) return "audio/mp4";
+  if (detectedMimeType === "video/3gpp" && isAudioOnlyMp4(buffer)) return "audio/3gpp";
+  if (detectedMimeType === "video/3gpp2" && isAudioOnlyMp4(buffer)) return "audio/3gpp2";
+  return detectedMimeType;
 }
 
 function normalizedKind(value) {
@@ -110,9 +120,7 @@ export async function savePrivateChatAttachment(file, data, { conversationId, sc
 
   if (!file?.buffer) throw new AppError("Selecione o arquivo que deseja enviar", 400);
   const detected = await fileTypeFromBuffer(file.buffer);
-  const mimeType = type === "AUDIO" && detected?.mime === "video/mp4" && isAudioOnlyMp4(file.buffer)
-    ? "audio/mp4"
-    : detected?.mime;
+  const mimeType = type === "AUDIO" ? normalizeAudioMimeType(detected?.mime, file.buffer) : detected?.mime;
   const accepted = type === "IMAGE" ? acceptedImages : type === "VIDEO" ? acceptedVideos : acceptedAudio;
   if (!mimeType || !accepted.has(mimeType)) throw new AppError("Formato de arquivo nao aceito neste chat", 400);
 
@@ -123,7 +131,7 @@ export async function savePrivateChatAttachment(file, data, { conversationId, sc
   const targetDirectory = path.resolve(chatPrivateRoot, relativeDirectory);
   await mkdir(targetDirectory, { recursive: true });
 
-  const extension = type === "IMAGE" ? "webp" : type === "AUDIO" && mimeType === "audio/mp4" ? "m4a" : detected.ext;
+  const extension = type === "IMAGE" ? "webp" : type === "AUDIO" && mimeType === "audio/mp4" ? "m4a" : type === "AUDIO" && mimeType === "audio/3gpp" ? "3gp" : type === "AUDIO" && mimeType === "audio/3gpp2" ? "3g2" : detected.ext;
   const filename = `${randomUUID()}.${extension}`;
   const storageKey = path.join(relativeDirectory, filename);
   const absolutePath = safeStoragePath(storageKey);

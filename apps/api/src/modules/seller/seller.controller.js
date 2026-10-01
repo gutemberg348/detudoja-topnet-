@@ -8,6 +8,7 @@ import {
   deleteSellerStore,
   deleteStoreProduct,
   getSellerProfile,
+  getExternalDeliveryLink,
   listStoreOrderMessages,
   listSellerStoreCategories,
   listSellerSegments,
@@ -16,6 +17,18 @@ import {
   updateStoreOrderStatus,
   updateStoreProduct,
 } from "./seller.service.js";
+import { env } from "../../config/env.js";
+
+export async function getExternalDeliveryLinkController(req, res, next) {
+  try {
+    const baseUrl = env.publicLinks.apiBaseUrl
+      ?? (env.nodeEnv === "production" ? null : `${req.protocol}://${req.get("host")}`);
+    res.set("Cache-Control", "no-store");
+    res.json(await getExternalDeliveryLink(req.auth.user.id, req.params.storeId, req.params.orderId, baseUrl));
+  } catch (error) {
+    next(error);
+  }
+}
 
 export async function listSellerSegmentsController(_req, res, next) {
   try {

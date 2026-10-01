@@ -45,6 +45,13 @@ import {
 import { sendExpoPushToUsers } from "../notifications/notifications.service.js";
 import { getStorePermissionUserIds } from "../store-staff/store-permissions.js";
 import { refundCustomerOrderPayment } from "../admin/admin-payments.service.js";
+import {
+  deliveryCodeForOrder,
+  isAssignedDeliveryCourier,
+  matchesDeliveryCode,
+  matchesExternalDeliveryToken,
+} from "./delivery-proof.js";
+import { notifyOrderCouriers } from "./order-courier-updates.js";
 
 
 const orderInclude = {
@@ -866,81 +873,127 @@ export async function listCustomerOrderMessages(userId, orderId) {
   return { messages: messages.map(serializeOrderMessage) };
 }
 
-export async function completeCustomerOrder(userId, orderId) {
-  const currentOrder = await findCustomerOrder(userId, orderId, {
-    id: true,
-    loja_id: true,
-    status: true,
-    usuario_id: true,
-  });
-
-  if (currentOrder.status === "CONCLUIDO") {
-    const order = await ordersRepository.findUniqueOrder({
-      include: orderInclude,
-      where: { id: currentOrder.id },
-    });
-
-    return { order: await serializeOrderWithCashback(order) };
-  }
-
-  if (currentOrder.status === "CANCELADO") {
-    throw new AppError("Pedido cancelado nao pode ser concluido", 409);
-  }
-
-  if (!["SAIU_ENTREGA", "PRONTO_RETIRADA"].includes(currentOrder.status)) {
-    throw new AppError("Aguarde a loja enviar ou liberar o pedido para retirada", 409);
-  }
-
-  const completedAt = new Date();
-  const { message, order, settlement } = await ordersRepository.transaction(async (database) => {
-    const updatedOrder = await createOrdersRepository(database).updateOrder({
-      data: {
-        cancelado_em: null,
-        concluido_em: completedAt,
-        status: "CONCLUIDO",
+async function completeOrderWithProof(userId, orderId, { code = null, conversationId = null, externalToken = null } = {}) {
+  const id = parsePositiveId(orderId, "Pedido invalido");
+  const courierProof = conversationId !== null;
+  const externalProof = externalToken !== null;
+  const result = await ordersRepository.transaction(async (database) => {
+    const repository = createOrdersRepository(database);
+    await repository.lockOrder(id);
+    const currentOrder = await repository.findUniqueOrder({
+      include: {
+        pagamento: { select: { status: true } },
+        corridas_motoboy: courierProof ? {
+          where: { id: conversationId },
+          include: {
+            vendedor: { select: { usuario_id: true, motoboy: { select: { id: true } } } },
+            solicitacao_motoboy: { select: { motoboy_aceite_id: true, status: true } },
+          },
+        } : false,
       },
-      include: orderInclude,
-      where: { id: currentOrder.id },
+      where: { id },
     });
+    if (!currentOrder || (!courierProof && !externalProof && currentOrder.usuario_id !== userId)) {
+      throw new AppError("Pedido nao encontrado", 404);
+    }
+    if (externalProof && !matchesExternalDeliveryToken(currentOrder, externalToken)) {
+      throw new AppError("Link de entrega invalido", 403);
+    }
+    if (courierProof) {
+      const assignedRide = currentOrder.corridas_motoboy?.find((ride) => (
+        isAssignedDeliveryCourier(currentOrder, ride, userId)
+      ));
+      if (!assignedRide) throw new AppError("Entrega nao atribuida a este motoboy", 403);
+    }
+    if (currentOrder.status === "CONCLUIDO") {
+      return { completed: false, order: await repository.findUniqueOrder({ include: orderInclude, where: { id } }) };
+    }
+    if (currentOrder.status === "CANCELADO") throw new AppError("Pedido cancelado nao pode ser concluido", 409);
+    if (courierProof || externalProof) {
+      if (currentOrder.tipo_entrega !== "ENTREGA" || currentOrder.status !== "SAIU_ENTREGA") {
+        throw new AppError("Aguarde a loja enviar o pedido para entrega", 409);
+      }
+      if (!["PAGO", "LIQUIDADO"].includes(currentOrder.pagamento?.status)) {
+        throw new AppError("O pagamento do pedido ainda nao foi confirmado", 409);
+      }
+      if (!matchesDeliveryCode(currentOrder, code)) throw new AppError("Codigo de entrega incorreto", 400);
+    } else if (!["SAIU_ENTREGA", "PRONTO_RETIRADA"].includes(currentOrder.status)) {
+      throw new AppError("Aguarde a loja enviar ou liberar o pedido para retirada", 409);
+    }
 
-    const createdMessage = await createOrdersRepository(database).createOrderMessage({
+    const completedAt = new Date();
+    const order = await repository.updateOrder({
+      data: { cancelado_em: null, concluido_em: completedAt, status: "CONCLUIDO" },
+      include: orderInclude,
+      where: { id, status: currentOrder.status },
+    });
+    const message = await repository.createOrderMessage({
       data: {
-        autor_usuario_id: userId,
-        mensagem: "Cliente confirmou que recebeu o pedido.",
+        autor_usuario_id: externalProof ? null : userId,
+        mensagem: externalProof
+          ? "Entrega confirmada por codigo no link do entregador externo."
+          : courierProof
+          ? "Entregador confirmou a entrega com o codigo informado pelo cliente."
+          : "Cliente confirmou que recebeu o pedido.",
         metadata_json: {
-          confirmedBy: "CLIENTE",
+          confirmedBy: externalProof ? "CODIGO_ENTREGADOR_EXTERNO" : courierProof ? "CODIGO_ENTREGADOR" : "CLIENTE",
           kind: "status",
           status: "CONCLUIDO",
         },
-        origem: "CLIENTE",
-        pedido_id: currentOrder.id,
+        origem: courierProof || externalProof ? "SISTEMA" : "CLIENTE",
+        pedido_id: id,
         lido_cliente_em: completedAt,
         titulo: "Pedido recebido",
       },
       include: orderMessageInclude,
     });
-
-    const result = await settleCompletedStoreOrderEarnings(database, currentOrder.id);
-
-    return { message: createdMessage, order: updatedOrder, settlement: result };
+    const settlement = await settleCompletedStoreOrderEarnings(database, id);
+    return { completed: true, message, order, settlement };
   });
-
-  const serializedOrder = await serializeOrderWithCashback(order);
-  const serializedMessage = serializeOrderMessage(message);
-
-  emitOrderMessageCreated({
-    customerId: currentOrder.usuario_id,
-    message: serializedMessage,
-    orderId: currentOrder.id,
-    storeId: currentOrder.loja_id,
-  });
-  emitOrderStatusUpdated(serializedOrder);
-  emitWalletUpdated({
-    transactionId: settlement.transactionId,
-    userIds: settlement.walletUserIds,
-  });
-
+  const serializedOrder = await serializeOrderWithCashback(result.order);
+  if (result.completed) {
+    emitOrderMessageCreated({
+      customerId: result.order.usuario_id,
+      message: serializeOrderMessage(result.message),
+      orderId: id,
+      storeId: result.order.loja_id,
+    });
+    emitOrderStatusUpdated(serializedOrder);
+    await notifyOrderCouriers(id).catch(() => {});
+    emitWalletUpdated({
+      transactionId: result.settlement.transactionId,
+      userIds: result.settlement.walletUserIds,
+    });
+  }
   return { order: serializedOrder };
+}
+
+export function completeCustomerOrder(userId, orderId) {
+  return completeOrderWithProof(userId, orderId);
+}
+
+export function completeDeliveryOrderWithCode(userId, orderId, { code, conversationId }) {
+  return completeOrderWithProof(userId, orderId, {
+    code,
+    conversationId: parsePositiveId(conversationId, "Conversa de entrega invalida"),
+  });
+}
+
+export function completeExternalDeliveryOrderWithCode(orderId, token, code) {
+  return completeOrderWithProof(null, orderId, { code, externalToken: token });
+}
+
+export async function getCustomerDeliveryCode(userId, orderId) {
+  const order = await findCustomerOrder(userId, orderId, {
+    codigo: true,
+    id: true,
+    status: true,
+    tipo_entrega: true,
+  });
+  if (order.tipo_entrega !== "ENTREGA" || order.status !== "SAIU_ENTREGA") {
+    throw new AppError("O codigo aparece quando o pedido sai para entrega", 409);
+  }
+  return { code: deliveryCodeForOrder(order), orderId: order.id };
 }
 
 export async function cancelCustomerOrder(userId, orderId, { refundDestination = null } = {}) {

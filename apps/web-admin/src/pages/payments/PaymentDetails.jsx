@@ -12,7 +12,11 @@ function AmountRow({ title, value, hint }) { return <div className="pay-amount-r
 
 function Distribution({ details }) {
   const settlement = details.settlement;
-  if (!settlement) return <Empty>{details.deposit ? "Depósitos creditam a carteira indicada na visão geral e não geram distribuição de ganhos de venda." : "Ainda não há distribuição registrada. Em pedidos de loja, os ganhos são calculados quando a compra é concluída."}</Empty>;
+  if (!settlement) return <Empty>{details.deposit
+    ? "Depósitos creditam a carteira indicada na visão geral e não geram distribuição de ganhos de venda."
+    : details.service
+      ? `Pagamento confirmado, mas a distribuição ainda não foi gerada. A corrida/serviço está ${label(details.service.conversationStatus)}; os ganhos são calculados ao concluir o atendimento.`
+      : "Ainda não há distribuição registrada. Em pedidos de loja, os ganhos são calculados quando a compra é concluída."}</Empty>;
   const rewards = settlement.rewards ?? [];
   const groups = [
     { title: "Cashback", icon: Gift, rows: rewards.filter((item) => ["CASHBACK_COMPRADOR", "CASHBACK"].includes(item.type)) },

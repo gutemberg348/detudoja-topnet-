@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { env } from "../../config/env.js";
 import {
   emitOrderMessageCreated,
   emitOrderStatusUpdated,
@@ -23,6 +24,8 @@ import {
   serializeOrderProposal,
 } from "../orders/orders.serializer.js";
 import { releaseReservedOrderStock } from "../orders/order-stock.service.js";
+import { notifyOrderCouriers } from "../orders/order-courier-updates.js";
+import { externalDeliveryTokenForOrder } from "../orders/delivery-proof.js";
 import {
   serializeStoreAccess,
   storePermissionAccessWhere,
@@ -1319,6 +1322,7 @@ export async function updateStoreOrderStatus(userId, storeId, orderId, status) {
   const serializedOrder = serializeOrder(order, { audience: "store" });
 
   emitOrderStatusUpdated(serializedOrder);
+  if (status === "SAIU_ENTREGA") await notifyOrderCouriers(parsedOrderId).catch(() => {});
   pushOrderToCustomer(order, {
     body: statusMessageCopy[status]?.message ?? `O pedido ${order.codigo} foi atualizado.`,
     reason: "order-status-updated",
@@ -1326,6 +1330,33 @@ export async function updateStoreOrderStatus(userId, storeId, orderId, status) {
   });
 
   return { order: serializedOrder };
+}
+
+export async function getExternalDeliveryLink(userId, storeId, orderId, publicBaseUrl) {
+  const store = await findStoreForUser(userId, storeId, { permission: "manageOrders" });
+  const id = parsePositiveId(orderId, "Pedido invalido");
+  const order = await sellerRepository.findFirstOrder({
+    include: { pagamento: { select: { status: true } } },
+    where: { id, loja_id: store.id },
+  });
+  if (!order) throw new AppError("Pedido nao encontrado nesta loja", 404);
+  if (order.tipo_entrega !== "ENTREGA" || order.status !== "SAIU_ENTREGA") {
+    throw new AppError("O link so pode ser enviado depois que o pedido sair para entrega", 409);
+  }
+  if (!["PAGO", "LIQUIDADO"].includes(order.pagamento?.status)) {
+    throw new AppError("Aguarde a confirmacao do pagamento antes de enviar o link", 409);
+  }
+  const baseUrl = String(publicBaseUrl ?? "").trim().replace(/\/$/, "");
+  if (!/^https?:\/\//i.test(baseUrl)) throw new AppError("URL publica da API nao configurada", 503);
+  if (env.nodeEnv === "production" && !baseUrl.startsWith("https://")) {
+    throw new AppError("Configure PUBLIC_API_URL com HTTPS para compartilhar o link", 503);
+  }
+  const url = `${baseUrl}/entrega/externa/${id}#token=${externalDeliveryTokenForOrder(order)}`;
+  return {
+    orderId: id,
+    shareMessage: `Entrega do pedido ${order.codigo} da ${store.nome}. Abra o link e peca o codigo ao cliente somente ao entregar: ${url}`,
+    url,
+  };
 }
 
 async function findStoreOrderForUser(userId, storeId, orderId) {

@@ -1,10 +1,12 @@
 import { Router } from "express";
-import { paymentStatusRefreshRateLimit } from "../middlewares/rate-limit.middleware.js";
+import { deliveryCodeAttemptRateLimit, paymentStatusRefreshRateLimit } from "../middlewares/rate-limit.middleware.js";
 import { refreshAsaasOrderPaymentController } from "../modules/payments/asaas.controller.js";
 import {
   cancelCustomerOrderController,
   acceptCustomerOrderProposalController,
   completeCustomerOrderController,
+  completeDeliveryOrderWithCodeController,
+  getCustomerDeliveryCodeController,
   createCheckoutOrderController,
   createCustomerOrderMessageController,
   createOnlineOrderRequestController,
@@ -15,6 +17,7 @@ import {
 } from "../modules/orders/orders.controller.js";
 import {
   cancelCustomerOrderSchema,
+  completeDeliveryWithCodeSchema,
   createCheckoutOrderSchema,
   createOnlineOrderRequestSchema,
   createOrderMessageSchema,
@@ -37,6 +40,13 @@ ordersRoutes.post(
   createOnlineOrderRequestController,
 );
 ordersRoutes.patch("/:orderId/complete", completeCustomerOrderController);
+ordersRoutes.get("/:orderId/delivery-code", getCustomerDeliveryCodeController);
+ordersRoutes.post(
+  "/:orderId/delivery-code/complete",
+  deliveryCodeAttemptRateLimit,
+  validate(completeDeliveryWithCodeSchema),
+  completeDeliveryOrderWithCodeController,
+);
 ordersRoutes.patch(
   "/:orderId/cancel",
   validate(cancelCustomerOrderSchema),

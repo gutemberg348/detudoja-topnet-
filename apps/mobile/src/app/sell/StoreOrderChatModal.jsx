@@ -7,6 +7,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   Text,
   TextInput,
   View,
@@ -22,6 +23,7 @@ import { useChatTimeline } from "../../hooks/useChatTimeline";
 import { useRealtimeOrders } from "../../hooks/useRealtimeOrders";
 import {
   createStoreOrderProposal,
+  getExternalDeliveryLink,
   getStoreOrderMessages,
   sendStoreOrderMessage,
 } from "../../services/seller.api";
@@ -54,6 +56,7 @@ export function StoreOrderChatModal({
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSendingReply, setIsSendingReply] = useState(false);
   const [isSendingProposal, setIsSendingProposal] = useState(false);
+  const [isSharingDeliveryLink, setIsSharingDeliveryLink] = useState(false);
   const [liveOrder, setLiveOrder] = useState(order);
   const [proposalDescription, setProposalDescription] = useState("");
   const [proposalOpen, setProposalOpen] = useState(false);
@@ -126,6 +129,7 @@ export function StoreOrderChatModal({
   if (!order) return null;
 
   const visibleOrder = liveOrder ?? order;
+  const canManageOrders = store?.access?.isOwner !== false || store?.access?.permissions?.manageOrders === true;
   const latestProposal = visibleOrder?.latestProposal ?? visibleOrder?.proposals?.at(-1) ?? null;
   const hasPersistedTimeline = chatMessages.some((message) =>
     ["created", "status"].includes(message.metadata?.kind),
@@ -182,6 +186,20 @@ export function StoreOrderChatModal({
       setChatError(requestError.message ?? "Nao foi possivel enviar a proposta.");
     } finally {
       setIsSendingProposal(false);
+    }
+  }
+
+  async function shareExternalDeliveryLink() {
+    if (isSharingDeliveryLink || !accessToken || !store?.id || !visibleOrder?.id) return;
+    setIsSharingDeliveryLink(true);
+    setChatError("");
+    try {
+      const { shareMessage } = await getExternalDeliveryLink(accessToken, store.id, visibleOrder.id);
+      await Share.share({ message: shareMessage });
+    } catch (requestError) {
+      setChatError(requestError.message ?? "Nao foi possivel compartilhar o link da entrega.");
+    } finally {
+      setIsSharingDeliveryLink(false);
     }
   }
 
@@ -254,6 +272,31 @@ export function StoreOrderChatModal({
               <Text style={styles.orderProposalWaitingText}>
                 Proposta aceita. Aguardando o pagamento online do cliente.
               </Text>
+            </View>
+          ) : null}
+
+          {visibleOrder.status === "SAIU_ENTREGA" && visibleOrder.deliveryMode === "ENTREGA" && canManageOrders ? (
+            <View style={styles.externalDeliveryBar}>
+              <View style={styles.orderProposalBarIcon}>
+                <Ionicons color={colors.primaryDark} name="link-outline" size={19} />
+              </View>
+              <View style={styles.orderProposalBarCopy}>
+                <Text style={styles.orderProposalBarTitle}>Entregador sem app?</Text>
+                <Text style={styles.orderProposalBarText}>Envie um link. Ele pede o código ao cliente após entregar.</Text>
+              </View>
+              <Pressable
+                accessibilityLabel="Enviar link para entregador externo"
+                disabled={isSharingDeliveryLink}
+                onPress={shareExternalDeliveryLink}
+                style={styles.externalDeliveryShareButton}
+              >
+                {isSharingDeliveryLink ? (
+                  <ActivityIndicator color={colors.card} size="small" />
+                ) : (
+                  <Ionicons color={colors.card} name="share-outline" size={18} />
+                )}
+                <Text style={styles.orderProposalButtonText}>Enviar</Text>
+              </Pressable>
             </View>
           ) : null}
 

@@ -16,6 +16,19 @@ export function createEarningsReleaseRepository(database = prisma) {
         select: { id: true },
         take,
         where: {
+          NOT: {
+            pagamento: {
+              is: {
+                cobranca: {
+                  is: {
+                    proposta_servico: {
+                      is: { conversa_servico: { is: { status: "EM_DISPUTA" } } },
+                    },
+                  },
+                },
+              },
+            },
+          },
           pagamento: { status: { in: ["PAGO", "LIQUIDADO"] } },
           status: "VALIDADA",
           validada_em: { lte: cutoff },

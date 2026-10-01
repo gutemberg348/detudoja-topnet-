@@ -76,6 +76,11 @@ export function configureAccessTokenRefresher(refresher) {
   };
 }
 
+export async function getValidAccessToken(token, { force = false } = {}) {
+  if (!token || !accessTokenRefresher) return token;
+  return await accessTokenRefresher(token, { force }).catch(() => null) || token;
+}
+
 export class ApiError extends Error {
   constructor(message, status, data) {
     super(message);
@@ -93,16 +98,7 @@ export async function apiRequest(
   const { body, headers: customHeaders, method = "GET", timeoutMs, token } = options;
   const headers = {};
   const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
-  let requestToken = token;
-
-  if (requestToken && accessTokenRefresher) {
-    const resolvedToken = await accessTokenRefresher(requestToken, { force: false })
-      .catch(() => null);
-
-    if (resolvedToken) {
-      requestToken = resolvedToken;
-    }
-  }
+  let requestToken = await getValidAccessToken(token);
 
   if (body && !isFormData) {
     headers["Content-Type"] = "application/json";

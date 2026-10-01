@@ -298,6 +298,12 @@ export function updateStoreOrderStatus(accessToken, storeId, orderId, status) {
   });
 }
 
+export function getExternalDeliveryLink(accessToken, storeId, orderId) {
+  return apiRequest(`/api/app/seller/stores/${storeId}/orders/${orderId}/external-delivery-link`, {
+    token: accessToken,
+  });
+}
+
 export function getStoreOrderMessages(accessToken, storeId, orderId) {
   return apiRequest(`/api/app/seller/stores/${storeId}/orders/${orderId}/messages`, {
     token: accessToken,

@@ -773,6 +773,30 @@ quando o lojista abre um campo de imagem.
   do gateway futuro.
 - Rotas de navegacao: `ChargeScan`, `ChargePayment`, `ChargeQr`.
 
+### Confirmacao de entrega por codigo
+
+Quando um pedido de loja pago sai para entrega, o cliente ve um codigo de 4
+digitos nas informacoes do pedido dentro do chat. O cliente so deve informa-lo
+depois de receber o produto. O botao `Recebi meu pedido` continua disponivel.
+
+Se o entregador nao tem cadastro no app, o lojista pode abrir o chat desse
+pedido e tocar em `Entregador sem app? Enviar`. O link compartilhado abre uma
+pagina publica da API; o entregador informa nela o codigo dado pelo cliente.
+Link e codigo sao necessarios juntos. A confirmacao conclui o pedido e executa
+a mesma distribuicao dos ganhos da confirmacao pelo cliente, uma unica vez.
+O link nao cadastra nem remunera o entregador externo pela plataforma.
+
+Esse codigo e exclusivo do pedido de loja entregue por motoboy. Na corrida
+direta solicitada por um cliente, o motoboy finaliza o trajeto; se o pagamento
+for feito no fim pelo QR, a confirmacao desse pagamento conclui a corrida sem
+outro botao de confirmacao do cliente. No pagamento antecipado, a conclusao
+acontece quando o motoboy finaliza. O cliente ainda pode contestar em ate
+24 horas, enquanto os ganhos ficam retidos.
+
+Em producao, `PUBLIC_API_URL` deve ser a origem HTTPS publica da API para o
+link abrir no celular do entregador. Nao envie o link ao cliente como forma de
+pedir o codigo antes da entrega.
+
 ## Central comercial e CRM (2026-07-15)
 
 A aba `Vender` usa `src/app/sell/SellerDashboard.jsx` como painel comercial.

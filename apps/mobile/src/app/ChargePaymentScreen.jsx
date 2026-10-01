@@ -37,6 +37,7 @@ export function ChargePaymentScreen({ navigation, route }) {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isPaying, setIsPaying] = useState(false);
+  const [amountLocked, setAmountLocked] = useState(false);
   const [paymentFeedback, setPaymentFeedback] = useState(null);
   const [cpfModalOpen, setCpfModalOpen] = useState(false);
   const [confirmationOpen, setConfirmationOpen] = useState(false);
@@ -52,6 +53,25 @@ export function ChargePaymentScreen({ navigation, route }) {
   const amountCents = isPermanentQr ? inputToCents(amount) : Number(charge?.amountCents ?? 0);
   const walletCents = useBalance ? Math.min(availableCents, amountCents) : 0;
   const pixCents = Math.max(0, amountCents - walletCents);
+
+  useEffect(() => {
+    idempotencyKey.current = newIdempotencyKey();
+    setAmount("");
+    setAmountLocked(false);
+    setCharge(null);
+    setPermanentStore(null);
+  }, [code, storeQrToken]);
+
+  function changeAmount(value) {
+    if (amountLocked || isPaying) return;
+    const formatted = moneyInput(value);
+    if (inputToCents(formatted) !== inputToCents(amount)) {
+      idempotencyKey.current = newIdempotencyKey();
+    }
+    setAmount(formatted);
+    setError("");
+    setConfirmationOpen(false);
+  }
 
   const loadPaymentTarget = useCallback(async () => {
     if (!session?.accessToken || (!code && !storeQrToken)) {
@@ -97,6 +117,7 @@ export function ChargePaymentScreen({ navigation, route }) {
           })
         : await payCharge(session.accessToken, charge.code, { useBalance });
       setCharge(response.charge);
+      setAmountLocked(false);
       refreshWallets().catch(() => {});
       if (response.gatewayPayment) {
         setPaymentFeedback(null);
@@ -115,12 +136,12 @@ export function ChargePaymentScreen({ navigation, route }) {
       idempotencyKey.current = newIdempotencyKey();
     } catch (requestError) {
       const message = requestError.message ?? "Nao foi possivel iniciar o pagamento.";
-      if (
-        requestError.data?.details?.code === "PAYMENT_ATTEMPT_FINAL_FAILURE"
-        && requestError.data.details.retryWithNewKey === true
-      ) {
+      const canStartNewAttempt = requestError.data?.details?.retryWithNewKey === true
+        && ["PAYMENT_ATTEMPT_FINAL_FAILURE", "PAYMENT_ATTEMPT_NOT_STARTED"].includes(requestError.data.details.code);
+      if (canStartNewAttempt) {
         idempotencyKey.current = newIdempotencyKey();
       }
+      if (isPermanentQr) setAmountLocked(!canStartNewAttempt);
       setError(message);
       setPaymentFeedback({ message, status: "error" });
     } finally {
@@ -190,8 +211,9 @@ export function ChargePaymentScreen({ navigation, route }) {
             <Text style={styles.currency}>R$</Text>
             <TextInput
               autoFocus
+              editable={!isPaying && !amountLocked}
               keyboardType="decimal-pad"
-              onChangeText={(value) => { setAmount(moneyInput(value)); setError(""); setConfirmationOpen(false); }}
+              onChangeText={changeAmount}
               placeholder="0,00"
               placeholderTextColor="#83AD9E"
               style={styles.amountInput}
@@ -200,6 +222,9 @@ export function ChargePaymentScreen({ navigation, route }) {
           </View>
         ) : <Text style={styles.amount}>{formatarDinheiro(amountCents)}</Text>}
         <Text style={styles.amountMeta}>Confira o valor com a loja antes de continuar.</Text>
+        {isPermanentQr && amountLocked ? (
+          <Text style={styles.amountMeta}>Esta tentativa pode estar pendente. Repita com o mesmo valor para consultar o resultado antes de iniciar outra compra.</Text>
+        ) : null}
       </View>
 
       {!paid && amountCents >= 100 ? (

@@ -1,4 +1,5 @@
 import rateLimit from "express-rate-limit";
+import { createHash } from "node:crypto";
 import { RedisStore } from "rate-limit-redis";
 import { env } from "../config/env.js";
 import { getRedisClient, isRedisReady } from "../config/redis.js";
@@ -103,6 +104,28 @@ export const paymentStatusRefreshRateLimit = createRateLimiter({
   skip: skipInTests,
   standardHeaders: "draft-7",
   windowMs: 60 * 1000,
+});
+
+export const deliveryCodeAttemptRateLimit = createRateLimiter({
+  keyPrefix: "delivery-code-attempt",
+  keyGenerator: (req) => `user:${req.auth.user.id}`,
+  legacyHeaders: false,
+  limit: 5,
+  message: { message: "Muitas tentativas de codigo. Aguarde uma hora." },
+  skip: skipInTests,
+  standardHeaders: "draft-7",
+  windowMs: 60 * 60 * 1000,
+});
+
+export const externalDeliveryCodeAttemptRateLimit = createRateLimiter({
+  keyPrefix: "external-delivery-code-attempt",
+  keyGenerator: (req) => `link:${createHash("sha256").update(String(req.body?.token ?? "")).digest("hex")}`,
+  legacyHeaders: false,
+  limit: 5,
+  message: { message: "Muitas tentativas de codigo. Aguarde uma hora." },
+  skip: skipInTests,
+  standardHeaders: "draft-7",
+  windowMs: 60 * 60 * 1000,
 });
 
 export const walletDepositCreateRateLimit = createRateLimiter({

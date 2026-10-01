@@ -21,6 +21,7 @@ import {
   isCourierSellerBusy,
 } from "../courier/courier-availability.js";
 import { settlePaidAutonomousChargeEarnings } from "../earnings/order-earnings.service.js";
+import { completePaidCourierRide, isCourierConversation, lockCourierConversation } from "./courier-completion.js";
 import { sendExpoPushToUsers } from "../notifications/notifications.service.js";
 import {
   availableServiceWhere,
@@ -157,7 +158,8 @@ const conversationInclude = {
   avaliacao: true,
   cliente: { select: { foto_url: true, id: true, nome: true } },
   loja_solicitante: { select: { id: true, logo_url: true, nome: true } },
-  pedido_loja: { select: { codigo: true, id: true } },
+  pedido_loja: { select: { codigo: true, id: true, status: true } },
+  solicitacao_motoboy: { select: { id: true } },
   mensagens: { orderBy: { criado_em: "asc" } },
   propostas: {
     include: {
@@ -169,6 +171,7 @@ const conversationInclude = {
               metodo_principal: true,
               pago_em: true,
               status: true,
+              transacao_comercial: { select: { id: true, status: true, validada_em: true } },
             },
           },
         },
@@ -316,6 +319,7 @@ function serializeConversation(conversation, viewerId, { includeMessages = false
 
   return {
     createdAt: conversation.criado_em.toISOString(),
+    courierRide: isCourierConversation(conversation),
     customer: { id: conversation.cliente.id, name: conversation.cliente.nome },
     id: conversation.id,
     isNewForSeller: isSeller && !conversation.visualizado_vendedor_em,
@@ -336,7 +340,7 @@ function serializeConversation(conversation, viewerId, { includeMessages = false
       description: conversation.descricao_inicial,
       destination: routeIsSharedInChat ? "A combinar no chat" : conversation.destino,
       order: conversation.pedido_loja
-        ? { code: conversation.pedido_loja.codigo, id: conversation.pedido_loja.id }
+        ? { code: conversation.pedido_loja.codigo, id: conversation.pedido_loja.id, status: conversation.pedido_loja.status }
         : null,
       origin: routeIsSharedInChat ? "A combinar no chat" : conversation.origem,
       store: conversation.loja_solicitante
@@ -361,7 +365,18 @@ function serializeConversation(conversation, viewerId, { includeMessages = false
         }
       : null,
     status: conversation.status,
-    canDispute: !isSeller && conversation.status === "AGUARDANDO_CONFIRMACAO",
+    canDispute: !isSeller && (
+      (conversation.status === "AGUARDANDO_CONFIRMACAO" && (
+        !isCourierConversation(conversation)
+        || (conversation.propostas ?? []).some((proposal) => proposal.status === "PAGA")
+      ))
+      || (isCourierConversation(conversation) && conversation.status === "ENCERRADA"
+        && (conversation.propostas ?? []).some((proposal) => (
+          proposal.concluido_em
+          && proposal.cobranca?.pagamento?.transacao_comercial?.status === "VALIDADA"
+          && Date.now() - proposal.concluido_em.getTime() < 24 * 60 * 60 * 1000
+        )))
+    ),
     canReview: !isSeller && conversation.status === "ENCERRADA" && !conversation.avaliacao,
     review: serializeReview(conversation.avaliacao),
     unreadCount,
@@ -1226,7 +1241,8 @@ export async function createServiceProposal(userId, conversationId, data) {
   if (conversation.servico_vendedor?.tipo_servico?.modo_atendimento === "PRECO_FIXO") {
     throw new AppError("Este servico usa o preco fixo cadastrado e nao aceita propostas manuais", 409);
   }
-  if (conversation.status !== "ACORDADA") {
+  if (conversation.status !== "ACORDADA"
+    && !(isCourierRide && conversation.status === "AGUARDANDO_CONFIRMACAO")) {
     throw new AppError("Esta conversa nao aceita novas propostas", 409);
   }
   if (
@@ -1480,6 +1496,7 @@ export async function cancelServiceConversation(userId, conversationId) {
 
 export async function markServiceDelivered(userId, conversationId) {
   const conversation = await findAccessibleConversation(userId, conversationId);
+  const isCourierRide = isCourierConversation(conversation);
 
   if (conversation.vendedor.usuario_id !== userId) {
     throw new AppError("Somente o prestador pode marcar o servico como prestado", 403);
@@ -1488,14 +1505,34 @@ export async function markServiceDelivered(userId, conversationId) {
     throw new AppError("Este atendimento ainda nao esta pronto para conclusao", 409);
   }
 
-  const paidProposal = [...(conversation.propostas ?? [])]
-    .reverse()
-    .find((proposal) => proposal.status === "PAGA");
-  if (!paidProposal) throw new AppError("O pagamento precisa estar confirmado primeiro", 409);
-
-  await serviceChatsRepository.transaction(async (database) => {
+  const result = await serviceChatsRepository.transaction(async (database) => {
     const repository = createServiceChatsRepository(database);
     await assertSellerCanOperateConversation(repository, conversation, userId);
+    if (isCourierRide) await lockCourierConversation(database, conversation.id);
+    const current = isCourierRide
+      ? await repository.findConversation({ include: conversationInclude, where: { id: conversation.id } })
+      : conversation;
+    const paidProposal = [...(current.propostas ?? [])]
+      .reverse()
+      .find((proposal) => proposal.status === "PAGA" && proposal.cobranca?.id);
+    const awaitingQrPayment = isCourierRide && !paidProposal
+      && [...(current.propostas ?? [])].reverse().some((proposal) => (
+        proposal.status === "ACEITA" && proposal.forma_pagamento === "QR_PRESENCIAL" && proposal.cobranca?.status === "ATIVA"
+      ));
+    if (current.status !== "ACORDADA" && !(isCourierRide && current.status === "AGUARDANDO_CONFIRMACAO" && paidProposal)) {
+      throw new AppError("A corrida mudou antes da conclusao", 409);
+    }
+    if (!paidProposal && !awaitingQrPayment) throw new AppError("O pagamento precisa estar confirmado primeiro", 409);
+    if (isCourierRide && paidProposal) {
+      const earnings = await completePaidCourierRide(database, {
+        actorUserId: userId,
+        chargeId: paidProposal.cobranca.id,
+        conversationId: conversation.id,
+        expectedStatus: current.status,
+        proposalId: paidProposal.id,
+      });
+      return { awaitingQrPayment: false, earnings };
+    }
     const marked = await repository.updateConversations({
       data: { status: "AGUARDANDO_CONFIRMACAO" },
       where: { id: conversation.id, status: "ACORDADA" },
@@ -1508,17 +1545,32 @@ export async function markServiceDelivered(userId, conversationId) {
         autor_usuario_id: userId,
         conversa_servico_id: conversation.id,
         lido_vendedor_em: new Date(),
-        mensagem: "O prestador marcou o servico como realizado. Confirme o recebimento para concluir.",
+        mensagem: awaitingQrPayment
+          ? "Corrida finalizada pelo motoboy. Pague pelo QR presencial para concluir."
+          : "O prestador marcou o servico como realizado. Confirme o recebimento para concluir.",
         origem: "SISTEMA",
       },
     });
+    return { awaitingQrPayment, earnings: null };
   });
   const updatedConversation = await findAccessibleConversation(userId, conversation.id);
+  if (result.earnings?.transactionId) {
+    emitWalletUpdated({ transactionId: result.earnings.transactionId, userIds: result.earnings.walletUserIds });
+    notifyCourierAvailability(
+      updatedConversation,
+      isOperationalServiceAvailable(updatedConversation.servico_vendedor)
+        && !(await isCourierSellerBusy(serviceChatsRepository, updatedConversation.vendedor_id)),
+    );
+  }
   notifyConversation(updatedConversation, "service-delivered");
   pushServiceNotification(
     updatedConversation,
     updatedConversation.cliente_usuario_id,
-    "O prestador marcou o servico como realizado. Confirme o recebimento.",
+    result.earnings
+      ? "Corrida finalizada. O valor fica protegido por 24 horas."
+      : result.awaitingQrPayment
+        ? "O motoboy finalizou a corrida. Pague pelo QR para concluir."
+        : "O prestador marcou o servico como realizado. Confirme o recebimento.",
     "service-delivered",
   );
   return { conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
@@ -1527,6 +1579,9 @@ export async function markServiceDelivered(userId, conversationId) {
 export async function confirmServiceCompletion(userId, conversationId) {
   const conversation = await findAccessibleConversation(userId, conversationId);
 
+  if (isCourierConversation(conversation)) {
+    throw new AppError("A corrida de motoboy e finalizada pelo proprio motoboy; nao exige confirmacao do cliente", 409);
+  }
   if (conversation.vendedor.usuario_id === userId) {
     throw new AppError("O cliente precisa confirmar o servico", 403);
   }
@@ -1613,16 +1668,36 @@ export async function disputeServiceCompletion(userId, conversationId) {
   if (conversation.vendedor.usuario_id === userId) {
     throw new AppError("Somente o cliente pode contestar a conclusao do servico", 403);
   }
-  if (conversation.status !== "AGUARDANDO_CONFIRMACAO") {
+  const completedCourier = isCourierConversation(conversation) && conversation.status === "ENCERRADA";
+  const paidProposal = [...(conversation.propostas ?? [])].reverse().find((proposal) => (
+    proposal.status === (completedCourier ? "CONCLUIDA" : "PAGA") && proposal.cobranca?.pagamento
+  ));
+  if (!paidProposal || (conversation.status !== "AGUARDANDO_CONFIRMACAO" && !completedCourier)) {
     throw new AppError("Este atendimento nao esta aguardando confirmacao do cliente", 409);
+  }
+  if (completedCourier && (!paidProposal.concluido_em
+    || Date.now() - paidProposal.concluido_em.getTime() >= 24 * 60 * 60 * 1000)) {
+    throw new AppError("O prazo de 24 horas para contestar a corrida terminou", 409);
   }
 
   const now = new Date();
-  const result = await serviceChatsRepository.transaction(async (database) => {
+  await serviceChatsRepository.transaction(async (database) => {
     const repository = createServiceChatsRepository(database);
+    if (completedCourier) {
+      const transactionId = paidProposal.cobranca.pagamento.transacao_comercial?.id;
+      if (!transactionId) throw new AppError("Distribuicao da corrida nao encontrada", 409);
+      await repository.lockCommercialTransaction(transactionId);
+      const transaction = await repository.findCommercialTransaction({
+        select: { status: true },
+        where: { id: transactionId },
+      });
+      if (transaction?.status !== "VALIDADA") {
+        throw new AppError("O prazo para contestacao financeira terminou", 409);
+      }
+    }
     const disputed = await repository.updateConversations({
       data: { status: "EM_DISPUTA" },
-      where: { id: conversation.id, status: "AGUARDANDO_CONFIRMACAO" },
+      where: { id: conversation.id, status: completedCourier ? "ENCERRADA" : "AGUARDANDO_CONFIRMACAO" },
     });
     if (disputed.count !== 1) {
       throw new AppError("O atendimento mudou antes da contestacao", 409);

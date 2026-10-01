@@ -1,6 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder, useAudioRecorderState } from "expo-audio";
+import { File } from "expo-file-system";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
@@ -43,7 +44,7 @@ async function prepareImage(asset) {
     ...normalized,
     file: undefined,
     fileName: `chat-${Date.now()}.jpg`,
-    fileSize: undefined,
+    fileSize: new File(normalized.uri).size,
     mimeType: "image/jpeg",
   };
 }
@@ -54,13 +55,13 @@ function formatRecordingTime(durationMillis) {
   return `${minutes}:${String(totalSeconds % 60).padStart(2, "0")}`;
 }
 
-async function waitForPosition(positionPromise) {
+async function waitForPosition(positionPromise, timeoutMs = 20_000) {
   let timeout;
   try {
     return await Promise.race([
       positionPromise,
       new Promise((_, reject) => {
-        timeout = setTimeout(() => reject(new Error("A localizacao demorou. Ative o GPS e tente novamente.")), 20_000);
+        timeout = setTimeout(() => reject(new Error("A localizacao demorou. Ative o GPS e tente novamente.")), timeoutMs);
       }),
     ]);
   } finally {
@@ -186,10 +187,10 @@ export function ChatComposer({
     if (type === "VIDEO" && selected.fileSize > MAX_VIDEO_BYTES) {
       throw new Error("O video ficou maior que 28 MB. Escolha um video mais curto.");
     }
-    if (type === "IMAGE" && selected.fileSize > MAX_IMAGE_BYTES) {
+    const prepared = type === "IMAGE" ? await prepareImage(selected) : selected;
+    if (type === "IMAGE" && prepared.fileSize > MAX_IMAGE_BYTES) {
       throw new Error("A foto ficou maior que 10 MB. Escolha outra imagem.");
     }
-    const prepared = type === "IMAGE" ? await prepareImage(selected) : selected;
     setAttachment(mediaFile(prepared, type));
     setActionsOpen(false);
   }
@@ -232,8 +233,9 @@ export function ChatComposer({
     try {
       const photo = await cameraRef.current.takePictureAsync({ quality: 0.68, skipProcessing: false });
       if (!photo?.uri) throw new Error("Nao foi possivel salvar a foto. Tente novamente.");
-      await useSelectedMedia(photo, "IMAGE");
       setCameraOpen(false);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      await useSelectedMedia(photo, "IMAGE");
     } catch (error) {
       reportError(error, "Nao foi possivel tirar a foto.");
     } finally {
@@ -248,7 +250,10 @@ export function ChatComposer({
     try {
       const permission = await Location.requestForegroundPermissionsAsync();
       if (!permission.granted) throw new Error("Permita o uso da localizacao para compartilhar onde voce esta.");
-      const cached = await Location.getLastKnownPositionAsync({ maxAge: 60_000, requiredAccuracy: 100 });
+      const cached = await waitForPosition(
+        Location.getLastKnownPositionAsync({ maxAge: 60_000, requiredAccuracy: 100 }),
+        5_000,
+      ).catch(() => null);
       const current = cached ?? await waitForPosition(Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
       setAttachment({ label: "Ponto GPS atual", latitude: current.coords.latitude, longitude: current.coords.longitude, type: "LOCATION" });
     } catch (error) {

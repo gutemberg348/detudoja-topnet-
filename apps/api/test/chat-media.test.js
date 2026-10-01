@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isAudioOnlyMp4, serializeChatAttachment, storedChatAttachment } from "../src/modules/chat-media/chat-media.service.js";
+import { isAudioOnlyMp4, normalizeAudioMimeType, serializeChatAttachment, storedChatAttachment } from "../src/modules/chat-media/chat-media.service.js";
 
 const audio = {
   durationMs: 2100,
@@ -39,4 +39,8 @@ test("generic Android MP4 is accepted as audio only when it has an audio track a
   assert.equal(isAudioOnlyMp4(Buffer.concat([ftyp, handler("soun"), handler("vide")])), false);
   assert.equal(isAudioOnlyMp4(Buffer.concat([ftyp, handler("vide")])), false);
   assert.equal(isAudioOnlyMp4(Buffer.from("not an mp4")), false);
+  assert.equal(normalizeAudioMimeType("video/mp4", Buffer.concat([ftyp, handler("soun")])), "audio/mp4");
+  assert.equal(normalizeAudioMimeType("video/3gpp", Buffer.concat([ftyp, handler("soun")])), "audio/3gpp");
+  assert.equal(normalizeAudioMimeType("video/3gpp2", Buffer.concat([ftyp, handler("soun")])), "audio/3gpp2");
+  assert.equal(normalizeAudioMimeType("video/3gpp", Buffer.concat([ftyp, handler("soun"), handler("vide")])), "video/3gpp");
 });

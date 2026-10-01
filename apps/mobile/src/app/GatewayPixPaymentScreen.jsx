@@ -9,7 +9,7 @@ import { ScreenContainer } from "../components/ScreenContainer";
 import { useRealtimeCharge } from "../hooks/useRealtimeCharge";
 import { useRealtimeOrders } from "../hooks/useRealtimeOrders";
 import { getCharge } from "../services/charges.api";
-import { getCustomerOrders } from "../services/orders.api";
+import { getCustomerOrders, refreshCustomerOrderPayment } from "../services/orders.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { formatarDinheiro } from "../utils/money";
 import { colors, fonts, radius, shadow, spacing, typography } from "../utils/theme";
@@ -23,6 +23,8 @@ export function GatewayPixPaymentScreen({ navigation, route }) {
   const [paymentFeedback, setPaymentFeedback] = useState(null);
   const [copied, setCopied] = useState(false);
   const successHandledRef = useRef(false);
+  const paymentCheckInFlightRef = useRef(false);
+  const lastGatewayCheckAtRef = useRef(0);
   const store = route.params?.store;
   const checkoutGroups = Array.isArray(route.params?.checkoutGroups)
     ? route.params.checkoutGroups
@@ -53,7 +55,8 @@ export function GatewayPixPaymentScreen({ navigation, route }) {
   });
 
   const syncPaymentStatus = useCallback(async () => {
-    if (!session?.accessToken || paymentConfirmed) return;
+    if (!session?.accessToken || paymentConfirmed || paymentCheckInFlightRef.current) return;
+    paymentCheckInFlightRef.current = true;
     try {
       if (charge?.code) {
         const response = await getCharge(session.accessToken, charge.code);
@@ -61,6 +64,15 @@ export function GatewayPixPaymentScreen({ navigation, route }) {
         return;
       }
       if (order?.id) {
+        if (
+          ["AGUARDANDO_PAGAMENTO", "EM_RECONCILIACAO"].includes(order.payment?.status)
+          && Date.now() - lastGatewayCheckAtRef.current >= 30_000
+        ) {
+          lastGatewayCheckAtRef.current = Date.now();
+          const response = await refreshCustomerOrderPayment(session.accessToken, order.id);
+          if (response.order) setOrder(response.order);
+          return;
+        }
         const response = await getCustomerOrders(session.accessToken, {
           storeId: order.storeId ?? store?.id,
         });
@@ -71,8 +83,10 @@ export function GatewayPixPaymentScreen({ navigation, route }) {
       }
     } catch {
       // The socket remains active; the next lightweight check retries.
+    } finally {
+      paymentCheckInFlightRef.current = false;
     }
-  }, [charge?.code, order?.id, order?.storeId, paymentConfirmed, session?.accessToken, store?.id]);
+  }, [charge?.code, order?.id, order?.payment?.status, order?.storeId, paymentConfirmed, session?.accessToken, store?.id]);
 
   useFocusEffect(useCallback(() => {
     syncPaymentStatus();

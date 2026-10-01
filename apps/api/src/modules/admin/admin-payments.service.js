@@ -134,6 +134,12 @@ export async function getAdminPaymentDetails(paymentId) {
       creditedAt: asIso(payment.deposito_carteira.creditado_em),
       feeCents: cents(payment.deposito_carteira.taxa_processamento_centavos),
     } : null,
+    service: payment.cobranca?.proposta_servico ? {
+      conversationId: payment.cobranca.proposta_servico.conversa_servico_id,
+      conversationStatus: payment.cobranca.proposta_servico.conversa_servico?.status ?? null,
+      paymentMode: payment.cobranca.proposta_servico.forma_pagamento,
+      proposalStatus: payment.cobranca.proposta_servico.status,
+    } : null,
     settlement: settlement ? {
       id: settlement.id, status: settlement.status,
       validatedAt: asIso(settlement.validada_em), settledAt: asIso(settlement.liquidada_em),

@@ -47,6 +47,18 @@ export function completeCustomerOrder(accessToken, orderId) {
   });
 }
 
+export function getCustomerDeliveryCode(accessToken, orderId) {
+  return apiRequest(`/api/app/orders/${orderId}/delivery-code`, { token: accessToken });
+}
+
+export function completeDeliveryOrderWithCode(accessToken, orderId, conversationId, code) {
+  return apiRequest(`/api/app/orders/${orderId}/delivery-code/complete`, {
+    body: { code, conversationId },
+    method: "POST",
+    token: accessToken,
+  });
+}
+
 export function cancelCustomerOrder(accessToken, orderId, { refundDestination } = {}) {
   return apiRequest(`/api/app/orders/${orderId}/cancel`, {
     body: refundDestination ? { refundDestination } : {},

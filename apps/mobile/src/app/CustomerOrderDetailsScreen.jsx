@@ -14,6 +14,7 @@ import {
   acceptCustomerOrderProposal,
   cancelCustomerOrder,
   completeCustomerOrder,
+  getCustomerDeliveryCode,
   declineCustomerOrderProposal,
   getCustomerOrderMessages,
   getCustomerOrders,
@@ -262,6 +263,8 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
   const [historyError, setHistoryError] = useState("");
   const [loadingOlderHistory, setLoadingOlderHistory] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
+  const [deliveryCode, setDeliveryCode] = useState(null);
+  const [deliveryCodeError, setDeliveryCodeError] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
   const [cancellationChoiceDismissed, setCancellationChoiceDismissed] = useState(false);
   const [proposalAction, setProposalAction] = useState("");
@@ -273,6 +276,28 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
   const lastAutomaticPaymentCheckAt = useRef(0);
   const routeConversationId = route.params?.conversationId ?? null;
   const orderStoreId = order?.storeId ?? order?.store?.id ?? null;
+
+  const loadDeliveryCode = useCallback(async (orderId) => {
+    if (!session?.accessToken) return;
+    setDeliveryCodeError(false);
+    try {
+      const response = await getCustomerDeliveryCode(session.accessToken, orderId);
+      setDeliveryCode(response.code);
+    } catch {
+      setDeliveryCode(null);
+      setDeliveryCodeError(true);
+    }
+  }, [session?.accessToken]);
+
+  useEffect(() => {
+    if (!session?.accessToken || !order?.id || order.status !== "SAIU_ENTREGA" || order.deliveryMode !== "ENTREGA") {
+      setDeliveryCode(null);
+      setDeliveryCodeError(false);
+      return undefined;
+    }
+    void loadDeliveryCode(order.id);
+    return undefined;
+  }, [session?.accessToken, order?.id, order?.status, order?.deliveryMode, loadDeliveryCode]);
 
   useEffect(() => {
     if (!session?.accessToken || !orderStoreId) return undefined;
@@ -322,7 +347,7 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
 
     const shouldCheckPayment = checkPayment
       && order.status === "AGUARDANDO_PAGAMENTO"
-      && order.payment?.status === "AGUARDANDO_PAGAMENTO"
+      && ["AGUARDANDO_PAGAMENTO", "EM_RECONCILIACAO"].includes(order.payment?.status)
       && (!automaticPaymentCheck || Date.now() - lastAutomaticPaymentCheckAt.current >= 15000);
 
     if (shouldCheckPayment && automaticPaymentCheck) {
@@ -368,8 +393,13 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
   }, [order?.id, order?.payment?.status, order?.status, session?.accessToken]);
 
   useFocusEffect(useCallback(() => {
-    loadOrder({ automaticPaymentCheck: true, checkPayment: true });
-  }, [loadOrder]));
+    void loadOrder({ automaticPaymentCheck: true, checkPayment: true });
+    if (order?.status !== "AGUARDANDO_PAGAMENTO") return undefined;
+    const timer = setInterval(() => {
+      void loadOrder({ automaticPaymentCheck: true, checkPayment: true, silent: true });
+    }, 30_000);
+    return () => clearInterval(timer);
+  }, [loadOrder, order?.status]));
 
   const handleRealtimeOrder = useCallback((payload) => {
     if (payload.order) {
@@ -784,7 +814,14 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
           ) : null}
           {historyError ? <Text style={styles.historyError}>{historyError}</Text> : null}
           {messages.map((message) => (
-            <MessageBubble accessToken={session.accessToken} key={message.id} message={message} />
+            <MessageBubble
+              accessToken={session.accessToken}
+              deliveryCode={deliveryCode}
+              deliveryCodeError={deliveryCodeError}
+              key={message.id}
+              message={message}
+              onRetryDeliveryCode={() => loadDeliveryCode(order.id)}
+            />
           ))}
           {canChoosePaidCancellation && !cancellationChoiceDismissed ? (
             <CancellationChoiceCard
@@ -1039,7 +1076,7 @@ function proposalStatusLabel(proposal) {
   return "Para decidir";
 }
 
-function MessageBubble({ accessToken, message }) {
+function MessageBubble({ accessToken, deliveryCode, deliveryCodeError, message, onRetryDeliveryCode }) {
   const isCustomer = message.kind === "customer";
   const isSystem = message.kind === "system";
   const isRichMessage = message.type === "summary" || message.type === "items";
@@ -1072,7 +1109,12 @@ function MessageBubble({ accessToken, message }) {
         </Text>
         <ChatAttachment accessToken={accessToken} attachment={message.attachment} isMine={isCustomer} />
         {message.type === "summary" ? (
-          <OrderSummaryMessage order={message.order} />
+          <OrderSummaryMessage
+            deliveryCode={deliveryCode}
+            deliveryCodeError={deliveryCodeError}
+            onRetryDeliveryCode={onRetryDeliveryCode}
+            order={message.order}
+          />
         ) : null}
         {message.type === "items" ? (
           <OrderItemsMessage order={message.order} />
@@ -1088,7 +1130,7 @@ function MessageBubble({ accessToken, message }) {
   );
 }
 
-function OrderSummaryMessage({ order }) {
+function OrderSummaryMessage({ deliveryCode, deliveryCodeError, onRetryDeliveryCode, order }) {
   return (
     <View style={styles.richMessage}>
       <View style={styles.summaryLine}>
@@ -1101,6 +1143,18 @@ function OrderSummaryMessage({ order }) {
       <OrderProgress order={order} />
       <BubbleDetail label="Total" value={formatarDinheiro(order.totalCents)} />
       <BubbleDetail label="Entrega" value={deliveryText(order)} />
+      {order.status === "SAIU_ENTREGA" && order.deliveryMode === "ENTREGA" ? (
+        <View style={styles.deliveryCodeBox}>
+          <Text style={styles.deliveryCodeLabel}>CÓDIGO DE ENTREGA</Text>
+          <Text selectable style={styles.deliveryCodeValue}>{deliveryCode ?? "••••"}</Text>
+          {deliveryCodeError ? (
+            <Pressable onPress={onRetryDeliveryCode}>
+              <Text style={styles.deliveryCodeRetry}>Não carregou? Tocar para tentar novamente</Text>
+            </Pressable>
+          ) : null}
+          <Text style={styles.deliveryCodeHint}>Só informe ao entregador depois de receber o pedido. Você também pode confirmar pelo botão acima.</Text>
+        </View>
+      ) : null}
       <PaymentBreakdown order={order} />
     </View>
   );
@@ -1503,6 +1557,11 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     padding: spacing.md,
   },
+  deliveryCodeBox: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.primaryLight, borderRadius: radius.md, borderWidth: 1, gap: 5, padding: spacing.md },
+  deliveryCodeHint: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption, lineHeight: 18, textAlign: "center" },
+  deliveryCodeLabel: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 11 },
+  deliveryCodeRetry: { color: colors.primaryDark, fontFamily: fonts.semiBold, fontSize: typography.caption },
+  deliveryCodeValue: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: 30, letterSpacing: 5 },
   confirmCopy: {
     gap: spacing.xs,
   },

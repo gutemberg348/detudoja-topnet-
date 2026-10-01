@@ -3,9 +3,12 @@ import QRCode from "qrcode";
 import {
   emitChargeUpdated,
   emitServiceChatUpdated,
+  emitServiceAvailabilityUpdated,
   emitWalletUpdated,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
+import { prisma } from "../../config/prisma.js";
+import { isCourierSellerBusy } from "../courier/courier-availability.js";
 import { chargeRepository, createChargeRepository } from "./charge.repository.js";
 import {
   getStoreCommissionDistribution,
@@ -20,6 +23,7 @@ import {
   resolvePaymentPolicy,
 } from "../earnings/order-earnings.config.js";
 import { releaseCommercialSettlement } from "../earnings/earnings-release.service.js";
+import { completePaidCourierRide, isCourierConversation, lockCourierConversation, shouldCompletePaidCourierRide } from "../service-chats/courier-completion.js";
 import {
   assertSellerMonthlyCpfLimit,
   assertStoreMonthlyCpfLimit,
@@ -113,9 +117,16 @@ const chargeInclude = {
           cliente_usuario_id: true,
           id: true,
           loja_solicitante_id: true,
+          pedido_loja_id: true,
+          solicitacao_motoboy: { select: { id: true } },
+          status: true,
           segmento_venda: { select: { nome: true } },
           servico_vendedor: {
             select: {
+              tipo_servico_id: true,
+              disponivel_agora: true,
+              excluido_em: true,
+              status: true,
               tipo_servico: { select: { tipo_operacao: true } },
             },
           },
@@ -837,35 +848,68 @@ async function completePaidCharge(database, charge, payment) {
   }
 
   let serviceConversation = null;
+  let completedCourierEarnings = null;
   if (charge.proposta_servico_id && charge.proposta_servico?.conversa_servico) {
     await repository.updateServiceProposal({
       data: { pago_em: paidAt, status: "PAGA" },
       where: { id: charge.proposta_servico_id },
     });
-    await repository.updateServiceConversation({
-      data: { status: "ACORDADA" },
-      where: { id: charge.proposta_servico.conversa_servico.id },
-    });
+    const conversation = charge.proposta_servico.conversa_servico;
+    if (isCourierConversation(conversation)) await lockCourierConversation(database, conversation.id);
+    const currentConversation = isCourierConversation(conversation)
+      ? await database.conversaServico.findUnique({
+        select: { status: true },
+        where: { id: conversation.id },
+      })
+      : conversation;
+    const completeQrRide = shouldCompletePaidCourierRide(
+      { ...conversation, status: currentConversation?.status },
+      charge.proposta_servico.forma_pagamento,
+    );
+    if (completeQrRide) {
+      completedCourierEarnings = await completePaidCourierRide(database, {
+        actorUserId: null,
+        chargeId: charge.id,
+        conversationId: conversation.id,
+        expectedStatus: "AGUARDANDO_CONFIRMACAO",
+        proposalId: charge.proposta_servico_id,
+        when: paidAt,
+      });
+    } else if (currentConversation?.status === "ACORDADA") {
+      // Payment alone must not finish a prepaid ride.
+      await repository.updateServiceConversation({
+        data: { status: "ACORDADA" },
+        where: { id: conversation.id },
+      });
+    }
     await repository.createServiceMessage({
       data: {
         conversa_servico_id: charge.proposta_servico.conversa_servico.id,
         lido_cliente_em: paidAt,
-        mensagem: "Pagamento confirmado pela plataforma. O servico pode seguir.",
+        mensagem: completedCourierEarnings
+          ? "Pagamento confirmado. Corrida concluida; os ganhos ficam protegidos por 24 horas."
+          : "Pagamento confirmado pela plataforma. O servico pode seguir.",
         origem: "SISTEMA",
       },
     });
     serviceConversation = {
+      completedCourierRide: completeQrRide,
       conversationId: charge.proposta_servico.conversa_servico.id,
       customerUserId: charge.proposta_servico.conversa_servico.cliente_usuario_id,
+      sellerId: charge.vendedor_id,
       sellerUserId: charge.vendedor?.usuario_id ?? null,
+      serviceAvailable: Boolean(conversation.servico_vendedor?.disponivel_agora
+        && conversation.servico_vendedor?.status === "ATIVO"
+        && !conversation.servico_vendedor?.excluido_em),
+      serviceTypeId: conversation.servico_vendedor?.tipo_servico_id ?? null,
     };
   }
 
-  const earnings = charge.loja_id
+  const earnings = completedCourierEarnings ?? (charge.loja_id
     ? await settlePaidStoreChargeEarnings(database, charge.id)
     : charge.venda_autonoma_id
       ? await settlePaidAutonomousChargeEarnings(database, charge.id)
-      : null;
+      : null);
   const releaseImmediately = Boolean(charge.loja_id || charge.venda_autonoma_id);
   const release = earnings?.transactionId && releaseImmediately
     ? await releaseCommercialSettlement(database, earnings.transactionId, {
@@ -979,6 +1023,15 @@ export async function publishChargePaymentResult(result) {
   }
   if (result.serviceConversation) {
     emitServiceChatUpdated({ ...result.serviceConversation, reason: "payment-confirmed" });
+    if (result.serviceConversation.completedCourierRide && result.serviceConversation.serviceTypeId) {
+      const busy = await isCourierSellerBusy(prisma, result.serviceConversation.sellerId).catch(() => true);
+      emitServiceAvailabilityUpdated({
+        available: result.serviceConversation.serviceAvailable && !busy,
+        sellerId: result.serviceConversation.sellerId,
+        sellerUserId: result.serviceConversation.sellerUserId,
+        serviceTypeId: result.serviceConversation.serviceTypeId,
+      });
+    }
   }
 }
 
@@ -1189,6 +1242,19 @@ export async function payChargeWithWallet(userId, rawCode) {
   });
 }
 
+export function permanentQrAttemptRetryDetails(charge) {
+  if (charge?.status === "ATIVA" && !charge.pagamento) {
+    return { code: "PAYMENT_ATTEMPT_NOT_STARTED", retryWithNewKey: true };
+  }
+  if (
+    ["CANCELADA", "EXPIRADA"].includes(charge?.status)
+    || ["CANCELADO", "FALHOU", "ESTORNADO"].includes(charge?.pagamento?.status)
+  ) {
+    return { code: "PAYMENT_ATTEMPT_FINAL_FAILURE", retryWithNewKey: true };
+  }
+  return null;
+}
+
 export async function createPermanentStoreQrPayment(userId, rawToken, data) {
   await chargeRepository.requireUserCpf(userId);
   const token = normalizePermanentStoreToken(rawToken);
@@ -1248,7 +1314,11 @@ export async function createPermanentStoreQrPayment(userId, rawToken, data) {
   }
 
   if (cents(charge.valor_centavos) !== Number(data.amountCents) || charge.loja_id !== store.id) {
-    throw new AppError("Esta tentativa de pagamento ja foi usada com outros dados", 409);
+    throw new AppError(
+      "Esta tentativa de pagamento ja foi usada com outros dados",
+      409,
+      permanentQrAttemptRetryDetails(charge) ?? undefined,
+    );
   }
   if (charge.status === "PAGA") {
     return { charge: serializeCharge(charge), gatewayPayment: null };
@@ -1264,14 +1334,11 @@ export async function createPermanentStoreQrPayment(userId, rawToken, data) {
       },
     };
   }
-  if (
-    ["CANCELADA", "EXPIRADA"].includes(charge.status)
-    || ["CANCELADO", "FALHOU", "ESTORNADO"].includes(charge.pagamento?.status)
-  ) {
+  if (permanentQrAttemptRetryDetails(charge)?.code === "PAYMENT_ATTEMPT_FINAL_FAILURE") {
     throw new AppError(
       "A tentativa anterior foi encerrada com seguranca. Toque novamente para criar um novo pagamento.",
       409,
-      { code: "PAYMENT_ATTEMPT_FINAL_FAILURE", retryWithNewKey: true },
+      permanentQrAttemptRetryDetails(charge),
     );
   }
   if (charge.status !== "ATIVA") {
@@ -1288,15 +1355,16 @@ export async function createPermanentStoreQrPayment(userId, rawToken, data) {
       include: chargeInclude,
       where: { chave_idempotencia: idempotencyKey },
     });
-    if (
-      ["CANCELADA", "EXPIRADA"].includes(failedAttempt?.status)
-      || ["CANCELADO", "FALHOU", "ESTORNADO"].includes(failedAttempt?.pagamento?.status)
-    ) {
+    const retryDetails = permanentQrAttemptRetryDetails(failedAttempt);
+    if (retryDetails?.code === "PAYMENT_ATTEMPT_FINAL_FAILURE") {
       throw new AppError(
         "O gateway nao concluiu esta tentativa. Seu saldo foi liberado e voce ja pode tentar novamente.",
         409,
-        { code: "PAYMENT_ATTEMPT_FINAL_FAILURE", retryWithNewKey: true },
+        retryDetails,
       );
+    }
+    if (retryDetails?.code === "PAYMENT_ATTEMPT_NOT_STARTED") {
+      throw new AppError(error.message, error.statusCode ?? 503, retryDetails);
     }
     throw error;
   }

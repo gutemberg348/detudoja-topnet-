@@ -29,6 +29,7 @@ import { useConversationRealtime } from "../hooks/useConversationRealtime";
 import { useChatTimeline } from "../hooks/useChatTimeline";
 import { useChatTyping } from "../hooks/useChatTyping";
 import { getGeneratedChargeQr } from "../services/seller.api";
+import { completeDeliveryOrderWithCode } from "../services/orders.api";
 import {
   acceptServiceConversation,
   acceptServiceProposal,
@@ -37,6 +38,7 @@ import {
   createServiceProposal,
   createServiceReview,
   declineServiceProposal,
+  disputeServiceCompletion,
   getServiceConversation,
   markServiceConversationRead,
   markServiceDelivered,
@@ -84,6 +86,7 @@ export function ServiceConversationScreen({ navigation, route }) {
   const [conversation, setConversation] = useState(initial);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [draft, setDraft] = useState("");
+  const [deliveryCodeInput, setDeliveryCodeInput] = useState("");
   const [error, setError] = useState("");
   const [proposalForm, setProposalForm] = useState(initialProposalForm);
   const [proposalOpen, setProposalOpen] = useState(false);
@@ -127,7 +130,13 @@ export function ServiceConversationScreen({ navigation, route }) {
   const isFixedPrice = conversation?.serviceType?.mode === "PRECO_FIXO";
   const isCourierRide = Boolean(
     conversation?.request?.store
+    || conversation?.courierRide
     || conversation?.serviceType?.operationalType === "ENTREGA_LOCAL",
+  );
+  const isCustomerMotoboyRide = Boolean(
+    (conversation?.courierRide || conversation?.serviceType?.operationalType === "ENTREGA_LOCAL")
+    && !conversation?.request?.store
+    && !conversation?.request?.order,
   );
   const isAwaitingServiceAcceptance = Boolean(
     !isCourierRide && conversation?.status === "ABERTA",
@@ -249,15 +258,23 @@ export function ServiceConversationScreen({ navigation, route }) {
     const onTyping = (payload = {}) => {
       if (payload.scope === "service" && Number(payload.senderUserId) !== Number(session.user?.id)) typing.receiveTyping(payload);
     };
+    const onOrderStatus = (payload = {}) => {
+      if (Number(payload.orderId) !== Number(conversation.request?.order?.id)) return;
+      setConversation((current) => current?.request?.order
+        ? { ...current, request: { ...current.request, order: { ...current.request.order, status: payload.status } } }
+        : current);
+    };
     socket?.on(realtimeEvents.serviceChatMessageCreated, onMessage);
+    socket?.on(realtimeEvents.orderStatusUpdated, onOrderStatus);
     socket?.on(realtimeEvents.chatTyping, onTyping);
     socket?.on(realtimeEvents.serviceChatUpdated, onUpdated);
     return () => {
       socket?.off(realtimeEvents.serviceChatMessageCreated, onMessage);
+      socket?.off(realtimeEvents.orderStatusUpdated, onOrderStatus);
       socket?.off(realtimeEvents.chatTyping, onTyping);
       socket?.off(realtimeEvents.serviceChatUpdated, onUpdated);
     };
-  }, [conversation?.id, session?.accessToken, session?.user?.id, typing.receiveTyping]);
+  }, [conversation?.id, conversation?.request?.order?.id, session?.accessToken, session?.user?.id, typing.receiveTyping]);
 
   async function send(payload = null) {
     if ((!draft.trim() && !payload?.attachment) || sending || !session?.accessToken) return;
@@ -362,6 +379,10 @@ export function ServiceConversationScreen({ navigation, route }) {
     if (!proposal?.charge?.id) return;
 
     await runAction("qr", async () => {
+      if (isCustomerMotoboyRide && conversation.status === "ACORDADA" && proposal.paymentMode === "QR_PRESENCIAL") {
+        const finished = await markServiceDelivered(session.accessToken, conversation.id);
+        setConversation(finished.conversation);
+      }
       const response = await getGeneratedChargeQr(
         session.accessToken,
         proposal.charge.id,
@@ -407,6 +428,36 @@ export function ServiceConversationScreen({ navigation, route }) {
         conversation.id,
       );
       setConversation(response.conversation);
+    });
+  }
+
+  async function disputeCompletion() {
+    await runAction("dispute", async () => {
+      const response = await disputeServiceCompletion(session.accessToken, conversation.id);
+      setConversation(response.conversation);
+    });
+  }
+
+  async function confirmStoreDelivery() {
+    if (!/^\d{4}$/.test(deliveryCodeInput)) {
+      setError("Digite os 4 digitos que o cliente recebeu no pedido.");
+      return;
+    }
+    await runAction("delivery-code", async () => {
+      await completeDeliveryOrderWithCode(
+        session.accessToken,
+        conversation.request.order.id,
+        conversation.id,
+        deliveryCodeInput,
+      );
+      setConversation((current) => ({
+        ...current,
+        request: {
+          ...current.request,
+          order: { ...current.request.order, status: "CONCLUIDO" },
+        },
+      }));
+      setDeliveryCodeInput("");
     });
   }
 
@@ -490,7 +541,9 @@ export function ServiceConversationScreen({ navigation, route }) {
           <View style={styles.statusLine}>
             <View style={styles.statusDot} />
             <Text style={styles.statusText}>
-              {conversationStatusCopy[conversation.status] ?? conversation.status}
+              {isCustomerMotoboyRide && conversation.status === "AGUARDANDO_CONFIRMACAO"
+                ? "Aguardando pagamento"
+                : conversationStatusCopy[conversation.status] ?? conversation.status}
             </Text>
           </View>
         </View>
@@ -599,11 +652,40 @@ export function ServiceConversationScreen({ navigation, route }) {
         </View>
       ) : null}
 
+      {conversation.isSeller && conversation.request?.store && conversation.request?.order?.status === "SAIU_ENTREGA" ? (
+        <View style={styles.deliveryProofCard}>
+          <View style={styles.deliveryProofHeader}>
+            <Ionicons color={colors.primaryDark} name="bag-check-outline" size={22} />
+            <View style={styles.deliveryProofCopy}>
+              <Text style={styles.deliveryProofTitle}>Confirmar entrega do pedido</Text>
+              <Text style={styles.deliveryProofHint}>Peça ao cliente o código exibido no pedido. Digite somente após entregar os itens.</Text>
+            </View>
+          </View>
+          <TextInput
+            accessibilityLabel="Codigo de entrega de 4 digitos"
+            keyboardType="number-pad"
+            maxLength={4}
+            onChangeText={(value) => setDeliveryCodeInput(value.replace(/\D/g, ""))}
+            placeholder="Código de 4 dígitos"
+            style={styles.deliveryProofInput}
+            value={deliveryCodeInput}
+          />
+          <AppButton
+            disabled={deliveryCodeInput.length !== 4 || Boolean(actionLoading)}
+            icon="checkmark-circle-outline"
+            loading={actionLoading === "delivery-code"}
+            onPress={confirmStoreDelivery}
+            title="Confirmar entrega"
+          />
+        </View>
+      ) : null}
+
       {latestProposal ? (
         <ProposalCard
           actionLoading={actionLoading}
           conversation={conversation}
           isCourierRide={isCourierRide}
+          isCustomerMotoboyRide={isCustomerMotoboyRide}
           onAccept={acceptProposal}
           onConfirmCompletion={confirmCompletion}
           onDecline={declineProposal}
@@ -620,6 +702,13 @@ export function ServiceConversationScreen({ navigation, route }) {
           </Text>
         </View>
       )}
+
+      {isCustomerMotoboyRide && !conversation.isSeller && conversation.canDispute && conversation.status === "ENCERRADA" ? (
+        <Pressable accessibilityRole="button" disabled={Boolean(actionLoading)} onPress={disputeCompletion} style={styles.rideDispute}>
+          <Ionicons color={colors.danger} name="alert-circle-outline" size={18} />
+          <Text style={styles.rideDisputeText}>Problema com a corrida? Contestar antes da liberacao.</Text>
+        </Pressable>
+      ) : null}
 
       {conversation.canReview ? (
         <Pressable
@@ -835,6 +924,7 @@ function ProposalCard({
   actionLoading,
   conversation,
   isCourierRide,
+  isCustomerMotoboyRide,
   onAccept,
   onConfirmCompletion,
   onDecline,
@@ -923,13 +1013,15 @@ function ProposalCard({
           loading={actionLoading === "qr"}
           onPress={() => onOpenQr(proposal)}
           style={styles.compactProposalButton}
-          title="Exibir QR presencial"
+          title={isCustomerMotoboyRide && conversation.status === "ACORDADA" ? "Cobrar na chegada" : "Exibir QR presencial"}
         />
       ) : null}
 
       {activeCharge && !isSeller && proposal.paymentMode === "QR_PRESENCIAL" ? (
         <Text style={styles.proposalHint}>
-          Encontre o prestador e pague pelo QR que ele exibir no atendimento.
+          {isCustomerMotoboyRide && conversation.status === "AGUARDANDO_CONFIRMACAO"
+            ? "Corrida finalizada. Pague pelo QR do motoboy para concluir automaticamente."
+            : "Encontre o prestador e pague pelo QR que ele exibir no atendimento."}
         </Text>
       ) : null}
 
@@ -943,7 +1035,8 @@ function ProposalCard({
         </Text>
       ) : null}
 
-      {paid && conversation.status === "ACORDADA" && isSeller ? (
+      {paid && isSeller && (conversation.status === "ACORDADA"
+        || (isCustomerMotoboyRide && conversation.status === "AGUARDANDO_CONFIRMACAO")) ? (
         <AppButton
           icon="checkmark-done-outline"
           loading={actionLoading === "delivered"}
@@ -953,7 +1046,7 @@ function ProposalCard({
         />
       ) : null}
 
-      {conversation.status === "AGUARDANDO_CONFIRMACAO" && !isSeller ? (
+      {conversation.status === "AGUARDANDO_CONFIRMACAO" && !isSeller && paid && !isCustomerMotoboyRide ? (
         <AppButton
           icon="shield-checkmark-outline"
           loading={actionLoading === "completion"}
@@ -963,8 +1056,12 @@ function ProposalCard({
         />
       ) : null}
 
-      {conversation.status === "AGUARDANDO_CONFIRMACAO" && isSeller ? (
-        <Text style={styles.proposalHint}>Aguardando a confirmacao do cliente.</Text>
+      {conversation.status === "AGUARDANDO_CONFIRMACAO" && isSeller && !paid ? (
+        <Text style={styles.proposalHint}>
+          {isCustomerMotoboyRide && !paid
+            ? "Corrida finalizada. Exiba o QR e aguarde o pagamento para concluir."
+            : "Aguardando a confirmacao do cliente."}
+        </Text>
       ) : null}
     </View>
   );
@@ -1288,6 +1385,12 @@ function parseMoneyToCents(value) {
 }
 
 const styles = StyleSheet.create({
+  deliveryProofCard: { backgroundColor: "#F0FDF4", borderBottomColor: colors.primaryLight, borderBottomWidth: 1, gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  deliveryProofCopy: { flex: 1, gap: 3 },
+  deliveryProofHeader: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
+  deliveryProofHint: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption },
+  deliveryProofInput: { backgroundColor: colors.card, borderColor: colors.primaryLight, borderRadius: radius.md, borderWidth: 1, color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.label, letterSpacing: 4, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  deliveryProofTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.small },
   acceptanceButton: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.md, flexDirection: "row", gap: 5, justifyContent: "center", minHeight: 40, minWidth: 88, paddingHorizontal: spacing.md },
   acceptanceButtonText: { color: colors.card, fontFamily: fonts.bold, fontSize: typography.caption },
   acceptanceActions: { alignItems: "stretch", gap: spacing.xs },
@@ -1429,6 +1532,8 @@ const styles = StyleSheet.create({
   reviewPromptTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.small },
   reviewSaved: { alignItems: "center", backgroundColor: colors.primarySoft, flexDirection: "row", gap: spacing.xs, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
   reviewSavedText: { color: colors.primaryDark, flex: 1, fontFamily: fonts.medium, fontSize: typography.caption },
+  rideDispute: { alignItems: "center", backgroundColor: colors.dangerSoft, borderBottomColor: colors.danger, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  rideDisputeText: { color: colors.danger, flex: 1, fontFamily: fonts.semiBold, fontSize: typography.caption },
   routeAddressAction: { alignItems: "center", backgroundColor: colors.primarySoft, borderColor: colors.primaryLight, borderRadius: radius.round, borderWidth: 1, flexDirection: "row", gap: 4, height: 40, justifyContent: "center", paddingHorizontal: spacing.sm },
   routeAddressActionText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 10 },
   routeAddressActionTextDisabled: { color: colors.textMuted },

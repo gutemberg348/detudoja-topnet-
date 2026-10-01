@@ -3,6 +3,19 @@ import { chatAttachmentFields, validateMessageAttachment } from "../chat-media/c
 
 const onlyDigits = (value) => String(value ?? "").replace(/\D/g, "");
 
+export const completeDeliveryWithCodeSchema = z.object({
+  code: z.string().regex(/^\d{4}$/, "Informe os 4 digitos do codigo de entrega"),
+  conversationId: z.coerce.number().int().positive("Conversa de entrega invalida"),
+}).strict();
+
+export const previewExternalDeliverySchema = z.object({
+  token: z.string().regex(/^[A-Za-z0-9_-]{43}$/, "Link de entrega invalido"),
+}).strict();
+
+export const completeExternalDeliverySchema = previewExternalDeliverySchema.extend({
+  code: z.string().regex(/^\d{4}$/, "Informe os 4 digitos do codigo de entrega"),
+});
+
 const checkoutAddressSchema = z.object({
   bairro: z.string().trim().min(1, "Informe o bairro").max(120),
   cep: z.string().transform(onlyDigits).refine((value) => value.length === 8, "CEP invalido"),

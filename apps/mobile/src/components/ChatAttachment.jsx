@@ -6,6 +6,7 @@ import { useVideoPlayer, VideoView } from "expo-video";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Animated, Image, Linking, Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { getValidAccessToken } from "../services/api";
 import { resolveMediaUrl } from "../utils/media";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
 
@@ -24,11 +25,17 @@ function formatDuration(seconds) {
 }
 
 function extensionFor(attachment) {
-  const mimeType = attachment.mimeType ?? "";
+  const mimeType = String(attachment.mimeType ?? "").toLowerCase();
   if (mimeType.includes("png")) return "png";
   if (mimeType.includes("webp")) return "webp";
   if (mimeType.includes("avif")) return "avif";
+  if (mimeType.includes("3gpp2")) return "3g2";
+  if (mimeType.includes("3gpp")) return "3gp";
   if (mimeType.includes("quicktime")) return "mov";
+  if (mimeType.includes("ogg")) return "ogg";
+  if (mimeType.includes("webm")) return "webm";
+  if (mimeType.includes("flac")) return "flac";
+  if (mimeType.includes("aac")) return "aac";
   if (mimeType.includes("video")) return "mp4";
   if (mimeType.includes("mpeg")) return "mp3";
   if (mimeType.includes("wav")) return "wav";
@@ -73,12 +80,23 @@ function useCachedMedia(attachment, accessToken) {
       try {
         const destination = new File(Paths.cache, cacheKey);
         if (attempt > 0 && destination.exists) destination.delete();
-        const downloaded = destination.exists && Number(destination.size ?? 0) > 0
-          ? destination
-          : await File.downloadFileAsync(remoteUri, destination, {
-            headers: remoteSource.headers,
-            idempotent: true,
-          });
+        let downloaded = destination.exists && Number(destination.size ?? 0) > 0 ? destination : null;
+        if (!downloaded) {
+          const validToken = await getValidAccessToken(accessToken);
+          try {
+            downloaded = await File.downloadFileAsync(remoteUri, destination, {
+              headers: validToken ? { Authorization: `Bearer ${validToken}` } : undefined,
+              idempotent: true,
+            });
+          } catch (downloadError) {
+            if (!accessToken || !/\b401\b/.test(String(downloadError?.message ?? ""))) throw downloadError;
+            const refreshedToken = await getValidAccessToken(accessToken, { force: true });
+            downloaded = await File.downloadFileAsync(remoteUri, destination, {
+              headers: refreshedToken ? { Authorization: `Bearer ${refreshedToken}` } : undefined,
+              idempotent: true,
+            });
+          }
+        }
         if (active) setState({ error: "", loading: false, source: { uri: downloaded.uri } });
       } catch (error) {
         if (active) {
@@ -152,7 +170,7 @@ function ImageAttachment({ accessToken, attachment }) {
         <Image resizeMode="cover" source={media.source} style={styles.image} />
         <View style={styles.imageExpand}><Ionicons color={colors.card} name="expand-outline" size={16} /></View>
       </Pressable>
-      <Modal animationType="fade" onRequestClose={() => setOpen(false)} transparent visible={open}>
+      <Modal animationType="fade" onRequestClose={() => setOpen(false)} presentationStyle="fullScreen" visible={open}>
         <SafeAreaView style={styles.viewer}>
           <View style={styles.viewerHeader}>
             <Pressable accessibilityLabel="Fechar foto" accessibilityRole="button" hitSlop={10} onPress={() => setOpen(false)} style={styles.viewerAction}>
@@ -338,7 +356,7 @@ const styles = StyleSheet.create({
   video: { aspectRatio: 1.2, borderRadius: radius.md, overflow: "hidden", width: "100%" },
   viewer: { backgroundColor: "rgba(3,10,8,0.98)", flex: 1 },
   viewerAction: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.12)", borderRadius: radius.round, height: 42, justifyContent: "center", width: 42 },
-  viewerHeader: { alignItems: "center", flexDirection: "row", gap: spacing.md, justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  viewerHeader: { alignItems: "center", elevation: 2, flexDirection: "row", gap: spacing.md, justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, zIndex: 2 },
   viewerHint: { color: "rgba(255,255,255,0.66)", fontFamily: fonts.medium, fontSize: 11, paddingBottom: spacing.lg, textAlign: "center" },
   viewerImage: { flex: 1, width: "100%" },
   viewerTitle: { color: colors.card, fontFamily: fonts.bold, fontSize: typography.small },

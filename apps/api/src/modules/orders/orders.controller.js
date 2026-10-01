@@ -2,6 +2,8 @@ import {
   cancelCustomerOrder,
   acceptCustomerOrderProposal,
   completeCustomerOrder,
+  completeDeliveryOrderWithCode,
+  getCustomerDeliveryCode,
   createCheckoutOrder,
   createCustomerOrderMessage,
   createOnlineOrderRequest,
@@ -83,6 +85,23 @@ export async function createCustomerOrderMessageController(req, res, next) {
 export async function completeCustomerOrderController(req, res, next) {
   try {
     res.json(await completeCustomerOrder(req.auth.user.id, req.params.orderId));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getCustomerDeliveryCodeController(req, res, next) {
+  try {
+    res.set("Cache-Control", "no-store");
+    res.json(await getCustomerDeliveryCode(req.auth.user.id, req.params.orderId));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function completeDeliveryOrderWithCodeController(req, res, next) {
+  try {
+    res.json(await completeDeliveryOrderWithCode(req.auth.user.id, req.params.orderId, req.body));
   } catch (error) {
     next(error);
   }

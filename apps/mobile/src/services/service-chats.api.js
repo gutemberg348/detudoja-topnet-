@@ -111,6 +111,14 @@ export function confirmServiceCompletion(token, conversationId) {
   });
 }
 
+export function disputeServiceCompletion(token, conversationId) {
+  return apiRequest(`/api/app/service-chats/${conversationId}/dispute`, {
+    body: {},
+    method: "POST",
+    token,
+  });
+}
+
 export function createServiceReview(token, conversationId, data) {
   return apiRequest(`/api/app/service-chats/${conversationId}/reviews`, {
     body: data,

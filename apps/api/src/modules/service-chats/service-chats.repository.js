@@ -11,6 +11,7 @@ export function createServiceChatsRepository(database = prisma) {
     createProposal(args) { return database.propostaServico.create(args); },
     createServiceType(args) { return database.tipoServico.create(args); },
     findConversation(args) { return database.conversaServico.findFirst(args); },
+    findCommercialTransaction(args) { return database.transacaoComercial.findUnique(args); },
     findReview(args) { return database.avaliacaoServico.findUnique(args); },
     findConversations(args) { return database.conversaServico.findMany(args); },
     countMessages(args) { return database.conversaServicoMensagem.count(args); },
@@ -26,6 +27,10 @@ export function createServiceChatsRepository(database = prisma) {
     requireCommercialTier2(userId) { return requireCommercialTier2(database, userId); },
     lockServiceConversation(customerUserId, sellerServiceId) {
       return database.$executeRaw`SELECT pg_advisory_xact_lock(CAST(${customerUserId} AS integer), CAST(${sellerServiceId} AS integer))`;
+    },
+    lockCommercialTransaction(transactionId) {
+      const lockKey = 724_010_000_000 + Number(transactionId);
+      return database.$queryRaw`SELECT pg_advisory_xact_lock(CAST(${lockKey} AS bigint))::text AS locked`;
     },
     transaction(work) { return database.$transaction(work); },
     updateCharges(args) { return database.cobranca.updateMany(args); },

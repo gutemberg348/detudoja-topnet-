@@ -1,5 +1,6 @@
 import { Router } from "express";
 import {
+  getExternalDeliveryLinkController,
   createAutonomousSaleController,
   createStoreOrderMessageController,
   createStoreOrderProposalController,
@@ -169,6 +170,10 @@ sellerRoutes.patch(
   "/stores/:storeId/orders/:orderId/status",
   validate(updateStoreOrderStatusSchema),
   updateStoreOrderStatusController,
+);
+sellerRoutes.get(
+  "/stores/:storeId/orders/:orderId/external-delivery-link",
+  getExternalDeliveryLinkController,
 );
 sellerRoutes.get(
   "/stores/:storeId/orders/:orderId/messages",

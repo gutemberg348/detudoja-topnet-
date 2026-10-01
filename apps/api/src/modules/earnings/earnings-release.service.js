@@ -38,7 +38,11 @@ export async function releaseCommercialSettlement(
           cobranca: {
             select: {
               proposta_servico: {
-                select: { concluido_em: true, status: true },
+                select: {
+                  concluido_em: true,
+                  status: true,
+                  conversa_servico: { select: { status: true } },
+                },
               },
             },
           },
@@ -74,7 +78,9 @@ export async function releaseCommercialSettlement(
   const serviceProposal = transaction.pagamento.cobranca?.proposta_servico;
   if (
     serviceProposal
-    && (serviceProposal.status !== "CONCLUIDA" || !serviceProposal.concluido_em)
+    && (serviceProposal.status !== "CONCLUIDA"
+      || !serviceProposal.concluido_em
+      || serviceProposal.conversa_servico?.status === "EM_DISPUTA")
   ) {
     return { availableAt, released: false, transactionId, walletUserIds: [] };
   }
