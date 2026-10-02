@@ -7,6 +7,41 @@ sem precisar reconstruir todo o contexto pela conversa. Sempre que uma regra,
 rota, tela, schema, comando ou fluxo importante mudar, atualize este arquivo.
 O indice e a regra completa de documentacao ficam em `docs/README.md`.
 
+## Atualizacao 2026-10-02: teste isolado Pix Sicredi na VPS
+
+- `docker/test-sicredi-pix-sandbox.sh` e `apps/api/scripts/sicredi-pix-sandbox.js`
+  testam certificado, autenticacao, criacao de cobranca Pix de R$ 1,00 e consulta
+  por TXID. Nao alteram o app, banco, gateway Asaas ou `apps/api/.env`.
+- Endpoints fixos `api-pix-h.sicredi.com.br/oauth/token` e `/api/v2`, publicados
+  no guia oficial anterior de 2022. Isso corrige a lacuna de documentacao sobre
+  os enderecos de homologacao; a disponibilidade atual sera testada na VPS.
+- Usa a imagem Docker instalada com os scripts montados do checkout, sem
+  rebuild/restart. Certificados em `/etc/detudoja/certificados/`; diretorio
+  do servidor informado pelo usuario: `/var/www/brasil/detudoja-topnet-`.
+- Par de teste dedicado tem prioridade sobre Pix e Multipag. Usar o par
+  Multipag e uma tentativa explicita de autenticacao, nao prova de permissao
+  para recebimento. Chave recebedora fica em arquivo separado opcional.
+- Consulta antes do PUT, prefixo DTJTEST, sem repeticao automatica da criacao.
+  Logs ocultam credenciais e exibem a etapa/status e erros sanitizados do banco.
+- Instrucoes: `docs/sicredi-pix-sandbox.md`. Validado localmente com 20 testes
+  e sintaxe Bash; nenhuma chamada ao banco feita. Execucao na VPS pendente.
+
+## Atualizacao 2026-10-02: chat com teclado no iPhone
+
+- O relato de mensagens sumindo com o teclado aberto foi tratado em
+  `useChatTimeline`: listas curtas tambem executam `scrollToEnd`, transicoes
+  do teclado iOS preservam o acompanhamento e ha reposicionamento ao final
+  de `keyboardDidChangeFrame`. Mensagem propria retoma a rolagem para o fim.
+- `ServiceConversationScreen` e `PersonalConversationScreen` preservam a
+  primeira mensagem visivel apenas ao ler o historico, evitando conflito com
+  a ancoragem no rodape. Os chats de servico, pessoais, loja e pedido informam
+  `onScrollBeginDrag` para respeitar a rolagem manual.
+- `scrollToLatest` aceita o evento de `Pressable` sem repassa-lo como valor
+  de `animated` para o componente nativo. Sem alteracao de API ou migration.
+- Validado: 47/47 testes mobile, sete simulacoes isoladas com eventos React/
+  nativos simulados e export Expo iOS. Pendente: reproducao e confirmacao
+  visual em iPhone real, inclusive com historico paginado e texto multilinha.
+
 ## Auditoria de lancamento 2026-09-08
 
 - Sem considerar registros antigos, o gate de codigo passou: 47 migrations em

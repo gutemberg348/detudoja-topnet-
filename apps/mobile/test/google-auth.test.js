@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { googleConfigurationError, googleErrorMessage, performNativeGoogleLogin } from "../src/utils/google-auth.js";
 import appConfig from "../app.config.js";
 
@@ -12,6 +14,40 @@ test("Android usa ID Web; iOS exige credencial propria", () => {
   assert.equal(googleConfigurationError(config), null);
   assert.equal(googleConfigurationError({ ...config, webClientId: "token" }), "GOOGLE_WEB_CLIENT_MISSING");
   assert.equal(googleConfigurationError({ ...config, platform: "ios", iosClientId: config.webClientId }), "GOOGLE_IOS_CLIENT_MISSING");
+});
+
+test("ID ausente bloqueia login antes de chamar o SDK", async () => {
+  await assert.rejects(performNativeGoogleLogin({ platform: "android", webClientId: "", googleSignin: {
+    configure() { assert.fail("SDK nao deve ser chamado sem ID"); },
+  } }), { code: "GOOGLE_WEB_CLIENT_MISSING" });
+});
+
+test("Expo Go e APK sem modulo nativo recebem orientacoes distintas", () => {
+  assert.match(googleErrorMessage({ code: "GOOGLE_EXPO_GO_UNSUPPORTED" }), /Expo Go/);
+  assert.match(googleErrorMessage({ code: "GOOGLE_NATIVE_MODULE_MISSING" }), /APK atualizado/);
+});
+
+function checkBuildConfig(webClientId, platform = "android", iosClientId = "") {
+  return spawnSync(process.execPath, [fileURLToPath(new URL("../scripts/check-google-auth-config.js", import.meta.url))], {
+    encoding: "utf8",
+    env: { ...process.env, EAS_BUILD: "true", EAS_BUILD_PLATFORM: platform,
+      EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: webClientId, EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: iosClientId },
+  });
+}
+
+test("build EAS sem ID falha mesmo quando o desenvolvedor tem .env local", () => {
+  const result = checkBuildConfig("");
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /GOOGLE_WEB_CLIENT_MISSING/);
+});
+
+test("build Android aceita ID Web e iOS exige cliente separado sem imprimir valores", () => {
+  const android = checkBuildConfig(config.webClientId);
+  assert.equal(android.status, 0, android.stderr);
+  assert.equal(android.stdout.includes(config.webClientId), false);
+  assert.equal(checkBuildConfig(config.webClientId, "ios", config.webClientId).status, 1);
+  const ios = checkBuildConfig(config.webClientId, "ios", "ios.apps.googleusercontent.com");
+  assert.equal(ios.status, 0, ios.stderr);
 });
 test("login pode repetir inclusive quando o SDK retorna a mesma identidade", async () => {
   let calls = 0;

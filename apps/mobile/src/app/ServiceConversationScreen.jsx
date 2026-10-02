@@ -750,9 +750,10 @@ export function ServiceConversationScreen({ navigation, route }) {
           contentContainerStyle={styles.messages}
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           keyboardShouldPersistTaps="handled"
-          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          maintainVisibleContentPosition={timeline.isAtBottom ? undefined : { minIndexForVisible: 0 }}
           onContentSizeChange={timeline.onContentSizeChange}
           onLayout={timeline.onLayout}
+          onScrollBeginDrag={timeline.onScrollBeginDrag}
           onScroll={(event) => {
             timeline.onScroll(event);
             if (event.nativeEvent.contentOffset.y < 60) void loadOlder();

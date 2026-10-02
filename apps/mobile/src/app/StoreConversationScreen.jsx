@@ -689,6 +689,7 @@ export function StoreConversationScreen({ navigation, route }) {
           keyboardShouldPersistTaps="handled"
           onContentSizeChange={timeline.onContentSizeChange}
           onLayout={timeline.onLayout}
+          onScrollBeginDrag={timeline.onScrollBeginDrag}
           onScroll={(event) => {
             timeline.onScroll(event);
             if (event.nativeEvent.contentOffset.y < 60) void loadOlder();

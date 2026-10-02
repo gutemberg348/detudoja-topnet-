@@ -5,7 +5,7 @@ import * as WebBrowser from "expo-web-browser";
 import { useEffect, useRef, useState } from "react";
 import { Platform, StyleSheet, Text, View } from "react-native";
 import { ApiError } from "../services/api";
-import { signInWithNativeGoogle } from "../services/google-sign-in";
+import { getGoogleSignInUnavailableReason, signInWithNativeGoogle } from "../services/google-sign-in";
 import { useAuthStore } from "../stores/useAuthStore";
 import { googleErrorMessage } from "../utils/google-auth";
 import { colors, spacing, typography } from "../utils/theme";
@@ -19,6 +19,7 @@ const googleClientIds = {
   web: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim() ?? "",
 };
 const googleRedirectUri = makeRedirectUri({ path: "oauth", scheme: "detudoja" });
+const googleUnavailableReason = getGoogleSignInUnavailableReason();
 
 function messageForError(error) {
   if (error instanceof ApiError) {
@@ -165,13 +166,14 @@ export function SocialAuthButtons({ action = "Entrar" }) {
   return (
     <View style={styles.wrapper}>
       <AppButton
-        disabled={isSubmitting}
+        disabled={isSubmitting || Boolean(googleUnavailableReason)}
         icon="logo-google"
         loading={isSubmitting}
         onPress={handleGooglePress}
         title={`${action} com Google`}
         variant="neutral"
       />
+      {googleUnavailableReason ? <Text style={styles.availabilityHint}>{googleUnavailableReason}</Text> : null}
       {Platform.OS === "ios" && isAppleAvailable ? (
         <View style={styles.appleButtonFrame}>
           <AppleAuthentication.AppleAuthenticationButton
@@ -201,6 +203,12 @@ export function SocialAuthButtons({ action = "Entrar" }) {
 }
 
 const styles = StyleSheet.create({
+  availabilityHint: {
+    color: colors.textSecondary,
+    fontSize: typography.caption,
+    lineHeight: 18,
+    textAlign: "center",
+  },
   wrapper: {
     gap: spacing.sm,
     width: "100%",

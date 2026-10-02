@@ -10,6 +10,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "doctor": "npx --yes expo-doctor",
+    "check:google": "node scripts/check-google-auth-config.js",
+    "eas-build-pre-install": "node scripts/check-google-auth-config.js",
     "build:android:preview": "npx --yes eas-cli@latest build --platform android --profile preview"
   },
   "dependencies": {

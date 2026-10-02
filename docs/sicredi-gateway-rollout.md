@@ -139,10 +139,17 @@ SICREDI_PIX_ENABLED=false
 
 Com PIX_ENABLED=false, checkout/QR/depositos usam Asaas se disponivel.
 Para receber pelo Sicredi, configurar TODOS os campos Pix e habilitar.
-URLs de homologacao devem vir do Sicredi; o codigo nao inventa essas URLs.
+URLs de homologacao devem vir de documentacao do Sicredi; o codigo nao inventa essas URLs.
 O [guia oficial Pix](https://developer.sicredi.com.br/api-portal/sites/default/files/Guia_tecnico_integracoes_APIPix_Sicredi_v1.9.5.pdf)
 publica https://api-pix.sicredi.com.br/api/v2 e /oauth/token **para producao**.
 Nao reutilizar essas URLs no teste de homologacao.
+
+Atualizacao 2026-10-02: o [guia oficial anterior, de 2022](https://www.sicredi.com.br/media/produtos/filer_public/2022/12/19/guia_tecnico_integracoes_api_pix_sicredi.pdf)
+publica `https://api-pix-h.sicredi.com.br/oauth/token` e a base
+`https://api-pix-h.sicredi.com.br/api/v2` para homologacao. Os novos
+[scripts isolados](sicredi-pix-sandbox.md) usam esses enderecos para verificar
+as credenciais ja existentes na VPS, sem alterar o gateway do app. A resposta
+real do banco ainda precisa ser verificada; o teste local nao prova acesso.
 
 O Sandbox Multipag tem dados estaticos. O exemplo 0910F3HT1 nao quita
 saques DTJ-SAQUE-* nem repasses DTJ-REPASSE-* do aplicativo. Esses casos

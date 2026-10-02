@@ -1,5 +1,26 @@
 # Front Mobile
 
+## Mensagens visiveis com teclado no iPhone (2026-10-02)
+
+- `useChatTimeline` reposiciona o fim da conversa mesmo quando o conteudo cabe
+  inteiro na lista; antes, esse caso ignorava `scrollToEnd` e podia manter um
+  deslocamento nativo incorreto depois de abrir o teclado.
+- No iOS, eventos de rolagem durante a mudanca de tamanho do teclado nao
+  desativam o acompanhamento da ultima mensagem. A posicao e conferida ao
+  terminar `keyboardDidChangeFrame`; enviar uma mensagem propria tambem leva
+  ao fim da conversa, sem precisar recolher o teclado.
+- Chats de servico e pessoais usam `maintainVisibleContentPosition` apenas
+  durante leitura do historico, evitando disputa com a rolagem automatica
+  quando as mensagens estao alinhadas ao rodape. Os quatro consumidores do
+  hook informam o inicio do arraste para cancelar o acompanhamento automatico.
+- O botao de ultima mensagem normaliza o evento de toque antes de enviar a
+  opcao booleana `animated` para a lista nativa.
+- Validacao: 47 testes mobile e sete simulacoes isoladas de sequencias de
+  eventos aprovados; export iOS aprovado. Ainda falta conferir no iPhone real
+  conversas curtas/longas, envio seguido, texto de varias linhas, leitura de
+  mensagens antigas e abertura/fechamento do teclado. Simulacoes e export nao
+  validam a renderizacao nativa do teclado.
+
 ## Amigos e conversas pessoais (2026-08-31)
 
 - A Home foi simplificada: pesquisa no topo, atalhos `Pagar` e `Receber` logo

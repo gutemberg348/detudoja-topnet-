@@ -288,11 +288,12 @@ export function PersonalConversationScreen({ navigation, route }) {
               )}
               onContentSizeChange={timeline.onContentSizeChange}
               onLayout={timeline.onLayout}
+              onScrollBeginDrag={timeline.onScrollBeginDrag}
               onScroll={(event) => {
                 timeline.onScroll(event);
                 if (event.nativeEvent.contentOffset.y < 60) void loadOlder();
               }}
-              maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+              maintainVisibleContentPosition={timeline.isAtBottom ? undefined : { minIndexForVisible: 0 }}
               ref={listRef}
               renderItem={({ item }) => <MessageBubble accessToken={session.accessToken} message={item} />}
               scrollEventThrottle={16}

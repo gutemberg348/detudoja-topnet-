@@ -39,6 +39,8 @@ export function googleErrorMessage(error) {
   if (code === "GOOGLE_WEB_CLIENT_MISSING") return "O ID OAuth Web do Google nao foi configurado neste app. Configure e gere um novo APK.";
   if (code === "GOOGLE_IOS_CLIENT_MISSING") return "Configure um ID OAuth iOS proprio, diferente do ID Web, e gere um novo app para iPhone.";
   if (code === "GOOGLE_BUILD_REQUIRED") return "Este app precisa de uma nova compilacao com o login Google nativo. Nao funciona no Expo Go.";
+  if (code === "GOOGLE_EXPO_GO_UNSUPPORTED") return "Para entrar com Google, use o APK instalado ou um build de desenvolvimento. O Expo Go nao oferece esse recurso.";
+  if (code === "GOOGLE_NATIVE_MODULE_MISSING") return "Esta versao do aplicativo nao inclui o login Google. Instale o APK atualizado e tente novamente.";
   if (code === "GOOGLE_TOKEN_MISSING") return "O Google nao retornou a identidade. Confira o ID OAuth Web e tente novamente.";
   if (code === "access_denied") return "Acesso Google nao autorizado. Confira os usuarios de teste e o publico do app no Google Cloud.";
   if (code === "redirect_uri_mismatch") return "A URL de retorno do login nao esta autorizada no cliente Web do Google.";

@@ -343,6 +343,7 @@ export function StoreOrderChatModal({
               keyboardShouldPersistTaps="handled"
               onContentSizeChange={timeline.onContentSizeChange}
               onLayout={timeline.onLayout}
+              onScrollBeginDrag={timeline.onScrollBeginDrag}
               onScroll={timeline.onScroll}
               ref={chatScrollRef}
               scrollEventThrottle={16}

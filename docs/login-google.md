@@ -7,6 +7,40 @@ fixo ou Client Secret no aplicativo. O SDK obtem a identidade a cada login.
 
 ## Android: configurar antes de gerar outro APK
 
+### Diagnostico do APK de preview em 02/10/2026
+
+O APK do build `b0bd5b05-c563-486e-817f-dc0e785a9a2c` tinha o modulo nativo,
+mas nao continha o ID Web configurado localmente. O ambiente EAS `preview`
+nao tinha `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`. Essa variavel foi cadastrada no
+EAS com o mesmo ID ja usado no projeto e a leitura de volta foi conferida.
+Instalar um novo APK e necessario para incorporar o valor.
+
+Dados extraidos da assinatura desse APK para conferir no cliente **Android**
+do mesmo projeto Google Cloud do cliente Web:
+
+```text
+Pacote: com.detudoja.mobile
+SHA-1: AE:91:85:9C:7F:46:77:21:ED:F9:0A:A7:67:61:24:FB:AD:5D:31:69
+```
+
+A verificacao local encontrou o mesmo ID nos campos Web, Android e iOS. Isso
+nao cria tres clientes OAuth. Android precisa do cadastro pacote/SHA-1 no
+Google Cloud; o SDK usa o ID Web. iOS exige seu proprio cliente iOS.
+Nao foi possivel conferir os clientes no Google Cloud nem o `.env` da VPS.
+
+O build executa `eas-build-pre-install` e falha com uma mensagem explicita
+se o ID necessario estiver ausente, antes de instalar dependencias. Para
+conferir a configuracao local, na raiz do repositorio:
+
+```bash
+npm run check:google -w apps/mobile
+```
+
+Esse comando valida formato e presenca; nao valida o tipo do cliente no Google
+Cloud, a assinatura autorizada ou uma autenticacao real.
+
+### Configuracao no Google Cloud
+
 1. Google Cloud > Google Auth Platform > Clients (ou APIs e servicos > Credenciais).
 2. No mesmo projeto, manter/criar um cliente **Aplicativo Web**. Seu Client ID
    vai em `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` do app e `GOOGLE_OAUTH_CLIENT_IDS`
