@@ -58,6 +58,7 @@ import {
   normalizeStoreOpeningHours,
 } from "./sell/storeSchedule";
 import { useRealtimeOrders } from "../hooks/useRealtimeOrders";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import {
   createAutonomousSale,
   createStoreQrCharge,
@@ -147,6 +148,7 @@ export function SellScreen() {
   const hasActivePayoutAccount = payoutAccount?.status === "ATIVA";
   const guideCheckedUserRef = useRef(null);
   const storeChatRefreshTimerRef = useRef(null);
+  const serviceRefreshVersionRef = useRef(0);
 
   const autonomousSegment = useMemo(
     () => segments.find((segment) => segment.slug === "venda-autonoma"),
@@ -177,6 +179,7 @@ export function SellScreen() {
       setIsLoading(true);
     }
 
+    const servicesVersion = ++serviceRefreshVersionRef.current;
     try {
       const [segmentsResponse, categoriesResponse, profileResponse, chargesResponse, servicesResponse, conversationsResponse, storeConversationsResponse, payoutResponse] = await Promise.all([
         getSellerSegments(session.accessToken),
@@ -194,7 +197,9 @@ export function SellScreen() {
       setSales(profileResponse.sales ?? []);
       setStores(profileResponse.stores ?? []);
       setGeneratedCharges(chargesResponse.charges ?? []);
-      setSellerServices(servicesResponse.services ?? []);
+      if (servicesVersion === serviceRefreshVersionRef.current) {
+        setSellerServices(servicesResponse.services ?? []);
+      }
       setServiceConversations((conversationsResponse.conversations ?? []).filter((conversation) => conversation.isSeller));
       setStoreConversations(storeConversationsResponse.conversations ?? []);
       setPayoutAccount(payoutResponse.account ?? null);
@@ -208,6 +213,20 @@ export function SellScreen() {
       }
     }
   }, [session?.accessToken]);
+
+  useLiveRefresh({
+    accessToken: session?.accessToken,
+    intervalMs: 0,
+    events: [realtimeEvents.serviceAvailabilityUpdated],
+    acceptEvent: (event) => !event?.sellerUserId || Number(event.sellerUserId) === Number(session?.user?.id),
+    onRefresh: async () => {
+      const version = ++serviceRefreshVersionRef.current;
+      const response = await getSellerServices(session.accessToken);
+      if (version === serviceRefreshVersionRef.current) {
+        setSellerServices(response.services ?? []);
+      }
+    },
+  });
 
   const loadStoreChatConversations = useCallback(async () => {
     if (!session?.accessToken) return;

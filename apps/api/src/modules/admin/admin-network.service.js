@@ -79,13 +79,14 @@ function serializeUser(user, context = {}) {
 }
 
 function parseMaxDepth(value) {
+  if (value === undefined || value === null || value === "" || value === "all") return null;
   const parsed = Number(value);
 
   if (!Number.isFinite(parsed)) {
-    return 20;
+    return null;
   }
 
-  return Math.min(Math.max(Math.trunc(parsed), 1), 20);
+  return Math.max(Math.trunc(parsed), 1);
 }
 
 function parseOptionalPositiveIntId(value) {
@@ -109,6 +110,15 @@ async function findMatrixChildren(parentIds) {
 }
 
 async function buildNetworkTree(rootUser, maxDepth) {
+  // Fetch relationships once. A deep network must not require one DB round trip
+  // per level, and the payment depth must never truncate the administrative tree.
+  const placements = await findMatrixChildren(null);
+  const childrenByParent = new Map();
+  for (const placement of placements) {
+    const children = childrenByParent.get(placement.alocado_sob_usuario_id) ?? [];
+    children.push(placement);
+    childrenByParent.set(placement.alocado_sob_usuario_id, children);
+  }
   const people = [];
   const visited = new Set([rootUser.id]);
   let frontier = [
@@ -119,10 +129,9 @@ async function buildNetworkTree(rootUser, maxDepth) {
     },
   ];
 
-  for (let level = 1; level <= maxDepth && frontier.length > 0; level += 1) {
-    const parentIds = frontier.map((node) => node.userId);
+  for (let level = 1; (maxDepth === null || level <= maxDepth) && frontier.length > 0; level += 1) {
     const parentById = new Map(frontier.map((node) => [node.userId, node]));
-    const indications = await findMatrixChildren(parentIds);
+    const indications = frontier.flatMap((node) => childrenByParent.get(node.userId) ?? []);
     const nextFrontier = [];
 
     for (const indication of indications) {
@@ -240,17 +249,15 @@ export async function getAdminNetworkOverview(query = {}) {
     findOrphanUsers(rootUser.id),
     findUnallocatedIndications(),
   ]);
-  const levels = Array.from({ length: maxDepth }, (_, index) => {
-    const level = index + 1;
-    const levelPeople = people.filter((person) => person.level === level);
-
-    return {
-      left: levelPeople.filter((person) => person.branch === "ESQUERDA").length,
-      level,
-      right: levelPeople.filter((person) => person.branch === "DIREITA").length,
-      total: levelPeople.length,
-    };
-  });
+  const counts = new Map();
+  for (const person of people) {
+    const count = counts.get(person.level) ?? { level: person.level, total: 0, left: 0, right: 0 };
+    count.total++;
+    if (person.branch === "ESQUERDA") count.left++;
+    if (person.branch === "DIREITA") count.right++;
+    counts.set(person.level, count);
+  }
+  const levels = [...counts.values()];
 
   return {
     diagnostics: {
@@ -259,11 +266,13 @@ export async function getAdminNetworkOverview(query = {}) {
     },
     levels,
     people,
-    root: serializeUser(rootUser),
+    root: serializeUser(rootUser, { level: 0, rootUserId: rootUser.id }),
     summary: {
       active: people.filter((person) => person.active).length,
       directToRoot: people.filter((person) => person.isDirectToRoot).length,
       maxDepth,
+      deepestLevel: levels.at(-1)?.level ?? 0,
+      rewardDepth: 20,
       orphans: orphanUsers.length,
       qualified: people.filter((person) => person.qualified).length,
       earningsBlocked: people.filter((person) => person.networkEarningsBlocked).length,
@@ -300,7 +309,7 @@ export async function updateAdminNetworkEarnings(adminId, userId, data) {
     });
   });
 
-  return getAdminNetworkOverview({ maxDepth: 20 });
+  return getAdminNetworkOverview();
 }
 
 function buildPlacementGraph(placements) {
@@ -321,8 +330,8 @@ function collectSubtree(rootUserId, childrenByParent) {
   const levels = new Map([[rootUserId, 0]]);
   const queue = [rootUserId];
 
-  while (queue.length) {
-    const parentId = queue.shift();
+  for (let index = 0; index < queue.length; index++) {
+    const parentId = queue[index];
     const parentLevel = levels.get(parentId);
     for (const childId of childrenByParent.get(parentId) ?? []) {
       if (levels.has(childId)) continue;
@@ -348,7 +357,6 @@ function depthFromRoot(userId, rootId, byUser) {
     if (!placement?.alocado_sob_usuario_id) return null;
     currentId = placement.alocado_sob_usuario_id;
     depth += 1;
-    if (depth > 20) return null;
   }
 
   return depth;
@@ -401,11 +409,7 @@ export async function moveAdminNetworkPlacement(adminId, userId, data) {
         throw new AppError("O destino nao esta conectado a raiz real da empresa", 409);
       }
 
-      const subtreeHeight = Math.max(...subtree.values());
       const movedDepth = parentDepth + 1;
-      if (movedDepth + subtreeHeight > 20) {
-        throw new AppError("A mudanca ultrapassaria o limite de 20 niveis da matriz", 409);
-      }
 
       await repository.updatePlacement(placement.id, {
         alocado_sob_usuario_id: parentUserId,
@@ -451,5 +455,5 @@ export async function moveAdminNetworkPlacement(adminId, userId, data) {
     reason: data.reason,
   });
 
-  return getAdminNetworkOverview({ maxDepth: 20 });
+  return getAdminNetworkOverview();
 }

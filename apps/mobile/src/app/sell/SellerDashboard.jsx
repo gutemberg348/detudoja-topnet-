@@ -5,6 +5,8 @@ import { resolveMediaUrl } from "../../utils/media";
 import { formatarDinheiro } from "../../utils/money";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../../utils/theme";
 import { countNewStoreOrders, formatStatus } from "./seller.utils";
+import { serviceModalityDescription, serviceOperationSummary } from "../../utils/service-operations";
+import { serviceIconName } from "../../utils/service-icons";
 
 const chargeStatusCopy = {
   ATIVA: "Aguardando",
@@ -33,7 +35,6 @@ const staffRoleLabels = {
 export function SellerDashboard({
   charges,
   payoutAccount,
-  profile,
   onCreateSale,
   onOpenServiceDesk,
   onCreateStore,
@@ -59,13 +60,9 @@ export function SellerDashboard({
     .filter((charge) => charge.status === "PAGA")
     .reduce((total, charge) => total + Number(charge.amountCents ?? 0), 0);
   const serviceOperationCreated = sellerServices.some((service) => service.enabled);
-  const enabledServiceCount = sellerServices.filter((service) => service.enabled).length;
-  const activeServiceCount = sellerServices.filter((service) => service.available).length;
-  const courierServices = sellerServices.filter(
-    (service) => service.requiresCourierProfile || service.operationalType === "ENTREGA_LOCAL",
-  );
-  const courierOperationCreated = courierServices.some((service) => service.enabled);
-  const activeCourierCount = courierServices.filter((service) => service.available).length;
+  const serviceSummary = serviceOperationSummary(sellerServices);
+  const enabledServiceCount = serviceSummary.count;
+  const activeServiceCount = serviceSummary.onlineCount;
   const servicesFirst = serviceOperationCreated && stores.length === 0;
   const hasBothOperations = serviceOperationCreated && stores.length > 0;
   const openStoreCount = stores.filter((store) => store.openForOrders !== false).length;
@@ -134,7 +131,7 @@ export function SellerDashboard({
                 active={activeServiceCount > 0}
                 detail={activeServiceCount ? `${activeServiceCount} online agora` : "Todos offline"}
                 icon="briefcase-outline"
-                label="Servicos"
+                label="Areas de trabalho"
                 value={enabledServiceCount}
               />
             </View>
@@ -153,7 +150,7 @@ export function SellerDashboard({
           <View style={styles.metrics}>
             <HeroMetric
               icon={servicesFirst ? "briefcase-outline" : "storefront-outline"}
-              label={servicesFirst ? "Servicos" : "Lojas"}
+              label={servicesFirst ? "Areas de trabalho" : "Lojas"}
               value={String(servicesFirst ? enabledServiceCount : stores.length)}
             />
             <View style={styles.metricDivider} />
@@ -169,18 +166,12 @@ export function SellerDashboard({
         )}
       </View>
 
-      {courierOperationCreated ? (
-        <ServiceSection
-          activeCount={activeCourierCount}
-          callsCount={serviceCallsCount}
-          courierMode
-          notificationCount={serviceNotificationCount}
-          onOpen={onOpenServiceDesk}
-          profile={profile}
-          serviceOperationCreated
-          servicesCount={courierServices.length}
-        />
-      ) : null}
+      <ServiceSection
+        callsCount={serviceCallsCount}
+        notificationCount={serviceNotificationCount}
+        onOpen={onOpenServiceDesk}
+        services={serviceSummary.registered}
+      />
 
       <Pressable
         accessibilityHint="Configura a chave Pix que recebe vendas presenciais"
@@ -288,36 +279,12 @@ export function SellerDashboard({
         </Pressable>
       ) : null}
 
-      {servicesFirst && !courierOperationCreated ? (
-        <ServiceSection
-          activeCount={activeServiceCount}
-          callsCount={serviceCallsCount}
-          notificationCount={serviceNotificationCount}
-          onOpen={onOpenServiceDesk}
-          profile={profile}
-          serviceOperationCreated={serviceOperationCreated}
-          servicesCount={enabledServiceCount}
-        />
-      ) : null}
-
       <CommerceSection
         onCreateStore={onCreateStore}
         onOpenStore={onOpenStore}
         storeChatUnreadByStore={storeChatUnreadByStore}
         stores={stores}
       />
-
-      {!servicesFirst && !courierOperationCreated ? (
-        <ServiceSection
-          activeCount={activeServiceCount}
-          callsCount={serviceCallsCount}
-          notificationCount={serviceNotificationCount}
-          onOpen={onOpenServiceDesk}
-          profile={profile}
-          serviceOperationCreated={serviceOperationCreated}
-          servicesCount={enabledServiceCount}
-        />
-      ) : null}
 
       <Pressable
         accessibilityHint="Abre ou fecha as cobrancas recentes"
@@ -443,34 +410,40 @@ function CommerceSection({ onCreateStore, onOpenStore, storeChatUnreadByStore, s
 }
 
 function ServiceSection({
-  activeCount,
   callsCount,
-  courierMode = false,
   notificationCount,
   onOpen,
-  profile,
-  serviceOperationCreated,
-  servicesCount,
+  services,
 }) {
+  const onlineServices = services.filter((service) => service.available);
   return (
     <>
       <SectionHeading
-        action={serviceOperationCreated ? (courierMode ? "Abrir" : "Gerenciar") : "Comecar"}
-        icon={courierMode ? "bicycle-outline" : "briefcase-outline"}
+        action={services.length ? "Gerenciar" : "Comecar"}
+        icon="briefcase-outline"
         onPress={onOpen}
-        subtitle={courierMode ? "Corridas, chamados e sua disponibilidade" : "Perfil profissional, disponibilidade e atendimentos"}
-        title={courierMode ? "Central do motoboy" : "Meus servicos"}
+        subtitle={onlineServices.length
+          ? `Online como: ${onlineServices.map((service) => service.name).join(", ")}`
+          : "Nenhuma atividade online no momento"}
+        title="Central de servicos"
       />
-      {serviceOperationCreated ? (
-        <ServiceOperationRow
-          activeCount={activeCount}
-          callsCount={callsCount}
-          courierMode={courierMode}
-          notificationCount={notificationCount}
-          onPress={onOpen}
-          profile={profile}
-          servicesCount={servicesCount}
-        />
+      {services.length ? (
+        <View style={styles.list}>
+          {services.map((service) => (
+            <ServiceOperationRow key={service.id} onPress={onOpen} service={service} />
+          ))}
+          <Pressable onPress={onOpen} style={({ pressed }) => [styles.serviceManage, pressed && styles.pressed]}>
+            <Ionicons color={colors.primaryDark} name="options-outline" size={18} />
+            <Text style={styles.serviceManageText}>Escolher atividades e disponibilidade</Text>
+            {notificationCount > 0 || callsCount > 0 ? (
+              <View style={styles.serviceNotification}>
+                <Ionicons color="#92400E" name="chatbubble-ellipses" size={13} />
+                <Text style={styles.serviceNotificationText}>{notificationCount || callsCount}</Text>
+              </View>
+            ) : null}
+            <Ionicons color={colors.primaryDark} name="chevron-forward" size={18} />
+          </Pressable>
+        </View>
       ) : (
         <OperationStartCard
           icon="person-add-outline"
@@ -496,47 +469,26 @@ function OperationStartCard({ icon, onPress, text, title }) {
   );
 }
 
-function ServiceOperationRow({
-  activeCount,
-  callsCount,
-  courierMode = false,
-  notificationCount,
-  onPress,
-  profile,
-  servicesCount,
-}) {
-  const isOnline = activeCount > 0;
+function ServiceOperationRow({ onPress, service }) {
+  const isOnline = Boolean(service.available);
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.serviceOperation, isOnline && styles.serviceOperationActive, pressed && styles.pressed]}>
+    <Pressable accessibilityLabel={`${service.name}, ${isOnline ? "online" : "offline"}. Gerenciar disponibilidade`} onPress={onPress} style={({ pressed }) => [styles.serviceOperation, isOnline && styles.serviceOperationActive, pressed && styles.pressed]}>
       <View style={[styles.serviceOperationIcon, isOnline && styles.serviceOperationIconActive]}>
-        <Ionicons color={isOnline ? colors.card : colors.primaryDark} name={courierMode ? "bicycle-outline" : "briefcase-outline"} size={21} />
+        <Ionicons color={isOnline ? colors.card : colors.primaryDark} name={serviceIconName(service.iconName)} size={21} />
       </View>
       <View style={styles.rowCopy}>
-        <View style={styles.storeTitleLine}>
-          <Text numberOfLines={1} style={styles.rowTitle}>
-            {courierMode ? "Area do motoboy" : `Servicos de ${profile?.publicName ?? "voce"}`}
-          </Text>
+        <View style={styles.serviceTitleLine}>
+          <Text style={[styles.rowTitle, styles.serviceTitle]}>{service.name}</Text>
           <View style={[styles.operationStatus, isOnline && styles.operationStatusActive]}>
             <View style={[styles.operationDot, isOnline && styles.operationDotActive]} />
-            <Text style={[styles.operationStatusText, isOnline && styles.operationStatusTextActive]}>{isOnline ? "online" : "offline"}</Text>
+            <Text style={[styles.operationStatusText, isOnline && styles.operationStatusTextActive]}>{isOnline ? "Online" : "Offline"}</Text>
           </View>
         </View>
-        <Text numberOfLines={1} style={styles.rowMeta}>
-          {courierMode
-            ? callsCount
-              ? `${callsCount} chamado${callsCount === 1 ? "" : "s"} aguardando voce`
-              : isOnline
-                ? "Disponivel para receber novas corridas"
-                : "Abra para ficar online e receber corridas"
-            : `${servicesCount} servico${servicesCount === 1 ? "" : "s"} configurado${servicesCount === 1 ? "" : "s"}${callsCount ? ` · ${callsCount} chamado${callsCount === 1 ? "" : "s"}` : " · abra para atender chamados"}`}
+        <Text style={styles.rowMeta}>{serviceModalityDescription(service)}</Text>
+        <Text style={[styles.rowMeta, isOnline && styles.serviceOnlineText]}>
+          {isOnline ? "Recebendo novos chamados" : "Nao recebe novos chamados nesta atividade"}
         </Text>
       </View>
-      {notificationCount > 0 ? (
-        <View style={styles.serviceNotification}>
-          <Ionicons color="#92400E" name="chatbubble-ellipses" size={13} />
-          <Text style={styles.serviceNotificationText}>{notificationCount}</Text>
-        </View>
-      ) : null}
       <Ionicons color={colors.primaryDark} name="chevron-forward" size={19} />
     </Pressable>
   );
@@ -768,6 +720,11 @@ function EmptyState({ icon, text, title }) {
 }
 
 const styles = StyleSheet.create({
+  serviceTitleLine: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  serviceTitle: { flexShrink: 1 },
+  serviceOnlineText: { color: colors.primaryDark },
+  serviceManage: { alignItems: "center", flexDirection: "row", gap: spacing.sm, padding: spacing.md, backgroundColor: colors.primarySoft, borderRadius: radius.lg },
+  serviceManageText: { flex: 1, color: colors.primaryDark, fontFamily: fonts.bold, fontSize: typography.caption },
   alert: { alignItems: "center", borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.md, padding: spacing.md, ...shadowSoft },
   alertConversation: { backgroundColor: "#FFFBEB", borderColor: "#FDE68A" },
   alertConversationIcon: { backgroundColor: "#FEF3C7" },

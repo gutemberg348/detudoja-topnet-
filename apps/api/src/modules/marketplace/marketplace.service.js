@@ -64,13 +64,16 @@ async function queryMarketplaceSearchMatches(patterns, servicePatterns = pattern
   });
 }
 
-function buildServiceSearchPatterns(search, patterns) {
+export function buildServiceSearchPatterns(search, patterns) {
   const aliases = /\b(?:moto taxi|mototaxi|taxi|taxista)\b/.test(search)
-    ? ["mototaxi", "moto taxi", "motoboy"]
+    ? ["mototaxi", "moto taxi", "taxi", "taxista"]
     : /\bmoto boy\b/.test(search)
       ? ["motoboy"]
       : [];
-  return [...new Set([...patterns, ...aliases.map((alias) => `%${alias}%`)])];
+  // Do not reintroduce the isolated word "moto" from the broad fallback search.
+  return aliases.length
+    ? aliases.map((alias) => `%${alias}%`)
+    : patterns;
 }
 
 function buildSearchPatterns(search, { includeWords = false } = {}) {

@@ -3,30 +3,35 @@ import {
   CircleDollarSign, GitBranch, LockKeyhole, RefreshCw, Search, ShieldCheck,
   UserRound, UsersRound, X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PageError, PageLoading } from "../components/PageState";
 import { StatusBadge } from "../components/StatusBadge";
 import {
   getAdminNetwork, moveAdminNetworkPlacement, updateAdminNetworkEarnings,
   updateAdminUserStatus,
 } from "../services/admin.api";
+import "./network.css";
 
 const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
   dateStyle: "short",
   timeStyle: "short",
 });
-const MAX_NETWORK_DEPTH = 20;
+const DIRECTORY_PAGE_SIZE = 25;
 
 export function NetworkPage({ accessToken, canManageNetwork = false }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
-  const [visibleDepth, setVisibleDepth] = useState(MAX_NETWORK_DEPTH);
+  const [visibleDepth, setVisibleDepth] = useState(2);
+  const [viewMode, setViewMode] = useState("directory");
+  const [directoryPage, setDirectoryPage] = useState(1);
+  const [levelFilter, setLevelFilter] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("TODOS");
   const [focusId, setFocusId] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [treeScale, setTreeScale] = useState(1);
+  const treeViewportRef = useRef(null);
   const [moveTarget, setMoveTarget] = useState(null);
   const [moveForm, setMoveForm] = useState({ parentUserId: "", position: "1", reason: "" });
   const [moving, setMoving] = useState(false);
@@ -39,7 +44,7 @@ export function NetworkPage({ accessToken, canManageNetwork = false }) {
   const loadNetwork = useCallback(async () => {
     setError("");
     try {
-      const response = await getAdminNetwork(accessToken, { maxDepth: MAX_NETWORK_DEPTH });
+      const response = await getAdminNetwork(accessToken, { maxDepth: "all" });
       setData(response);
       const responseIds = new Set([response.root, ...(response.people ?? [])].filter(Boolean).map((person) => person.id));
       setFocusId((current) => responseIds.has(current) ? current : response.root?.id ?? null);
@@ -52,6 +57,15 @@ export function NetworkPage({ accessToken, canManageNetwork = false }) {
   useEffect(() => {
     loadNetwork();
   }, [loadNetwork]);
+
+  useEffect(() => { setDirectoryPage(1); }, [search, statusFilter, levelFilter]);
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const viewport = treeViewportRef.current;
+      if (viewport) viewport.scrollTo({ top: 0, left: Math.max(0, (viewport.scrollWidth - viewport.clientWidth) / 2), behavior: "instant" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusId, viewMode, visibleDepth]);
 
   useEffect(() => {
     if (!inspectorOpen) return undefined;
@@ -92,7 +106,7 @@ export function NetworkPage({ accessToken, canManageNetwork = false }) {
   );
   const searchSuggestions = useMemo(() => {
     const term = normalize(search).trim();
-    if (term.length < 2) return [];
+    if (!term) return [];
     return allPeople
       .filter((person) => [person.name, person.email, person.phone, person.id, person.publicIdentifier]
         .filter(Boolean)
@@ -102,6 +116,7 @@ export function NetworkPage({ accessToken, canManageNetwork = false }) {
   const filteredPeople = useMemo(() => {
     const term = normalize(search);
     return (data?.people ?? []).filter((person) => {
+      if (levelFilter && person.level !== Number(levelFilter)) return false;
       if (!matchesStatus(person, statusFilter)) return false;
       if (!term) return true;
       return [person.name, person.email, person.phone, person.publicIdentifier, person.id,
@@ -111,7 +126,11 @@ export function NetworkPage({ accessToken, canManageNetwork = false }) {
         .filter(Boolean)
         .some((value) => normalize(value).includes(term));
     });
-  }, [data?.people, search, statusFilter]);
+  }, [data?.people, search, statusFilter, levelFilter]);
+  const totalPages = Math.max(1, Math.ceil(filteredPeople.length / DIRECTORY_PAGE_SIZE));
+  const currentPage = Math.min(directoryPage, totalPages);
+  const pagePeople = filteredPeople.slice((currentPage - 1) * DIRECTORY_PAGE_SIZE, currentPage * DIRECTORY_PAGE_SIZE);
+  const focusPath = useMemo(() => buildAncestorPath(focusPerson, peopleById), [focusPerson, peopleById]);
 
   const destinationPeople = useMemo(() => {
     if (!data?.root || !moveTarget) return [];
@@ -128,7 +147,8 @@ export function NetworkPage({ accessToken, canManageNetwork = false }) {
   function locatePerson(person) {
     setSelectedId(person.id);
     setFocusId(person.id);
-    setInspectorOpen(true);
+    setInspectorOpen(false);
+    setViewMode("tree");
     setSearch("");
     window.requestAnimationFrame(() => {
       document.querySelector(".network-explorer")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -216,8 +236,8 @@ export function NetworkPage({ accessToken, canManageNetwork = false }) {
       <header className="page-heading page-heading--actions">
         <div>
           <p className="eyebrow">Central da matriz global</p>
-          <h1>Gestao completa da rede</h1>
-          <p>Navegue por ramos, inspecione vinculos e controle conta, ganhos e posicao com rastreabilidade.</p>
+          <h1>Participantes e conexões</h1>
+          <p>Encontre pessoas, acompanhe seus ramos e administre a rede inteira em um só lugar.</p>
         </div>
         <button className="button button--secondary" onClick={loadNetwork} type="button"><RefreshCw size={16} /> Atualizar dados</button>
       </header>
@@ -232,6 +252,14 @@ export function NetworkPage({ accessToken, canManageNetwork = false }) {
           </article>
         ))}
       </section>
+
+      <div className="network-overview-bar">
+        <div className="network-view-tabs" role="group" aria-label="Modo de visualização">
+          <button aria-pressed={viewMode === "directory"} onClick={() => setViewMode("directory")} type="button"><UsersRound size={17} /> Participantes</button>
+          <button aria-pressed={viewMode === "tree"} onClick={() => setViewMode("tree")} type="button"><GitBranch size={17} /> Explorar conexões</button>
+        </div>
+        <div className="network-depth-note"><strong>Rede sem limite de níveis</strong><span>Remuneração: até 20 níveis acima de cada transação, conforme qualificação.</span></div>
+      </div>
 
       <section className="toolbar toolbar--network" aria-label="Filtros da rede">
         <div className="network-search-locator">
@@ -253,11 +281,9 @@ export function NetworkPage({ accessToken, canManageNetwork = false }) {
         <select aria-label="Filtrar situacao" onChange={(event) => setStatusFilter(event.target.value)} value={statusFilter}>
           <option value="TODOS">Todos os participantes</option><option value="ATIVOS">Contas ativas</option><option value="BLOQUEADOS">Contas bloqueadas</option><option value="QUALIFICADOS">Qualificados</option><option value="GANHOS_BLOQUEADOS">Ganhos bloqueados</option><option value="KYC_PENDENTE">KYC pendente</option>
         </select>
-        <select aria-label="Níveis exibidos" onChange={(event) => setVisibleDepth(Number(event.target.value))} value={visibleDepth}>
-          {Array.from({ length: MAX_NETWORK_DEPTH }, (_, index) => index + 1).map((depth) => (
-            <option key={depth} value={depth}>{depth === MAX_NETWORK_DEPTH ? "Toda a matriz · 20 níveis" : `${depth} ${depth === 1 ? "nível" : "níveis"}`}</option>
-          ))}
-        </select>
+        {viewMode === "tree" ? <select aria-label="Tamanho do recorte visual" onChange={(event) => setVisibleDepth(Number(event.target.value))} value={visibleDepth}>
+          {[1, 2, 3, 4].map((depth) => <option key={depth} value={depth}>{depth} {depth === 1 ? "camada por vez" : "camadas por vez"}</option>)}
+        </select> : <input aria-label="Filtrar pelo nível na rede" className="network-level-input" min="1" onChange={(event) => setLevelFilter(event.target.value)} placeholder="Qualquer nível" step="1" type="number" value={levelFilter} />}
       </section>
 
       {data.diagnostics.orphanUsers.length || data.diagnostics.unallocatedIndications.length ? (
@@ -270,18 +296,21 @@ export function NetworkPage({ accessToken, canManageNetwork = false }) {
         </details>
       ) : null}
 
-      <article className="data-section network-explorer network-tree-workspace">
+      {viewMode === "tree" ? <article className="data-section network-explorer network-tree-workspace">
         <div className="section-heading network-explorer__heading">
           <div>
             <span className="network-section-kicker"><GitBranch size={14} /> Visualização principal</span>
-            <h2>Árvore completa da matriz</h2>
-            <p>A rede desce da raiz para os participantes. Clique em qualquer pessoa para consultar e administrar.</p>
+            <h2>Explore um ramo de cada vez</h2>
+            <p>O recorte mantém a leitura clara. Use “Continuar daqui” para descer sem limite na rede.</p>
           </div>
           <div className="network-explorer__nav">
             <button className="button button--secondary" disabled={!focusPerson?.parentId} onClick={() => setFocusId(focusPerson?.parentId)} type="button"><ArrowLeft size={15} /> Subir um nível</button>
             <button className="button button--secondary" disabled={focusId === data.root?.id} onClick={() => setFocusId(data.root?.id)} type="button">Mostrar desde a raiz</button>
           </div>
         </div>
+        <nav className="network-breadcrumbs" aria-label="Caminho do ramo">
+          {focusPath.map((person) => <button key={person.id} onClick={() => setFocusId(person.id)} type="button">{person.level === 0 ? "Raiz" : `${person.name} · N${person.level}`}<ChevronRight size={14} /></button>)}
+        </nav>
         {visibleTree ? (
           <div className="network-tree-commandbar">
             <div className="network-tree-focus"><span className="avatar">{initials(focusPerson.name)}</span><span><small>Ramo em foco</small><strong>{focusPerson.name}</strong></span></div>
@@ -299,15 +328,15 @@ export function NetworkPage({ accessToken, canManageNetwork = false }) {
           </div>
         ) : null}
         {visibleTree ? (
-          <div className="network-tree-scroll"><div className="network-tree" style={{ zoom: treeScale }}>
-            <NetworkTreeNode focusId={focusPerson.id} node={visibleTree} onFocus={selectPerson} onSelect={selectPerson} selectedId={selectedId} />
+          <div className="network-tree-scroll" ref={treeViewportRef}><div className="network-tree" style={{ zoom: treeScale }}>
+            <NetworkTreeNode focusId={focusPerson.id} node={visibleTree} onFocus={(person) => { setFocusId(person.id); setSelectedId(person.id); }} onSelect={selectPerson} selectedId={selectedId} />
           </div></div>
         ) : <div className="empty-state"><GitBranch size={24} /><p>Raiz da empresa ainda não existe.</p></div>}
         <div className="network-tree-footer">
           <span><i className="is-active" /> Conta ativa</span><span><i className="is-blocked" /> Conta ou ganhos bloqueados</span>
           <p>Use a rolagem horizontal quando o ramo ficar largo. “Focar ramo” traz qualquer participante para o topo sem perder seus dados.</p>
         </div>
-      </article>
+      </article> : null}
 
       {inspectorOpen && selectedPerson ? (
         <div className="network-inspector-backdrop" onMouseDown={() => setInspectorOpen(false)}>
@@ -319,24 +348,27 @@ export function NetworkPage({ accessToken, canManageNetwork = false }) {
 
       <section className="network-safety-note" aria-label="Politica de alteracoes"><LockKeyhole size={20} /><div><strong>Controles protegidos</strong><p>Mover nao troca o patrocinador. Bloquear ganhos impede apenas novas comissoes; saldo ja creditado permanece intacto. Todas as alteracoes de matriz e ganhos sao auditadas.</p></div></section>
 
-      <section className="data-section data-section--flush network-directory">
-        <div className="section-heading"><div><h2>Diretorio da rede</h2><p>Localize qualquer cadastro e abra seus controles administrativos.</p></div><span className="network-hint">{filteredPeople.length.toLocaleString("pt-BR")} encontrados</span></div>
+      {viewMode === "directory" ? <section className="data-section data-section--flush network-directory">
+        <div className="section-heading"><div><h2>Todos os participantes</h2><p>Rede completa · {data.summary.deepestLevel ?? data.levels?.at(-1)?.level ?? 0} níveis cadastrados. Clique no nome para ver os detalhes.</p></div><span className="network-hint">{filteredPeople.length.toLocaleString("pt-BR")} encontrados</span></div>
         <div className="table-scroll"><table className="network-table">
-          <thead><tr><th>Pessoa</th><th>Posicao</th><th>Alocada sob</th><th>Patrocinador</th><th>Conta</th><th>KYC</th><th>Ganhos</th><th>Entrada</th><th></th></tr></thead>
-          <tbody>{filteredPeople.slice(0, 200).map((person) => (
+          <thead><tr><th>Participante</th><th>Posição na rede</th><th>Conexões</th><th>Conta e verificação</th><th>Ganhos</th><th>Ações</th></tr></thead>
+          <tbody>{pagePeople.map((person) => (
             <tr className={person.id === selectedId ? "is-selected" : ""} key={person.id}>
-              <td><UserIdentity person={person} /></td>
+              <td><button className="network-person-link" onClick={() => selectPerson(person)} type="button"><UserIdentity person={person} /><small>ID {person.id} · {person.phone || "Sem telefone"}</small></button></td>
               <td><strong className="table-primary">Nivel {person.level} · {person.parentSide || "-"}</strong><small className="table-secondary">Perna {person.branch || "-"} · {formatConnection(person.parentConnectionType)}</small></td>
-              <td><strong className="table-primary">{person.parentName || "-"}</strong><small className="table-secondary">{person.parentEmail || ""}</small></td>
-              <td><strong className="table-primary">{person.directSponsorName || "-"}</strong><small className="table-secondary">{person.directSponsorEmail || ""}</small></td>
-              <td><StatusBadge status={person.status} /></td><td><StatusBadge status={person.kycStatus} /></td><td>{person.networkEarningsBlocked ? <StatusBadge status="BLOQUEADO" /> : <StatusBadge status="ATIVO" />}</td><td>{dateFormatter.format(new Date(person.createdAt))}</td>
-              <td><button className="button button--secondary" onClick={() => { selectPerson(person, true); window.scrollTo({ top: 0, behavior: "smooth" }); }} type="button"><ChevronRight size={15} /> Gerenciar</button></td>
+              <td><small className="table-secondary">Alocado sob</small><strong className="table-primary">{person.parentName || "-"}</strong><small className="table-secondary">Indicado por {person.directSponsorName || "-"}</small></td>
+              <td><div className="network-account-status"><StatusBadge status={person.status} /><small>KYC <StatusBadge status={person.kycStatus} /></small></div></td>
+              <td><span className={`network-earnings-state ${person.networkEarningsBlocked ? "is-blocked" : ""}`}>{person.networkEarningsBlocked ? "Bloqueados" : "Liberados"}</span></td>
+              <td><div className="network-row-actions"><button className="button button--secondary" onClick={() => selectPerson(person)} type="button">Detalhes <ChevronRight size={15} /></button><button aria-label={`Explorar rede de ${person.name}`} className="icon-button" onClick={() => locatePerson(person)} title="Explorar ramo" type="button"><GitBranch size={17} /></button></div></td>
             </tr>
           ))}</tbody>
         </table></div>
-        {filteredPeople.length > 200 ? <div className="result-line">Mostrando os primeiros 200 registros filtrados.</div> : null}
+        <div className="network-pagination">
+          <span>{filteredPeople.length ? (currentPage - 1) * DIRECTORY_PAGE_SIZE + 1 : 0}–{Math.min(currentPage * DIRECTORY_PAGE_SIZE, filteredPeople.length)} de {filteredPeople.length.toLocaleString("pt-BR")} participantes</span>
+          <div><button className="button button--secondary" disabled={currentPage === 1} onClick={() => setDirectoryPage(currentPage - 1)} type="button">Anterior</button><span>Página {currentPage} de {totalPages}</span><button className="button button--secondary" disabled={currentPage === totalPages} onClick={() => setDirectoryPage(currentPage + 1)} type="button">Próxima</button></div>
+        </div>
         {!filteredPeople.length ? <div className="empty-state"><UserRound size={24} /><p>Nenhuma pessoa encontrada com esses filtros.</p></div> : null}
-      </section>
+      </section> : null}
 
       {moveTarget ? (
         <div className="modal-backdrop" onMouseDown={() => !moving && setMoveTarget(null)}><section className="modal network-move-modal" onMouseDown={(event) => event.stopPropagation()}>
@@ -421,7 +453,8 @@ function NetworkTreeNode({ focusId, node, onFocus, onSelect, selectedId }) {
           <span>{initials(person.name)}</span>
           <i className={person.active ? "is-online" : ""} />
         </button>
-        <strong title={person.name}>{person.name}</strong>
+        <button className="network-node-name" onClick={() => onSelect(person)} title={person.name} type="button">{person.name}</button>
+        <span className="network-node-id">ID {person.id}</span>
         <small>{person.level === 0 ? "Raiz operacional" : `N${person.level} · ${person.parentSide || "sem lado"}`}</small>
         <div className="network-tree-person__badges">
           <em className={person.parentConnectionType === "DIRETA" ? "is-direct" : ""}>{formatConnection(person.parentConnectionType)}</em>
@@ -465,11 +498,13 @@ function buildVisibleTree(focusPerson, people, depth) {
   const childrenByParent = new Map();
   people.forEach((person) => { const children = childrenByParent.get(person.parentId) ?? []; children.push(person); childrenByParent.set(person.parentId, children); });
   childrenByParent.forEach((children) => children.sort((a, b) => (a.position ?? 0) - (b.position ?? 0)));
+  const visited = new Set();
   function build(person, remainingDepth) {
+    visited.add(person.id);
     const availableChildren = childrenByParent.get(person.id) ?? [];
     return {
       children: remainingDepth > 0
-        ? availableChildren.map((child) => build(child, remainingDepth - 1))
+        ? availableChildren.filter((child) => !visited.has(child.id)).map((child) => build(child, remainingDepth - 1))
         : [],
       hasHiddenChildren: remainingDepth <= 0 && availableChildren.length > 0,
       person,
@@ -489,11 +524,11 @@ function buildAncestorPath(person, peopleById) {
   const visited = new Set();
   let current = person;
   while (current && !visited.has(current.id)) {
-    path.unshift(current);
+    path.push(current);
     visited.add(current.id);
     current = current.parentId ? peopleById.get(current.parentId) : null;
   }
-  return path;
+  return path.reverse();
 }
 
 function buildMemberStats(person, people) {
@@ -508,8 +543,8 @@ function buildMemberStats(person, people) {
   const descendants = [];
   const queue = [...directChildren];
   const visited = new Set();
-  while (queue.length) {
-    const current = queue.shift();
+  for (let index = 0; index < queue.length; index++) {
+    const current = queue[index];
     if (!current || visited.has(current.id)) continue;
     visited.add(current.id);
     descendants.push(current);
@@ -544,8 +579,8 @@ function collectDescendantIds(userId, people) {
   people.forEach((person) => { const children = childrenByParent.get(person.parentId) ?? []; children.push(person.id); childrenByParent.set(person.parentId, children); });
   const blocked = new Set([userId]);
   const queue = [userId];
-  while (queue.length) {
-    const parentId = queue.shift();
+  for (let index = 0; index < queue.length; index++) {
+    const parentId = queue[index];
     for (const childId of childrenByParent.get(parentId) ?? []) { if (blocked.has(childId)) continue; blocked.add(childId); queue.push(childId); }
   }
   return blocked;

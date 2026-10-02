@@ -54,8 +54,8 @@ export function CartFeedbackProvider({ children }) {
   );
 }
 
-// Draw inside the Buscar screen, above its ScrollView, so native navigation
-// and the scroll content cannot cover the dot.
+// Mounted beside GlobalCartButton in AppContent: both use the same native root.
+// A screen-local layer can be clipped/covered by the native tab/stack surfaces.
 export function CartFeedbackLayer() {
   const context = useContext(CartFeedbackLayerContext);
   if (!context) throw new Error("CartFeedbackLayer must be used inside CartFeedbackProvider");
@@ -104,7 +104,7 @@ export function useCartFeedback() {
 }
 
 const styles = StyleSheet.create({
-  overlay: { ...StyleSheet.absoluteFillObject, zIndex: 200, elevation: 20 },
+  overlay: { ...StyleSheet.absoluteFillObject, zIndex: 99, elevation: 8 },
   dot: {
     position: "absolute",
     width: 16,

@@ -1,4 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
+import { mergeConversationSnapshot } from "../utils/live-refresh";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -63,21 +65,24 @@ export function PersonalConversationScreen({ navigation, route }) {
     sendTyping: (isTyping) => setPersonalConversationTyping(session?.accessToken, conversationId, isTyping),
   });
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ silent = false } = {}) => {
     if (!session?.accessToken || !conversationId) return;
 
     try {
       const response = await getPersonalConversation(session.accessToken, conversationId);
-      setConversation(response.conversation);
-      setMessagePage(response.messagePage ?? { hasMore: false, nextCursor: null });
-      setAlias(response.conversation.alias ?? "");
+      setConversation((current) => mergeConversationSnapshot(current, response.conversation));
+      setMessagePage((current) => current.nextCursor ? current : (response.messagePage ?? { hasMore: false, nextCursor: null }));
+      if (!silent) setAlias(response.conversation.alias ?? "");
       setError("");
     } catch (requestError) {
-      setError(requestError.message);
+      if (!silent) setError(requestError.message);
     } finally {
       setIsLoading(false);
     }
   }, [conversationId, session?.accessToken]);
+
+  useLiveRefresh({ accessToken: session?.accessToken, enabled: Boolean(conversationId), scopeKey: conversationId,
+    onRefresh: () => load({ silent: true }) });
 
   const loadOlder = useCallback(async () => {
     if (!session?.accessToken || !conversationId || loadingOlder || !messagePage.hasMore || !messagePage.nextCursor) return;
@@ -122,6 +127,7 @@ export function PersonalConversationScreen({ navigation, route }) {
 
     socket?.on(realtimeEvents.personalChatMessageCreated, onMessage);
     const onUpdated = (payload = {}) => {
+      if (Number(payload.conversationId) !== Number(conversationId)) return;
       if (payload.reason === "read") {
         const readAt = new Date().toISOString();
         setConversation((current) => current

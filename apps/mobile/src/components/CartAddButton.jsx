@@ -13,13 +13,16 @@ export function CartAddButton({ name = "produto", onDecrease, onPress, quantity 
   function add(event) {
     const origin = cartPressOrigin(event) ?? pressOriginRef.current;
     pressOriginRef.current = null;
-    if (origin || !buttonRef.current) {
+    if (!buttonRef.current) {
       onPress?.(origin);
       return;
     }
-    // Accessibility/keyboard activation may not contain a touch location.
+    // Measure before adding: the first addition replaces this + with a stepper.
+    // All three points (button, cart and overlay) must use window coordinates;
+    // touch pageY can belong to a nested native screen on Android.
     buttonRef.current.measureInWindow((x, y, width, height) => {
-      onPress?.({ pageX: x + width / 2, pageY: y + height / 2 });
+      const measured = [x, y, width, height].every(Number.isFinite) && width > 0 && height > 0;
+      onPress?.(measured ? { pageX: x + width / 2, pageY: y + height / 2 } : origin);
     });
   }
 

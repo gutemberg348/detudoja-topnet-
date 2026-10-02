@@ -10,7 +10,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { AppState, Keyboard, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { GlobalIncomingServiceAlert } from "./src/components/GlobalIncomingServiceAlert";
-import { CartFeedbackProvider, useCartFeedback } from "./src/components/CartFeedbackProvider";
+import { CartFeedbackLayer, CartFeedbackProvider, useCartFeedback } from "./src/components/CartFeedbackProvider";
 import { AppNavigator, navigationRef } from "./src/navigation/AppNavigator";
 import { heartbeatSellerServices } from "./src/services/service-chats.api";
 import {
@@ -133,6 +133,7 @@ function AppContent() {
     <View style={styles.app}>
       <StatusBar style="dark" />
       <AppNavigator onRouteChange={setActiveRouteName} />
+      <CartFeedbackLayer />
       <GlobalCartButton activeRouteName={activeRouteName} />
       <GlobalIncomingServiceAlert navigationRef={navigationRef} />
     </View>

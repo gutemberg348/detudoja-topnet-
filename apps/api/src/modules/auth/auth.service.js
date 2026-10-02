@@ -246,7 +246,7 @@ async function ensureCompanyRootUser(repository) {
   });
 }
 
-async function findMatrixPlacement(repository, sponsorUserId) {
+export async function findMatrixPlacement(repository, sponsorUserId) {
   const sponsorPlacement = await repository.findMatrixPlacementByUserId(sponsorUserId);
   const queue = [
     {
@@ -256,12 +256,11 @@ async function findMatrixPlacement(repository, sponsorUserId) {
     },
   ];
 
-  while (queue.length > 0) {
-    const node = queue.shift();
-
-    if (node.depthFromSponsor >= 20) {
-      continue;
-    }
+  const visited = new Set();
+  for (let index = 0; index < queue.length; index++) {
+    const node = queue[index];
+    if (visited.has(node.userId)) continue;
+    visited.add(node.userId);
 
     const children = await repository.findMatrixChildren(node.userId);
     const occupiedPositions = new Set(
@@ -286,7 +285,7 @@ async function findMatrixPlacement(repository, sponsorUserId) {
     }
   }
 
-  throw new AppError("A matriz 2x20 desta rede esta completa", 409);
+  throw new AppError("Nao foi possivel encontrar uma posicao valida na matriz. Verifique os vinculos da rede.", 409);
 }
 
 export async function login({ audience, login: loginValue, password }) {

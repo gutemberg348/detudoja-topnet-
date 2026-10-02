@@ -1,0 +1,64 @@
+.network-admin-page .network-overview-bar { display: flex; justify-content: space-between; align-items: center; gap: 24px; margin: 24px 0; }
+.network-admin-page .network-view-tabs { display: flex; gap: 4px; padding: 5px; background: #e9eeed; border-radius: 12px; flex-shrink: 0; }
+.network-admin-page .network-view-tabs button { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border: 0; border-radius: 8px; background: transparent; cursor: pointer; font-size: 13px; font-weight: 600; color: #61706a; }
+.network-admin-page .network-view-tabs button[aria-pressed="true"] { background: white; color: #096c50; box-shadow: 0 2px 5px #173b2410; }
+.network-admin-page .network-depth-note { display: grid; gap: 4px; max-width: 420px; }
+.network-admin-page .network-depth-note strong { color: #29483d; font-size: 13px; }
+.network-admin-page .network-depth-note span { color: #68766f; font-size: 12px; line-height: 1.5; }
+.network-admin-page .toolbar--network { display: grid; grid-template-columns: minmax(260px, 1fr) 240px 190px; padding: 16px; gap: 12px; }
+.network-admin-page .toolbar--network select, .network-admin-page .network-level-input { width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; background: #fff; color: var(--ink); font-size: 13px; }
+.network-admin-page .network-search-locator { min-width: 0; }
+.network-admin-page .network-search-results { max-height: 420px; overflow-y: auto; }
+.network-admin-page .network-search-results button strong { font-size: 14px; }
+.network-admin-page .network-search-results button small { font-size: 12px; }
+.network-admin-page .network-person-link { display: grid; gap: 7px; border: 0; background: transparent; text-align: left; cursor: pointer; padding: 2px 0; }
+.network-admin-page .network-person-link > small { padding-left: 44px; color: var(--muted); font-size: 11px; }
+.network-admin-page .network-person-link:hover strong { color: var(--primary); text-decoration: underline; }
+.network-admin-page .network-account-status { display: grid; justify-items: start; gap: 8px; }
+.network-admin-page .network-account-status small { display: flex; align-items: center; gap: 5px; color: var(--muted); }
+.network-admin-page .network-row-actions { display: flex; align-items: center; gap: 8px; }
+.network-admin-page .network-earnings-state { display: inline-flex; align-items: center; gap: 7px; color: #097451; font-size: 12px; font-weight: 600; }
+.network-admin-page .network-earnings-state::before { content: ""; width: 6px; height: 6px; background: currentColor; border-radius: 50%; }
+.network-admin-page .network-earnings-state.is-blocked { color: #a53b43; }
+.network-admin-page .network-pagination { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 18px 22px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+.network-admin-page .network-pagination > div { display: flex; align-items: center; gap: 12px; }
+.network-admin-page .network-directory td { padding: 18px; }
+.network-admin-page .network-table { min-width: 960px; }
+.network-admin-page .network-breadcrumbs { display: flex; overflow: auto; gap: 4px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: #fff; }
+.network-admin-page .network-breadcrumbs button { display: flex; align-items: center; gap: 8px; flex-shrink: 0; border: 0; border-radius: 6px; padding: 6px; color: #566f63; background: transparent; cursor: pointer; font-size: 12px; }
+.network-admin-page .network-breadcrumbs button:hover { background: #eaf5ef; }
+.network-admin-page .network-tree-workspace .network-tree-person { width: 192px; min-height: 200px; padding: 16px; box-shadow: 0 3px 12px #173b2409; border-radius: 12px; }
+.network-admin-page .network-node-name { border: 0; background: transparent; font-size: 14px; font-weight: 700; color: var(--ink); cursor: pointer; width: 100%; overflow-wrap: anywhere; line-height: 1.4; }
+.network-admin-page .network-node-name:hover { color: var(--primary); }
+.network-admin-page .network-node-id { color: var(--muted); font-size: 11px; }
+.network-admin-page .network-tree-workspace .network-tree-person > small { font-size: 10px; }
+.network-admin-page .network-tree-person__badges em { font-size: 9px; padding: 4px 7px; }
+.network-admin-page .network-tree-workspace .network-tree-person__focus { font-size: 11px; min-height: 34px; padding: 7px 12px; }
+.network-admin-page .network-tree-workspace .network-node-children--multi::after { left: 96px; right: 96px; }
+.network-admin-page .network-tree-workspace .network-tree-scroll { min-height: 460px; max-height: 65vh; background-image: radial-gradient(#d9e3de 1px, transparent 1px); }
+.network-admin-page .network-tree-summary { flex-wrap: wrap; }
+.network-admin-page .network-tree-summary span { font-size: 11px; }
+.network-admin-page .network-tree-summary strong { font-size: 12px; }
+.network-admin-page .network-tree-focus strong { font-size: 14px; }
+.network-admin-page .network-tree-focus small { font-size: 10px; }
+.network-admin-page .network-tree-footer span, .network-admin-page .network-tree-footer p { font-size: 11px; }
+.network-admin-page .network-inspector { width: min(520px, 100vw); }
+.network-admin-page .network-member-details dt, .network-admin-page .network-member-details dd { font-size: 13px; line-height: 1.6; }
+.network-admin-page .network-member-panel__hero h2 { font-size: 23px; overflow-wrap: anywhere; }
+.network-admin-page .network-member-panel__hero span { font-size: 13px; }
+.network-admin-page .network-member-section-title { font-size: 11px; letter-spacing: .06em; }
+.network-admin-page .network-member-stats strong { font-size: 24px; }
+.network-admin-page .network-member-stats span { font-size: 12px; }
+.network-admin-page .network-safety-note { margin: 16px 0; box-shadow: none; }
+.network-admin-page .network-safety-note p { font-size: 12px; line-height: 1.6; }
+@media (max-width: 1180px) {
+  .network-admin-page .toolbar--network { grid-template-columns: minmax(180px, 1fr) 220px; }
+  .network-admin-page .network-search-locator { grid-column: 1 / -1; }
+  .network-admin-page .network-overview-bar { align-items: start; flex-direction: column; gap: 14px; }
+}
+@media (max-width: 640px) {
+  .network-admin-page .toolbar--network { grid-template-columns: 1fr; }
+  .network-admin-page .network-pagination { align-items: flex-start; flex-direction: column; }
+  .network-admin-page .network-view-tabs { width: 100%; }
+  .network-admin-page .network-view-tabs button { flex: 1; padding: 10px; font-size: 12px; }
+}

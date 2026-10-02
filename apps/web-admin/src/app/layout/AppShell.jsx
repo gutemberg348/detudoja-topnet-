@@ -144,6 +144,7 @@ export function AppShell({ onLogout, session }) {
                 <button
                   className={activePage === id ? "active" : ""}
                   key={id}
+                  aria-current={activePage === id ? "page" : undefined}
                   onClick={() => navigate(id)}
                   type="button"
                 >
@@ -200,7 +201,7 @@ export function AppShell({ onLogout, session }) {
             <div><strong>Ambiente seguro</strong><small>Sessão administrativa ativa</small></div>
           </div>
         </header>
-        <main>
+        <main id="admin-content">
       <ActivePage
             accessToken={session.accessToken}
             currentAdminId={session.user.id}

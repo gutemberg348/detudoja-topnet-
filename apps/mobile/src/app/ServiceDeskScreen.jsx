@@ -4,14 +4,14 @@ import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Switch,
 import { PageHeader } from "../components/PageHeader";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { StatePanel } from "../components/StatePanel";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import {
   acceptCourierRequest,
   getCourierRequests,
   saveCourierProfile,
   updateCourierDispatchScope,
 } from "../services/courier.api";
-import { getSellerProfile } from "../services/seller.api";
-import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
+import { realtimeEvents } from "../services/realtime";
 import {
   getServiceConversation,
   getSellerServices,
@@ -20,6 +20,7 @@ import {
   updateSellerService,
 } from "../services/service-chats.api";
 import { useAuthStore } from "../stores/useAuthStore";
+import { chatMessagePreview } from "../utils/chat-preview";
 import { getCurrentUserAddresses, updateCurrentUser } from "../services/users.api";
 import { serviceIconName } from "../utils/service-icons";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
@@ -27,6 +28,7 @@ import { CourierRegistrationModal } from "./service/CourierRegistrationModal";
 import { FixedServicePriceModal } from "./service/FixedServicePriceModal";
 import { RegisterServiceModal } from "./service/RegisterServiceModal";
 import { formatarDinheiro } from "../utils/money";
+import { serviceModalityDescription, serviceOperationSummary } from "../utils/service-operations";
 
 function serviceIcon(iconName) {
   return serviceIconName(iconName);
@@ -55,7 +57,6 @@ export function ServiceDeskScreen({ navigation }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [moreServicesOpen, setMoreServicesOpen] = useState(false);
-  const [profile, setProfile] = useState(null);
   const [registeringService, setRegisteringService] = useState(false);
   const [registerServiceError, setRegisterServiceError] = useState("");
   const [registerServiceOpen, setRegisterServiceOpen] = useState(false);
@@ -79,13 +80,7 @@ export function ServiceDeskScreen({ navigation }) {
     () => registeredServices.filter((service) => service.requiresCourierProfile),
     [registeredServices],
   );
-  const otherRegisteredServices = useMemo(
-    () => registeredServices.filter((service) => !service.requiresCourierProfile),
-    [registeredServices],
-  );
-  const mainAvailabilityServices = courierProfile
-    ? services.filter((service) => service.requiresCourierProfile)
-    : registeredServices;
+  const mainAvailabilityServices = serviceOperationSummary(services).registered;
   const mainAvailabilityOnline = mainAvailabilityServices.some((service) => service.available);
   const activeMainServices = mainAvailabilityServices.filter((service) => service.available);
   const courierConversations = useMemo(
@@ -107,10 +102,6 @@ export function ServiceDeskScreen({ navigation }) {
     )),
     [conversations],
   );
-  const courierService = useMemo(
-    () => services.find((service) => service.requiresCourierProfile),
-    [services],
-  );
   const receivesPlatformCalls = Boolean(
     courierProfile && (courierProfile.acceptsPlatformCalls || !courierProfile.linkedStoreCount),
   );
@@ -123,14 +114,12 @@ export function ServiceDeskScreen({ navigation }) {
     }
 
     try {
-      const [profileResponse, servicesResponse, conversationsResponse, requestsResponse, addressesResponse] = await Promise.all([
-        getSellerProfile(session.accessToken),
+      const [servicesResponse, conversationsResponse, requestsResponse, addressesResponse] = await Promise.all([
         getSellerServices(session.accessToken),
         getServiceConversations(session.accessToken),
         getCourierRequests(session.accessToken),
         getCurrentUserAddresses(session.accessToken),
       ]);
-      setProfile(profileResponse.profile ?? null);
       setCourierProfile(servicesResponse.courierProfile ?? null);
       setServices(servicesResponse.services ?? []);
       setConversations((conversationsResponse.conversations ?? []).filter((conversation) => conversation.isSeller));
@@ -165,26 +154,12 @@ export function ServiceDeskScreen({ navigation }) {
     };
   }, [courierRequests.length]);
 
-  useEffect(() => {
-    if (!session?.accessToken) return undefined;
-    const socket = getRealtimeSocket(session.accessToken);
-    const refresh = () => load({ silent: true });
-    const notifyCourier = () => load({ silent: true });
-    socket?.on(realtimeEvents.serviceChatCreated, refresh);
-    socket?.on(realtimeEvents.serviceChatMessageCreated, refresh);
-    socket?.on(realtimeEvents.serviceAvailabilityUpdated, refresh);
-    socket?.on(realtimeEvents.serviceChatUpdated, refresh);
-    socket?.on(realtimeEvents.courierRequestCreated, notifyCourier);
-    socket?.on(realtimeEvents.courierRequestUpdated, refresh);
-    return () => {
-      socket?.off(realtimeEvents.serviceChatCreated, refresh);
-      socket?.off(realtimeEvents.serviceChatMessageCreated, refresh);
-      socket?.off(realtimeEvents.serviceAvailabilityUpdated, refresh);
-      socket?.off(realtimeEvents.serviceChatUpdated, refresh);
-      socket?.off(realtimeEvents.courierRequestCreated, notifyCourier);
-      socket?.off(realtimeEvents.courierRequestUpdated, refresh);
-    };
-  }, [load, session?.accessToken]);
+  useLiveRefresh({ accessToken: session?.accessToken,
+    events: [realtimeEvents.serviceChatCreated, realtimeEvents.serviceChatMessageCreated,
+      realtimeEvents.serviceAvailabilityUpdated, realtimeEvents.serviceChatUpdated,
+      realtimeEvents.courierRequestCreated, realtimeEvents.courierRequestUpdated],
+    onRefresh: () => load({ silent: true }),
+  });
 
   async function toggleService(service) {
     if (!session?.accessToken || savingServiceId) return;
@@ -411,11 +386,9 @@ export function ServiceDeskScreen({ navigation }) {
     <ScreenContainer contentContainerStyle={styles.content}>
       <PageHeader
         action={<StatusPill activeCount={activeMainServices.length} courierStatus={courierDashboard?.operationalStatus} />}
-        eyebrow={courierProfile ? "Area do entregador" : "Prestador de servicos"}
-        subtitle={courierProfile
-          ? "Corrida atual, novas chamadas e disponibilidade em um unico lugar."
-          : "Escolha o que atende agora e acompanhe os chamados recebidos pelo chat."}
-        title={courierProfile ? "Central de corridas" : `Servicos de ${profile?.publicName ?? "voce"}`}
+        eyebrow="Sua central de trabalho"
+        subtitle="Suas atividades em um so lugar. Escolha o que atende e adicione novos servicos."
+        title="Central de servicos"
       />
 
       {loading ? <StatePanel icon="briefcase-outline" loading text="Carregando sua operacao..." /> : null}
@@ -426,35 +399,52 @@ export function ServiceDeskScreen({ navigation }) {
           <View style={styles.summary}>
             <View style={styles.summaryIcon}><Ionicons color={colors.card} name="radio-outline" size={22} /></View>
             <View style={styles.summaryCopy}>
-              <Text style={styles.summaryTitle}>{activeMainServices.length ? "Recebendo chamados" : "Voce esta offline"}</Text>
+              <Text style={styles.summaryTitle}>{activeMainServices.length ? "Voce esta online como:" : "Todas as atividades estao offline"}</Text>
               <Text style={styles.summaryText}>
                 {activeMainServices.length
-                  ? `${activeMainServices.map((service) => service.name).join(" e ")} aparece para clientes e lojas.`
+                  ? activeMainServices.map((service) => service.name).join(" • ")
                   : "Ative ao menos um servico para aparecer nas buscas."}
               </Text>
             </View>
           </View>
 
+          {hasRegisteredServices ? (
+            <>
+              <SectionTitle
+                icon="options-outline"
+                subtitle="Cada atividade tem seu proprio controle. Verde recebe chamados; cinza fica offline."
+                title="Em que voce quer trabalhar?"
+              />
+              <ServiceAvailabilityList
+                courierProfile={courierProfile}
+                onEditPrice={(service) => { setFixedPriceError(""); setFixedPriceService(service); }}
+                onToggle={toggleService}
+                savingServiceId={savingServiceId}
+                services={registeredServices}
+              />
+            </>
+          ) : null}
+
           {mainAvailabilityServices.length ? (
             <View style={[styles.mainAvailability, mainAvailabilityOnline && styles.mainAvailabilityOnline]}>
               <View style={styles.mainAvailabilityIcon}>
-                <Ionicons color={colors.primaryDark} name={courierProfile ? "bicycle-outline" : "radio-outline"} size={26} />
+                <Ionicons color={colors.primaryDark} name="radio-outline" size={26} />
               </View>
               <View style={styles.mainAvailabilityCopy}>
                 <Text style={styles.mainAvailabilityTitle}>
-                  {mainAvailabilityOnline ? "Voce esta online" : "Ficar online agora"}
+                  {mainAvailabilityOnline ? "Pausar todas as atividades" : "Ativar todas as atividades"}
                 </Text>
                 <Text style={styles.mainAvailabilityHint}>
-                  {courierProfile
-                    ? "Receber chamadas de corrida"
-                    : "Receber chamados dos seus servicos"}
+                  {mainAvailabilityOnline
+                    ? `${activeMainServices.length} de ${registeredServices.length} online. Desligue para pausar todas.`
+                    : "Ligue para receber chamados de todos os servicos cadastrados."}
                 </Text>
               </View>
               {savingServiceId === "main-availability" ? (
                 <ActivityIndicator color={colors.primaryDark} size="large" />
               ) : (
                 <Switch
-                  accessibilityLabel={mainAvailabilityOnline ? "Ficar offline" : "Ficar online"}
+                  accessibilityLabel={mainAvailabilityOnline ? "Pausar todas as atividades" : "Ativar todas as atividades cadastradas"}
                   disabled={Boolean(savingServiceId)}
                   onValueChange={toggleMainAvailability}
                   style={styles.mainAvailabilitySwitch}
@@ -466,6 +456,23 @@ export function ServiceDeskScreen({ navigation }) {
             </View>
           ) : null}
           {availabilityError ? <Text style={styles.mainAvailabilityError}>{availabilityError}</Text> : null}
+
+          {hasRegisteredServices ? (
+            <MoreServicesPanel
+              availableCount={catalogServices.length}
+              open={moreServicesOpen}
+              onToggle={() => setMoreServicesOpen((current) => !current)}
+            >
+              <ServiceCatalog
+                loadingServiceId={savingServiceId}
+                onStart={startService}
+                services={catalogServices}
+                subtitle="Cadastre somente as atividades que tambem deseja atender"
+                title="Outros servicos disponiveis"
+              />
+              <RegisterServicePrompt onPress={() => { setRegisterServiceError(""); setRegisterServiceOpen(true); }} />
+            </MoreServicesPanel>
+          ) : null}
 
           {!hasRegisteredServices ? (
             <>
@@ -482,6 +489,13 @@ export function ServiceDeskScreen({ navigation }) {
 
           {courierProfile ? (
             <>
+              <SectionTitle
+                icon="bicycle-outline"
+                title="Area do motoboy"
+                subtitle={courierRegisteredServices.some((service) => service.available)
+                  ? "Transporte online. Acompanhe suas corridas abaixo."
+                  : "Transporte offline. Isso nao desativa seus outros servicos."}
+              />
               <Pressable
                 onPress={() => {
                   setPendingCourierService(null);
@@ -510,7 +524,7 @@ export function ServiceDeskScreen({ navigation }) {
                 acceptsPlatformCalls={receivesPlatformCalls}
                 canUseTeamOnly={courierProfile.linkedStoreCount > 0}
                 isBusy={courierDashboard?.operationalStatus === "BUSY"}
-                isOnline={Boolean(courierService?.available)}
+                isOnline={courierRegisteredServices.some((service) => service.available)}
                 loading={courierScopeSaving}
                 onChange={updateDispatchScope}
               />
@@ -564,44 +578,6 @@ export function ServiceDeskScreen({ navigation }) {
             </>
           ) : null}
 
-          {(courierProfile ? courierRegisteredServices : registeredServices).length ? (
-            <>
-              <SectionTitle
-                icon="flash-outline"
-                subtitle={courierProfile ? "Fique online para receber corridas mesmo com o app em segundo plano" : "Ative apenas o que voce consegue atender agora"}
-                title={courierProfile ? "Disponibilidade para corridas" : "Meu painel de servicos"}
-              />
-              <ServiceAvailabilityList
-                courierProfile={courierProfile}
-                onEditPrice={(service) => { setFixedPriceError(""); setFixedPriceService(service); }}
-                onToggle={toggleService}
-                savingServiceId={savingServiceId}
-                services={courierProfile ? courierRegisteredServices : registeredServices}
-              />
-            </>
-          ) : null}
-
-          {courierProfile ? (
-            <>
-              {otherRegisteredServices.length ? (
-                <>
-                  <SectionTitle
-                    icon="briefcase-outline"
-                    subtitle="Atividades extras separadas da sua central de corridas"
-                    title="Outros servicos cadastrados"
-                  />
-                  <ServiceAvailabilityList
-                    courierProfile={courierProfile}
-                    onEditPrice={(service) => { setFixedPriceError(""); setFixedPriceService(service); }}
-                    onToggle={toggleService}
-                    savingServiceId={savingServiceId}
-                    services={otherRegisteredServices}
-                  />
-                </>
-              ) : null}
-            </>
-          ) : null}
-
           <SectionTitle icon="chatbubbles-outline" subtitle="Conversas reais enviadas por clientes" title="Chamados" value={openCalls.length} />
           {openCalls.length ? (
             <View style={styles.callsList}>
@@ -617,22 +593,6 @@ export function ServiceDeskScreen({ navigation }) {
             <StatePanel icon="chatbubble-ellipses-outline" text="Quando um cliente escolher voce na busca, o chamado chega aqui em tempo real." title="Nenhum chamado em aberto" />
           )}
 
-          {hasRegisteredServices ? (
-            <MoreServicesPanel
-              availableCount={catalogServices.length}
-              open={moreServicesOpen}
-              onToggle={() => setMoreServicesOpen((current) => !current)}
-            >
-              <ServiceCatalog
-                loadingServiceId={savingServiceId}
-                onStart={startService}
-                services={catalogServices}
-                subtitle="Cadastre somente as atividades que tambem deseja atender"
-                title="Outros servicos disponiveis"
-              />
-              <RegisterServicePrompt onPress={() => { setRegisterServiceError(""); setRegisterServiceOpen(true); }} />
-            </MoreServicesPanel>
-          ) : null}
         </>
       ) : null}
       <CourierRegistrationModal
@@ -692,13 +652,13 @@ function ServiceAvailabilityList({ courierProfile, onEditPrice, onToggle, saving
           <View style={styles.serviceCopy}>
             <View style={styles.serviceNameLine}>
               <Text style={styles.serviceName}>{service.name}</Text>
-              {service.requiresCourierProfile ? (
-                <View style={styles.deliveryPill}>
-                  <Ionicons color={colors.primaryDark} name="bicycle-outline" size={12} />
-                  <Text style={styles.deliveryPillText}>Central de corridas</Text>
-                </View>
-              ) : null}
+              <View style={[styles.availabilityBadge, service.available && styles.availabilityBadgeOnline]}>
+                <Text style={[styles.availabilityBadgeText, service.available && styles.availabilityBadgeTextOnline]}>
+                  {service.available ? "Online" : "Offline"}
+                </Text>
+              </View>
             </View>
+            <Text style={styles.serviceMeta}>{serviceModalityDescription(service)}</Text>
             <Text style={styles.serviceMeta}>
               {service.available
                 ? "Online e disponivel para novas chamadas"
@@ -718,6 +678,7 @@ function ServiceAvailabilityList({ courierProfile, onEditPrice, onToggle, saving
             <ActivityIndicator color={colors.primaryDark} />
           ) : (
             <Switch
+              accessibilityLabel={`Disponibilidade de ${service.name}`}
               disabled={Boolean(savingServiceId)}
               onValueChange={() => onToggle(service)}
               thumbColor={colors.card}
@@ -865,7 +826,7 @@ function ServiceCallCard({ conversation, onPress }) {
             <Text numberOfLines={1} style={styles.callRouteText}>{conversation.request?.origin || "Retirada"} - {conversation.request?.destination || "Destino"}</Text>
           </View>
         ) : (
-          <Text numberOfLines={1} style={styles.callMessage}>{conversation.lastMessage?.text || "Novo chamado aguardando sua resposta."}</Text>
+          <Text numberOfLines={1} style={styles.callMessage}>{chatMessagePreview(conversation.lastMessage, "Novo chamado aguardando sua resposta.")}</Text>
         )}
       </View>
       {unreadCount ? (
@@ -990,6 +951,10 @@ function CourierDispatchScope({ acceptsPlatformCalls, canUseTeamOnly, isBusy, is
 }
 
 const styles = StyleSheet.create({
+  availabilityBadge: { borderRadius: radius.round, paddingHorizontal: spacing.sm, paddingVertical: 4, backgroundColor: colors.cardMuted },
+  availabilityBadgeOnline: { backgroundColor: colors.primarySoft },
+  availabilityBadgeText: { color: colors.textSecondary, fontFamily: fonts.bold, fontSize: 11 },
+  availabilityBadgeTextOnline: { color: colors.primaryDark },
   mainAvailability: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.md, minHeight: 90, padding: spacing.md, ...shadowSoft },
   mainAvailabilityOnline: { backgroundColor: colors.primarySoft, borderColor: colors.primaryLight },
   mainAvailabilityIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 52, justifyContent: "center", width: 52 },

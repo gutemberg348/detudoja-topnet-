@@ -2,9 +2,11 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Keyboard,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -26,6 +28,7 @@ import { ScreenContainer } from "../components/ScreenContainer";
 import { StatePanel } from "../components/StatePanel";
 import { ShareAddressModal } from "./service/ShareAddressModal";
 import { useConversationRealtime } from "../hooks/useConversationRealtime";
+import { mergeConversationSnapshot } from "../utils/live-refresh";
 import { useChatTimeline } from "../hooks/useChatTimeline";
 import { useChatTyping } from "../hooks/useChatTyping";
 import { getGeneratedChargeQr } from "../services/seller.api";
@@ -52,6 +55,7 @@ import { resolveMediaUrl } from "../utils/media";
 import { formatarHora } from "../utils/date";
 import { formatarDinheiro } from "../utils/money";
 import { formatCep } from "../utils/authValidation";
+import { addressDirectionsUrl } from "../utils/chat-address";
 import {
   colors,
   fonts,
@@ -81,6 +85,7 @@ export function ServiceConversationScreen({ navigation, route }) {
   const initial = route.params?.conversation;
   const scrollRef = useRef(null);
   const loadPromiseRef = useRef(null);
+  const reloadPendingRef = useRef(false);
   const [actionLoading, setActionLoading] = useState("");
   const [acceptPaymentMode, setAcceptPaymentMode] = useState("ONLINE");
   const [conversation, setConversation] = useState(initial);
@@ -154,14 +159,20 @@ export function ServiceConversationScreen({ navigation, route }) {
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!session?.accessToken || !initial?.id) return;
-    if (loadPromiseRef.current) return loadPromiseRef.current;
+    if (loadPromiseRef.current) {
+      reloadPendingRef.current = true;
+      return loadPromiseRef.current;
+    }
     if (!silent) setError("");
 
     const request = (async () => {
       try {
-        const response = await getServiceConversation(session.accessToken, initial.id);
-        setConversation(response.conversation);
-        setMessagePage(response.messagePage ?? { hasMore: false, nextCursor: null });
+        do {
+          reloadPendingRef.current = false;
+          const response = await getServiceConversation(session.accessToken, initial.id);
+          setConversation((current) => mergeConversationSnapshot(current, response.conversation));
+          setMessagePage((current) => current.nextCursor ? current : (response.messagePage ?? { hasMore: false, nextCursor: null }));
+        } while (reloadPendingRef.current);
       } catch (requestError) {
         if (!silent) {
           setError(requestError.message ?? "Nao foi possivel carregar a conversa.");
@@ -218,7 +229,7 @@ export function ServiceConversationScreen({ navigation, route }) {
   }, [timeline.scrollToLatest]);
 
   const refreshConversation = useCallback(() => {
-    load({ silent: true });
+    return load({ silent: true });
   }, [load]);
 
   useConversationRealtime({
@@ -874,6 +885,10 @@ function MessageBubble({ accessToken, message }) {
 
 function LocationMessageCard({ message }) {
   const location = message.location;
+  async function openDirections() {
+    try { await Linking.openURL(addressDirectionsUrl(location)); }
+    catch { Alert.alert("Não foi possível abrir o mapa", "Tente novamente com uma conexão disponível."); }
+  }
   const label = location.label === "DESTINO"
     ? "Destino"
     : location.label === "OUTRO"
@@ -893,11 +908,11 @@ function LocationMessageCard({ message }) {
           </View>
           <View style={styles.locationCopy}>
             <Text style={[styles.locationLabel, message.isMine && styles.locationTextMine]}>{label}</Text>
-            <Text style={[styles.locationAddress, message.isMine && styles.locationTextMine]}>
-              {location.street}, {location.number}
-            </Text>
           </View>
         </View>
+        <Text selectable style={[styles.locationAddress, message.isMine && styles.locationTextMine]}>
+          {[location.street, location.number].filter(Boolean).join(", ")}
+        </Text>
         <Text style={[styles.locationDetail, message.isMine && styles.locationDetailMine]}>
           {location.district} - {location.city}/{location.state}
         </Text>
@@ -914,6 +929,12 @@ function LocationMessageCard({ message }) {
             Referencia: {location.reference}
           </Text>
         ) : null}
+        <Pressable accessibilityRole="button" accessibilityLabel={`Abrir rota para ${location.street}, ${location.number}`}
+          onPress={openDirections} style={({ pressed }) => [styles.locationMapButton, message.isMine && styles.locationMapButtonMine, pressed && { opacity: 0.75 }]}>
+          <Ionicons color={message.isMine ? colors.card : colors.primaryDark} name="navigate-outline" size={19} />
+          <Text style={[styles.locationMapText, message.isMine && styles.locationTextMine]}>Abrir rota no mapa</Text>
+          <Ionicons color={message.isMine ? colors.card : colors.primaryDark} name="open-outline" size={16} />
+        </Pressable>
         <ChatMessageMeta createdAt={message.createdAt} isMine={message.isMine} readAt={message.readAt} />
       </View>
     </View>
@@ -1462,10 +1483,10 @@ const styles = StyleSheet.create({
   imageReadyText: { color: colors.primaryDark, flex: 1, fontFamily: fonts.bold, fontSize: typography.caption },
   input: { color: colors.textPrimary, flex: 1, fontFamily: fonts.regular, fontSize: typography.small, maxHeight: 92, minHeight: 40, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
   inputRow: { alignItems: "flex-end", backgroundColor: colors.cardMuted, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.xs, padding: spacing.xs },
-  locationAddress: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.small },
-  locationCard: { backgroundColor: colors.card, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, gap: 4, maxWidth: "88%", padding: spacing.md },
+  locationAddress: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.body, lineHeight: 23, flexShrink: 1 },
+  locationCard: { backgroundColor: colors.card, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, gap: spacing.sm, width: "88%", maxWidth: 360, padding: spacing.lg },
   locationCardMine: { backgroundColor: colors.primaryDark, borderColor: colors.primaryDark },
-  locationCopy: { flex: 1, gap: 2 },
+  locationCopy: { flex: 1, gap: 2, minWidth: 0 },
   locationDetail: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption },
   locationDetailMine: { color: "#D5F4E7" },
   locationIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 34, justifyContent: "center", width: 34 },
@@ -1474,6 +1495,9 @@ const styles = StyleSheet.create({
   locationReference: { color: colors.textPrimary, fontFamily: fonts.medium, fontSize: typography.caption, marginTop: 3 },
   locationTextMine: { color: colors.card },
   locationTopline: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
+  locationMapButton: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, flexDirection: "row", gap: spacing.sm, minHeight: 46, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, marginTop: spacing.xs },
+  locationMapButtonMine: { backgroundColor: "rgba(255,255,255,0.16)" },
+  locationMapText: { flex: 1, color: colors.primaryDark, fontFamily: fonts.bold, fontSize: typography.caption },
   messageImage: { borderRadius: radius.md, height: 190, maxWidth: "100%", width: 240 },
   messageLine: { alignItems: "flex-start" },
   messageLineMine: { alignItems: "flex-end" },

@@ -26,6 +26,7 @@ import { ChatTypingIndicator } from "../components/ChatTypingIndicator";
 import { BackHeader } from "../components/BackHeader";
 import { CartAddButton } from "../components/CartAddButton";
 import { useConversationRealtime } from "../hooks/useConversationRealtime";
+import { mergeConversationSnapshot } from "../utils/live-refresh";
 import { useRealtimeOrders } from "../hooks/useRealtimeOrders";
 import { useChatTimeline } from "../hooks/useChatTimeline";
 import { useChatTyping } from "../hooks/useChatTyping";
@@ -130,8 +131,8 @@ export function StoreConversationScreen({ navigation, route }) {
         ? await getStoreConversation(session.accessToken, conversationId)
         : await openStoreConversation(session.accessToken, storeId);
 
-      setConversation(response.conversation);
-      setMessagePage(response.messagePage ?? { hasMore: false, nextCursor: null });
+      setConversation((current) => mergeConversationSnapshot(current, response.conversation));
+      setMessagePage((current) => current.nextCursor ? current : (response.messagePage ?? { hasMore: false, nextCursor: null }));
       if (!response.conversation?.isStore && response.conversation?.store?.id) {
         try {
           const storeResponse = await getMarketplaceStore(
@@ -232,7 +233,7 @@ export function StoreConversationScreen({ navigation, route }) {
   }, []);
 
   const refreshConversation = useCallback(() => {
-    load({ silent: true });
+    return load({ silent: true });
   }, [load]);
 
   useConversationRealtime({

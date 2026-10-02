@@ -33,6 +33,17 @@ export function SearchBar({
     maximumListHeight,
     Math.max(rowHeight, suggestions.length * rowHeight),
   );
+  // Expanded Home results belong to the page's scroll area. Android cannot
+  // reliably hit-test an absolute dropdown extending outside its parent.
+  const SuggestionsList = expandedSuggestions ? View : ScrollView;
+  const suggestionsListProps = expandedSuggestions ? { style: styles.suggestionsContent } : {
+    bounces: false,
+    contentContainerStyle: styles.suggestionsContent,
+    keyboardShouldPersistTaps: "always",
+    nestedScrollEnabled: true,
+    showsVerticalScrollIndicator: true,
+    style: [styles.suggestionsScroll, { height: suggestionListHeight, maxHeight: maximumListHeight }],
+  };
 
   useEffect(() => () => clearBlurTimeout(), []);
 
@@ -111,7 +122,7 @@ export function SearchBar({
 
       {visibleSuggestions ? (
         <View
-          style={[styles.suggestions, compact && styles.suggestionsCompact]}
+          style={[styles.suggestions, compact && styles.suggestionsCompact, expandedSuggestions && styles.suggestionsInline]}
         >
           {!value.trim() && recentSuggestions.length ? (
             <View style={styles.recentsSection}>
@@ -146,17 +157,7 @@ export function SearchBar({
               {loading ? <ActivityIndicator color={colors.primaryDark} size="small" /> : null}
             </View>
           ) : null}
-          {suggestions.length ? <ScrollView
-            bounces={false}
-            contentContainerStyle={styles.suggestionsContent}
-            keyboardShouldPersistTaps="always"
-            nestedScrollEnabled
-            overScrollMode="always"
-            persistentScrollbar
-            scrollEnabled={suggestions.length * rowHeight > maximumListHeight}
-            showsVerticalScrollIndicator
-            style={[styles.suggestionsScroll, { height: suggestionListHeight, maxHeight: maximumListHeight }]}
-          >
+          {suggestions.length ? <SuggestionsList {...suggestionsListProps}>
             {suggestions.map((suggestion) => {
               const label = suggestion.label ?? suggestion.name ?? String(suggestion);
               const key = [
@@ -195,7 +196,7 @@ export function SearchBar({
                 </Pressable>
               );
             })}
-          </ScrollView> : null}
+          </SuggestionsList> : null}
         </View>
       ) : null}
     </View>
@@ -480,6 +481,7 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   suggestionsCompact: { top: 54 },
+  suggestionsInline: { position: "relative", top: 0, elevation: 0 },
   suggestionsScroll: {
     maxHeight: 244,
   },

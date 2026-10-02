@@ -23,9 +23,13 @@ export function getSearchTerms(value = "", { includeWords = true } = {}) {
   if (/\b(?:moto taxi|mototaxi|taxi|taxista)\b/.test(normalized)) {
     terms.add("mototaxi");
     terms.add("moto taxi");
-    terms.add("motoboy");
+    // Passenger transport must not advertise parcel delivery as the same service.
+    return [...terms];
   }
-  if (/\bmoto boy\b/.test(normalized)) terms.add("motoboy");
+  if (/\bmoto boy\b/.test(normalized)) {
+    terms.add("motoboy");
+    return [...terms];
+  }
 
   if (includeWords && words.length > 1) {
     words

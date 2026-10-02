@@ -1,10 +1,12 @@
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCustomerOrders } from "../../services/orders.api";
 import { getPersonalChats } from "../../services/personal-chats.api";
 import { getRealtimeSocket, realtimeEvents } from "../../services/realtime";
 import { getSellerServices, getServiceConversations, heartbeatSellerServices } from "../../services/service-chats.api";
 import { getStoreConversations } from "../../services/store-chats.api";
+import { chatMessagePreview } from "../../utils/chat-preview";
+import { useLiveRefresh } from "../../hooks/useLiveRefresh";
 
 const finalOrderStatuses = new Set(["CANCELADO", "CONCLUIDO"]);
 
@@ -36,7 +38,7 @@ function serializeStoreConversation(conversation, order = null) {
     order,
     subtitle: order
       ? `Pedido ${order.code ?? order.id} - ${order.status ?? "em acompanhamento"}`
-      : conversation.lastMessage?.text ?? "Conversa com a loja",
+      : chatMessagePreview(conversation.lastMessage, "Conversa com a loja"),
     title: conversation.store?.name ?? "Loja",
     unreadCount: Number(conversation.unreadCount ?? 0)
       + Number(order?.unreadCustomerMessages ?? order?.unreadMessagesCount ?? 0),
@@ -50,7 +52,7 @@ function serializePersonalConversation(conversation) {
     id: `person-${conversation.id}`,
     imageUrl: conversation.person?.photoUrl ?? null,
     kind: "person",
-    subtitle: conversation.lastMessage?.text ?? `@${conversation.person?.publicId ?? "contato"}`,
+    subtitle: chatMessagePreview(conversation.lastMessage, `@${conversation.person?.publicId ?? "contato"}`),
     title: conversation.displayName,
     unreadCount: Number(conversation.unreadCount ?? 0),
   };
@@ -64,10 +66,9 @@ function serializeServiceConversation(conversation) {
     id: `service-${conversation.id}`,
     imageUrl: requestedStore?.logoUrl ?? conversation.otherPerson?.photoUrl ?? null,
     kind: "service",
-    subtitle: conversation.lastMessage?.text
-      ?? conversation.request?.description
+    subtitle: chatMessagePreview(conversation.lastMessage, conversation.request?.description
       ?? conversation.serviceType?.name
-      ?? "Conversa de servico",
+      ?? "Conversa de servico"),
     title: requestedStore?.name
       ?? conversation.otherPerson?.name
       ?? conversation.serviceType?.name
@@ -85,8 +86,20 @@ export function useHomeConversations(accessToken) {
   const [sellerServices, setSellerServices] = useState([]);
   const [serviceConversations, setServiceConversations] = useState([]);
   const [storeConversations, setStoreConversations] = useState([]);
+  const requestIdRef = useRef(0);
+  const sellerRequestIdRef = useRef(0);
+  const refreshTimerRef = useRef(null);
 
-  const load = useCallback(async () => {
+  const loadSellerServices = useCallback(() => {
+    if (!accessToken) return;
+    const requestId = ++sellerRequestIdRef.current;
+    void getSellerServices(accessToken).then((response) => {
+      if (requestId === sellerRequestIdRef.current) setSellerServices(response.services ?? []);
+    }).catch(() => {});
+  }, [accessToken]);
+
+  const load = useCallback(() => {
+    const requestId = ++requestIdRef.current;
     if (!accessToken) {
       setOrders([]);
       setPersonalChats([]);
@@ -98,46 +111,47 @@ export function useHomeConversations(accessToken) {
       return;
     }
 
-    await heartbeatSellerServices(accessToken).catch(() => {});
-    const [ordersResult, storesResult, personalResult, servicesResult, serviceConversationsResult] = await Promise.allSettled([
-      getCustomerOrders(accessToken),
-      getStoreConversations(accessToken),
-      getPersonalChats(accessToken),
-      getSellerServices(accessToken),
-      getServiceConversations(accessToken),
-    ]);
+    let pendingConversations = 4;
+    const finish = () => {
+      pendingConversations -= 1;
+      if (requestId === requestIdRef.current && pendingConversations === 0) setIsLoading(false);
+    };
+    const receive = (promise, apply, hasConversations) => {
+      void promise.then((response) => {
+        if (requestId !== requestIdRef.current) return;
+        apply(response);
+        if (hasConversations(response)) setIsLoading(false);
+      }).catch(() => {
+        // Mantem as conversas ja exibidas se uma fonte falhar.
+      }).finally(finish);
+    };
 
-    if (ordersResult.status === "fulfilled") {
-      setOrders(ordersResult.value.orders ?? []);
-    }
-
-    if (storesResult.status === "fulfilled") {
-      setStoreConversations(storesResult.value.conversations ?? []);
-    }
-
-    if (personalResult.status === "fulfilled") {
-      setPersonalChats(personalResult.value.conversations ?? []);
-      setPendingFriendRequests(
-        (personalResult.value.requests ?? []).filter(
-          (request) => request.invitationDirection === "incoming",
-        ).length,
-      );
-    }
-
-    if (servicesResult.status === "fulfilled") {
-      setSellerServices(servicesResult.value.services ?? []);
-    }
-
-    if (serviceConversationsResult.status === "fulfilled") {
-      setServiceConversations(serviceConversationsResult.value.conversations ?? []);
-    }
-
-    setIsLoading(false);
+    receive(getCustomerOrders(accessToken), (response) => setOrders(response.orders ?? []),
+      (response) => (response.orders ?? []).length > 0);
+    receive(getStoreConversations(accessToken), (response) => setStoreConversations(response.conversations ?? []),
+      (response) => (response.conversations ?? []).length > 0);
+    receive(getPersonalChats(accessToken), (response) => {
+      setPersonalChats(response.conversations ?? []);
+      setPendingFriendRequests((response.requests ?? []).filter(
+        (request) => request.invitationDirection === "incoming",
+      ).length);
+    }, (response) => (response.conversations ?? []).length > 0);
+    receive(getServiceConversations(accessToken), (response) => setServiceConversations(response.conversations ?? []),
+      (response) => (response.conversations ?? []).length > 0);
   }, [accessToken]);
 
   useFocusEffect(useCallback(() => {
     load();
-  }, [load]));
+    loadSellerServices();
+    if (accessToken) void heartbeatSellerServices(accessToken).catch(() => {});
+    return () => {
+      requestIdRef.current += 1;
+      sellerRequestIdRef.current += 1;
+    };
+  }, [accessToken, load, loadSellerServices]));
+
+  useLiveRefresh({ accessToken, intervalMs: 0,
+    onRefresh: () => { load(); loadSellerServices(); } });
 
   useEffect(() => {
     if (!accessToken || !isFocused) {
@@ -145,37 +159,45 @@ export function useHomeConversations(accessToken) {
     }
 
     const socket = getRealtimeSocket(accessToken);
+    const scheduleLoad = () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = setTimeout(() => {
+        refreshTimerRef.current = null;
+        load();
+      }, 180);
+    };
 
-    socket?.on(realtimeEvents.orderCreated, load);
-    socket?.on(realtimeEvents.orderMessageCreated, load);
-    socket?.on(realtimeEvents.orderStatusUpdated, load);
-    socket?.on(realtimeEvents.personalChatCreated, load);
-    socket?.on(realtimeEvents.personalChatMessageCreated, load);
-    socket?.on(realtimeEvents.personalChatUpdated, load);
-    socket?.on(realtimeEvents.storeChatCreated, load);
-    socket?.on(realtimeEvents.storeChatMessageCreated, load);
-    socket?.on(realtimeEvents.storeChatUpdated, load);
-    socket?.on(realtimeEvents.serviceAvailabilityUpdated, load);
-    socket?.on(realtimeEvents.serviceChatCreated, load);
-    socket?.on(realtimeEvents.serviceChatMessageCreated, load);
-    socket?.on(realtimeEvents.serviceChatUpdated, load);
+    socket?.on(realtimeEvents.orderCreated, scheduleLoad);
+    socket?.on(realtimeEvents.orderMessageCreated, scheduleLoad);
+    socket?.on(realtimeEvents.orderStatusUpdated, scheduleLoad);
+    socket?.on(realtimeEvents.personalChatCreated, scheduleLoad);
+    socket?.on(realtimeEvents.personalChatMessageCreated, scheduleLoad);
+    socket?.on(realtimeEvents.personalChatUpdated, scheduleLoad);
+    socket?.on(realtimeEvents.storeChatCreated, scheduleLoad);
+    socket?.on(realtimeEvents.storeChatMessageCreated, scheduleLoad);
+    socket?.on(realtimeEvents.storeChatUpdated, scheduleLoad);
+    socket?.on(realtimeEvents.serviceAvailabilityUpdated, loadSellerServices);
+    socket?.on(realtimeEvents.serviceChatCreated, scheduleLoad);
+    socket?.on(realtimeEvents.serviceChatMessageCreated, scheduleLoad);
+    socket?.on(realtimeEvents.serviceChatUpdated, scheduleLoad);
 
     return () => {
-      socket?.off(realtimeEvents.orderCreated, load);
-      socket?.off(realtimeEvents.orderMessageCreated, load);
-      socket?.off(realtimeEvents.orderStatusUpdated, load);
-      socket?.off(realtimeEvents.personalChatCreated, load);
-      socket?.off(realtimeEvents.personalChatMessageCreated, load);
-      socket?.off(realtimeEvents.personalChatUpdated, load);
-      socket?.off(realtimeEvents.storeChatCreated, load);
-      socket?.off(realtimeEvents.storeChatMessageCreated, load);
-      socket?.off(realtimeEvents.storeChatUpdated, load);
-      socket?.off(realtimeEvents.serviceAvailabilityUpdated, load);
-      socket?.off(realtimeEvents.serviceChatCreated, load);
-      socket?.off(realtimeEvents.serviceChatMessageCreated, load);
-      socket?.off(realtimeEvents.serviceChatUpdated, load);
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      socket?.off(realtimeEvents.orderCreated, scheduleLoad);
+      socket?.off(realtimeEvents.orderMessageCreated, scheduleLoad);
+      socket?.off(realtimeEvents.orderStatusUpdated, scheduleLoad);
+      socket?.off(realtimeEvents.personalChatCreated, scheduleLoad);
+      socket?.off(realtimeEvents.personalChatMessageCreated, scheduleLoad);
+      socket?.off(realtimeEvents.personalChatUpdated, scheduleLoad);
+      socket?.off(realtimeEvents.storeChatCreated, scheduleLoad);
+      socket?.off(realtimeEvents.storeChatMessageCreated, scheduleLoad);
+      socket?.off(realtimeEvents.storeChatUpdated, scheduleLoad);
+      socket?.off(realtimeEvents.serviceAvailabilityUpdated, loadSellerServices);
+      socket?.off(realtimeEvents.serviceChatCreated, scheduleLoad);
+      socket?.off(realtimeEvents.serviceChatMessageCreated, scheduleLoad);
+      socket?.off(realtimeEvents.serviceChatUpdated, scheduleLoad);
     };
-  }, [accessToken, isFocused, load]);
+  }, [accessToken, isFocused, load, loadSellerServices]);
 
   const searchableConversations = useMemo(() => {
     const latestOrderByStore = new Map();

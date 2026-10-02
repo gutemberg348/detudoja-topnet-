@@ -12,6 +12,7 @@ import {
   subscribeStoreConversationRead,
 } from "../services/store-chats.api";
 import { useAuthStore } from "../stores/useAuthStore";
+import { chatMessagePreview } from "../utils/chat-preview";
 import { resolveMediaUrl } from "../utils/media";
 import { colors, fonts, radius, spacing, typography } from "../utils/theme";
 
@@ -386,7 +387,7 @@ function ConversationRow({ conversation, onPress, showStoreName }) {
           <Text style={styles.date}>{formatDate(conversation.updatedAt)}</Text>
         </View>
         <Text numberOfLines={1} style={styles.message}>
-          {conversation.lastMessage?.text ?? "Conversa da loja"}
+          {chatMessagePreview(conversation.lastMessage, "Conversa da loja")}
         </Text>
         {conversation.unreadCount > 0 ? (
           <Text style={styles.unreadLabel}>Nova mensagem</Text>

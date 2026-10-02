@@ -10,11 +10,11 @@ import {
   View,
 } from "react-native";
 import { BrandLogo } from "../components/BrandLogo";
-import { CartFeedbackLayer } from "../components/CartFeedbackProvider";
 import { MarketplaceLocationModal } from "../components/MarketplaceLocationModal";
 import { MarketplaceProductCard } from "../components/MarketplaceProductCard";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { SearchBar } from "../components/SearchBar";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { StatePanel } from "../components/StatePanel";
 import { StoreCard } from "../components/StoreCard";
 import { useMarketplaceSuggestions } from "../hooks/useMarketplaceSuggestions";
@@ -23,7 +23,7 @@ import {
   getMarketplaceProducts,
   getMarketplaceStores,
 } from "../services/marketplace.api";
-import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
+import { realtimeEvents } from "../services/realtime";
 import { getServiceTypes } from "../services/service-chats.api";
 import { getCurrentUserAddresses, updateCurrentUser } from "../services/users.api";
 import { useAuthStore } from "../stores/useAuthStore";
@@ -123,6 +123,26 @@ export function StoresScreen({ navigation, route }) {
     && !hasAnySearchResult;
 
   useEffect(() => {
+    if (!session?.accessToken || !marketplaceLocation) return undefined;
+    let active = true;
+
+    void Promise.allSettled([
+      getMarketplaceCategories(session.accessToken),
+      getServiceTypes(session.accessToken),
+    ]).then(([categoriesResult, servicesResult]) => {
+      if (!active) return;
+      if (categoriesResult.status === "fulfilled") {
+        setCategories(categoriesResult.value.categories ?? []);
+      }
+      if (servicesResult.status === "fulfilled") {
+        setServiceTypes(servicesResult.value.serviceTypes ?? []);
+      }
+    });
+
+    return () => { active = false; };
+  }, [session?.accessToken, marketplaceLocation?.city, marketplaceLocation?.state]);
+
+  useEffect(() => {
     let active = true;
 
     async function loadLocation() {
@@ -206,8 +226,7 @@ export function StoresScreen({ navigation, route }) {
       setIsLoading(true);
 
       try {
-        const [categoriesResponse, storesResponse, productsResponse, servicesResponse] = await Promise.all([
-          getMarketplaceCategories(session.accessToken),
+        const [storesResponse, productsResponse] = await Promise.all([
           !hasMarketplaceSearch && resultMode !== "stores"
             ? Promise.resolve({ stores: [] })
             : getMarketplaceStores(session.accessToken, {
@@ -220,15 +239,12 @@ export function StoresScreen({ navigation, route }) {
                 categoryId: category === "todas" ? "" : category,
                 search: marketplaceSearch,
               }),
-          getServiceTypes(session.accessToken),
         ]);
 
         if (!active) {
           return;
         }
 
-        setCategories(categoriesResponse.categories ?? []);
-        setServiceTypes(servicesResponse.serviceTypes ?? []);
         setStores(storesResponse.stores ?? []);
         setProducts(productsResponse.products ?? []);
       } catch (requestError) {
@@ -262,18 +278,8 @@ export function StoresScreen({ navigation, route }) {
     }
   }, [session?.accessToken]);
 
-  useEffect(() => {
-    if (!session?.accessToken) {
-      return undefined;
-    }
-
-    const socket = getRealtimeSocket(session.accessToken);
-    socket?.on(realtimeEvents.serviceAvailabilityUpdated, refreshServiceTypes);
-
-    return () => {
-      socket?.off(realtimeEvents.serviceAvailabilityUpdated, refreshServiceTypes);
-    };
-  }, [refreshServiceTypes, session?.accessToken]);
+  useLiveRefresh({ accessToken: session?.accessToken,
+    events: [realtimeEvents.serviceAvailabilityUpdated], onRefresh: refreshServiceTypes });
 
   function openStore(store) {
     navigation.navigate("StoreConversation", { store, storeId: store.id });
@@ -398,7 +404,7 @@ export function StoresScreen({ navigation, route }) {
         : `Lojas disponiveis em ${locationLabel}`;
 
   return (
-    <ScreenContainer contentContainerStyle={styles.content} overlay={<CartFeedbackLayer />} padded={false}>
+    <ScreenContainer contentContainerStyle={styles.content} padded={false}>
       <View style={styles.hero}>
         <BrandLogo centered size="large" />
 
@@ -707,6 +713,13 @@ function ResultModeOption({ active, icon, label, onPress }) {
 
 function CategoryCard({ active, category, icon, label, onPress }) {
   const iconUrl = resolveMediaUrl(category?.iconUrl);
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [imageFailed, setImageFailed] = useState(false);
+
+  useEffect(() => {
+    setImageLoaded(false);
+    setImageFailed(false);
+  }, [iconUrl]);
 
   return (
     <Pressable
@@ -720,15 +733,21 @@ function CategoryCard({ active, category, icon, label, onPress }) {
       ]}
     >
       <View style={[styles.categoryIcon, active && styles.categoryIconActive]}>
-        {iconUrl ? (
-          <Image source={{ uri: iconUrl }} style={styles.categoryImage} />
-        ) : (
+        {!imageLoaded || imageFailed ? (
           <Ionicons
             color={colors.primaryDark}
             name={icon ?? "storefront-outline"}
             size={24}
           />
-        )}
+        ) : null}
+        {iconUrl && !imageFailed ? (
+          <Image
+            onError={() => { setImageFailed(true); setImageLoaded(false); }}
+            onLoad={() => setImageLoaded(true)}
+            source={{ uri: iconUrl }}
+            style={[styles.categoryImage, !imageLoaded && styles.categoryImageLoading]}
+          />
+        ) : null}
       </View>
       <Text numberOfLines={2} style={[styles.categoryText, active && styles.categoryTextActive]}>
         {label}
@@ -928,6 +947,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   categoryImage: { height: "100%", width: "100%" },
+  categoryImageLoading: { position: "absolute", opacity: 0 },
   categoryList: { gap: spacing.sm, paddingBottom: spacing.xs, paddingRight: spacing.sm },
   categoryText: {
     color: colors.textPrimary,

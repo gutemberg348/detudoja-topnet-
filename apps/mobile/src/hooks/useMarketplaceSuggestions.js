@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { getMarketplaceSuggestions } from "../services/marketplace.api";
 import { normalizeSearchText } from "../utils/search";
+import { useLiveRefresh } from "./useLiveRefresh";
+import { realtimeEvents } from "../services/realtime";
 
 export function useMarketplaceSuggestions(
   accessToken,
@@ -16,6 +18,12 @@ export function useMarketplaceSuggestions(
   const [isLoading, setIsLoading] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const search = normalizeSearchText(query);
+  const [revision, setRevision] = useState(0);
+  useLiveRefresh({ accessToken,
+    enabled: enabled && ((showInitial && !search) || search.length >= minimumCharacters),
+    events: [realtimeEvents.serviceAvailabilityUpdated],
+    onRefresh: () => setRevision((current) => current + 1),
+  });
 
   useEffect(() => {
     let active = true;
@@ -58,7 +66,7 @@ export function useMarketplaceSuggestions(
       active = false;
       clearTimeout(timeout);
     };
-  }, [accessToken, enabled, limit, minimumCharacters, scope, search, showInitial]);
+  }, [accessToken, enabled, limit, minimumCharacters, scope, search, showInitial, revision]);
 
   return { isLoading, suggestions };
 }

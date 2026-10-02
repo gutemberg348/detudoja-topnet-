@@ -8,6 +8,7 @@ import { getCustomerCourierRequests } from "../services/courier.api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import { getServiceConversations } from "../services/service-chats.api";
 import { useAuthStore } from "../stores/useAuthStore";
+import { chatMessagePreview } from "../utils/chat-preview";
 import { colors, fonts, radius, spacing, typography } from "../utils/theme";
 
 const statusCopy = {
@@ -130,7 +131,7 @@ export function ServiceInboxScreen({ navigation }) {
                   {conversation.otherPerson?.name ?? "Prestador"}
                 </Text>
                 <Text numberOfLines={1} style={styles.message}>
-                  {conversation.lastMessage?.text || "Conversa iniciada"}
+                  {chatMessagePreview(conversation.lastMessage)}
                 </Text>
               </View>
               <View style={styles.end}>

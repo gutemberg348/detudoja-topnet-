@@ -4,8 +4,8 @@ import { File, Paths } from "expo-file-system";
 import * as MediaLibrary from "expo-media-library";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Animated, Image, Linking, Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { ActivityIndicator, Alert, Animated, Image, Linking, Modal, Platform, Pressable, StatusBar, StyleSheet, Text, View } from "react-native";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { getValidAccessToken } from "../services/api";
 import { resolveMediaUrl } from "../utils/media";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
@@ -170,20 +170,23 @@ function ImageAttachment({ accessToken, attachment }) {
         <Image resizeMode="cover" source={media.source} style={styles.image} />
         <View style={styles.imageExpand}><Ionicons color={colors.card} name="expand-outline" size={16} /></View>
       </Pressable>
-      <Modal animationType="fade" onRequestClose={() => setOpen(false)} presentationStyle="fullScreen" visible={open}>
-        <SafeAreaView style={styles.viewer}>
-          <View style={styles.viewerHeader}>
-            <Pressable accessibilityLabel="Fechar foto" accessibilityRole="button" hitSlop={10} onPress={() => setOpen(false)} style={styles.viewerAction}>
-              <Ionicons color={colors.card} name="close" size={26} />
-            </Pressable>
-            <Text style={styles.viewerTitle}>Foto da conversa</Text>
-            <Pressable accessibilityLabel="Baixar foto" accessibilityRole="button" disabled={saving} hitSlop={10} onPress={saveImage} style={styles.viewerAction}>
-              {saving ? <ActivityIndicator color={colors.card} size="small" /> : <Ionicons color={colors.card} name="download-outline" size={23} />}
-            </Pressable>
-          </View>
-          <Image resizeMode="contain" source={media.source} style={styles.viewerImage} />
-          <Text style={styles.viewerHint}>Toque no icone de download para salvar na galeria</Text>
-        </SafeAreaView>
+      <Modal animationType="fade" onRequestClose={() => setOpen(false)} presentationStyle="fullScreen" statusBarTranslucent navigationBarTranslucent visible={open}>
+        <SafeAreaProvider>
+          {open ? <StatusBar barStyle="light-content" /> : null}
+          <SafeAreaView edges={["top", "bottom", "left", "right"]} style={styles.viewer}>
+            <View style={styles.viewerHeader}>
+              <Pressable accessibilityLabel="Fechar foto" accessibilityRole="button" hitSlop={10} onPress={() => setOpen(false)} style={styles.viewerAction}>
+                <Ionicons color={colors.card} name="close" size={26} />
+              </Pressable>
+              <Text numberOfLines={1} style={styles.viewerTitle}>Foto da conversa</Text>
+              <Pressable accessibilityLabel="Baixar foto" accessibilityRole="button" disabled={saving} hitSlop={10} onPress={saveImage} style={styles.viewerAction}>
+                {saving ? <ActivityIndicator color={colors.card} size="small" /> : <Ionicons color={colors.card} name="download-outline" size={23} />}
+              </Pressable>
+            </View>
+            <Image resizeMode="contain" source={media.source} style={styles.viewerImage} />
+            <Text style={styles.viewerHint}>Toque no icone de download para salvar na galeria</Text>
+          </SafeAreaView>
+        </SafeAreaProvider>
       </Modal>
     </>
   );
@@ -359,7 +362,7 @@ const styles = StyleSheet.create({
   viewerHeader: { alignItems: "center", elevation: 2, flexDirection: "row", gap: spacing.md, justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, zIndex: 2 },
   viewerHint: { color: "rgba(255,255,255,0.66)", fontFamily: fonts.medium, fontSize: 11, paddingBottom: spacing.lg, textAlign: "center" },
   viewerImage: { flex: 1, width: "100%" },
-  viewerTitle: { color: colors.card, fontFamily: fonts.bold, fontSize: typography.small },
+  viewerTitle: { color: colors.card, flex: 1, fontFamily: fonts.bold, fontSize: typography.small, textAlign: "center" },
   wave: { alignItems: "center", flexDirection: "row", gap: 2, height: 27, width: "100%" },
   waveBar: { backgroundColor: colors.borderStrong ?? colors.border, borderRadius: 2, flex: 1, maxWidth: 4, minWidth: 2 },
   waveBarMine: { backgroundColor: "rgba(255,255,255,0.28)" },

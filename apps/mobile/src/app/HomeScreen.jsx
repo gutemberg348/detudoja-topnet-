@@ -150,7 +150,6 @@ export function HomeScreen({ navigation }) {
         contentContainerStyle={styles.root}
         edges={["top", "left", "right", "bottom"]}
         padded={false}
-        scrollEnabled={!searchFocused}
         style={styles.screen}
       >
         <View style={styles.content}>
@@ -371,7 +370,7 @@ const styles = StyleSheet.create({
   friendsUnreadText: { color: "#4A2B00", fontFamily: fonts.bold, fontSize: 10 },
   content: {
     alignItems: "center",
-    flex: 1,
+    flexGrow: 1,
     gap: spacing.xl,
     paddingHorizontal: spacing.xl,
     paddingBottom: spacing.xl,
@@ -417,7 +416,7 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   root: {
-    flex: 1,
+    flexGrow: 1,
   },
   screen: {
     backgroundColor: colors.card,

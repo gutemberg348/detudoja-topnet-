@@ -1,9 +1,9 @@
-import { CameraView, useCameraPermissions } from "expo-camera";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { AppButton } from "../components/AppButton";
+import { QrCamera } from "../components/QrCamera";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { colors, fonts, radius, spacing, typography } from "../utils/theme";
 
@@ -27,7 +27,6 @@ function scannedChargeCode(value) {
 }
 
 export function ChargeScanScreen({ navigation }) {
-  const [permission, requestPermission] = useCameraPermissions();
   const [code, setCode] = useState("");
   const [hasRead, setHasRead] = useState(false);
   const [error, setError] = useState("");
@@ -97,25 +96,7 @@ export function ChargeScanScreen({ navigation }) {
         </View>
       </View>
 
-      {permission?.granted ? (
-        <View style={styles.cameraShell}>
-          <CameraView
-            barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-            onBarcodeScanned={hasRead ? undefined : handleBarcodeScanned}
-            style={styles.camera}
-          />
-          <View pointerEvents="none" style={styles.scanFrame}>
-            <View style={styles.scanCorner} />
-          </View>
-        </View>
-      ) : (
-        <View style={styles.permissionCard}>
-          <Ionicons color={colors.primaryDark} name="camera-outline" size={32} />
-          <Text style={styles.permissionTitle}>Camera para ler o QR</Text>
-          <Text style={styles.permissionText}>A camera e usada apenas para identificar a loja ou cobranca que voce esta pagando.</Text>
-          <AppButton icon="camera-outline" onPress={requestPermission} title="Permitir camera" />
-        </View>
-      )}
+      <QrCamera onBarcodeScanned={hasRead ? undefined : handleBarcodeScanned} />
 
       {hasRead || error ? (
         <AppButton
@@ -153,8 +134,6 @@ export function ChargeScanScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  camera: { flex: 1 },
-  cameraShell: { backgroundColor: "#102019", borderRadius: radius.lg, height: 305, overflow: "hidden", position: "relative" },
   content: { gap: spacing.xl, paddingBottom: spacing.xxxl },
   error: { color: colors.danger, fontFamily: fonts.medium, fontSize: typography.caption },
   header: { alignItems: "flex-start", flexDirection: "row", gap: spacing.md },
@@ -167,12 +146,7 @@ const styles = StyleSheet.create({
   manualButtonText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: typography.label, fontWeight: "700" },
   manualCard: { backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, gap: spacing.md, padding: spacing.lg },
   manualTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.h3, fontWeight: "700" },
-  permissionCard: { alignItems: "center", backgroundColor: colors.primarySoft, borderColor: colors.primaryLight, borderRadius: radius.lg, borderWidth: 1, gap: spacing.md, padding: spacing.xl },
-  permissionText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.small, lineHeight: 20, textAlign: "center" },
-  permissionTitle: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.h3, fontWeight: "700" },
   pressed: { opacity: 0.72 },
-  scanCorner: { borderColor: "#A7F3D0", borderRadius: radius.lg, borderWidth: 2, height: 192, width: 192 },
-  scanFrame: { alignItems: "center", bottom: 0, justifyContent: "center", left: 0, position: "absolute", right: 0, top: 0 },
   subtitle: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.small, lineHeight: 20 },
   title: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.h2, fontWeight: "800" },
 });

@@ -14,6 +14,7 @@ import { AccountAddressRequirementModal } from "../components/AccountAddressRequ
 import { PageHeader } from "../components/PageHeader";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { StatePanel } from "../components/StatePanel";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { ApiError } from "../services/api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import {
@@ -55,6 +56,7 @@ export function ServiceProvidersScreen({ navigation, route }) {
   const [serviceLocation, setServiceLocation] = useState(null);
   const [sellers, setSellers] = useState([]);
   const courierPulse = useRef(new Animated.Value(0)).current;
+  const loadSequenceRef = useRef(0);
   const isCourier = segment?.operationalType === "ENTREGA_LOCAL";
   const isFixedPrice = segment?.mode === "PRECO_FIXO";
   const serviceName = segment?.name ?? "Servico";
@@ -80,6 +82,7 @@ export function ServiceProvidersScreen({ navigation, route }) {
   const load = useCallback(
     async ({ silent = false } = {}) => {
       if (!session?.accessToken || !segment?.id) return;
+      const sequence = ++loadSequenceRef.current;
       if (!silent) {
         setLoading(true);
         setError("");
@@ -95,6 +98,7 @@ export function ServiceProvidersScreen({ navigation, route }) {
               ? getServiceConversations(session.accessToken)
               : Promise.resolve({ conversations: [] }),
           ]);
+        if (sequence !== loadSequenceRef.current) return;
         const activeConversation = (
           conversationsResponse.conversations ?? []
         ).find(
@@ -112,12 +116,12 @@ export function ServiceProvidersScreen({ navigation, route }) {
         setCourierRequest(requestsResponse.requests?.[0] ?? null);
         setSellers(isCourier ? [] : (providersResponse.sellers ?? []));
       } catch (requestError) {
-        if (!silent)
+        if (!silent && sequence === loadSequenceRef.current)
           setError(
             requestError.message ?? "Nao foi possivel buscar prestadores.",
           );
       } finally {
-        if (!silent) setLoading(false);
+        if (sequence === loadSequenceRef.current) setLoading(false);
       }
     },
     [isCourier, segment?.id, session?.accessToken],
@@ -126,6 +130,13 @@ export function ServiceProvidersScreen({ navigation, route }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  useLiveRefresh({
+    accessToken: session?.accessToken, enabled: Boolean(segment?.id), scopeKey: segment?.id,
+    events: [realtimeEvents.serviceAvailabilityUpdated, realtimeEvents.serviceChatCreated,
+      realtimeEvents.serviceChatMessageCreated, realtimeEvents.serviceChatUpdated],
+    onRefresh: () => load({ silent: true }),
+  });
 
   useEffect(() => {
     const isSearching =
@@ -152,12 +163,6 @@ export function ServiceProvidersScreen({ navigation, route }) {
   useEffect(() => {
     if (!session?.accessToken) return undefined;
     const socket = getRealtimeSocket(session.accessToken);
-    const refreshProviders = (payload = {}) => {
-      if (Number(payload.serviceTypeId) === Number(segment?.id)) {
-        load({ silent: true });
-      }
-    };
-    const refreshConversation = () => load({ silent: true });
     const handleCourierUpdate = async ({ request } = {}) => {
       if (
         !isCourier ||
@@ -184,20 +189,9 @@ export function ServiceProvidersScreen({ navigation, route }) {
         }
       }
     };
-    socket?.on(realtimeEvents.serviceAvailabilityUpdated, refreshProviders);
     socket?.on(realtimeEvents.courierRequestUpdated, handleCourierUpdate);
-    socket?.on(realtimeEvents.serviceChatCreated, refreshConversation);
-    socket?.on(realtimeEvents.serviceChatMessageCreated, refreshConversation);
-    socket?.on(realtimeEvents.serviceChatUpdated, refreshConversation);
     return () => {
-      socket?.off(realtimeEvents.serviceAvailabilityUpdated, refreshProviders);
       socket?.off(realtimeEvents.courierRequestUpdated, handleCourierUpdate);
-      socket?.off(realtimeEvents.serviceChatCreated, refreshConversation);
-      socket?.off(
-        realtimeEvents.serviceChatMessageCreated,
-        refreshConversation,
-      );
-      socket?.off(realtimeEvents.serviceChatUpdated, refreshConversation);
     };
   }, [
     isCourier,

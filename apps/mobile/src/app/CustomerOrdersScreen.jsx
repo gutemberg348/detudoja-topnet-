@@ -9,6 +9,7 @@ import { getCustomerOrders } from "../services/orders.api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import { getServiceConversations } from "../services/service-chats.api";
 import { useAuthStore } from "../stores/useAuthStore";
+import { chatMessagePreview } from "../utils/chat-preview";
 import { formatarDataHora } from "../utils/date";
 import { formatarDinheiro } from "../utils/money";
 import {
@@ -494,8 +495,8 @@ function OrderTab({ active, count, icon, label, notificationCount = 0, onPress }
 function ServiceConversationCard({ conversation, onPress }) {
   const unreadCount = unreadServiceMessages(conversation);
   const proposal = [...(conversation.proposals ?? [])].reverse()[0];
-  const subtitle = conversation.lastMessage?.text
-    || (proposal ? "Existe uma proposta aguardando voce." : "Conversa iniciada");
+  const subtitle = chatMessagePreview(conversation.lastMessage,
+    proposal ? "Existe uma proposta aguardando voce." : "Conversa iniciada");
 
   return (
     <Pressable

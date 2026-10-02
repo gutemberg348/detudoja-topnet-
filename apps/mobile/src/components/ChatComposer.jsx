@@ -6,9 +6,10 @@ import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Animated, BackHandler, Image, Keyboard, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Animated, BackHandler, Image, Keyboard, Linking, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useReducedMotion } from "../hooks/useReducedMotion";
+import { attachmentPermissionError, chatAttachmentNotice } from "../utils/chat-attachment-errors";
 import { colors, fonts, radius, spacing, typography } from "../utils/theme";
 
 const AUDIO_CANCEL_DISTANCE = 72;
@@ -89,6 +90,7 @@ export function ChatComposer({
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraBusy, setCameraBusy] = useState(false);
   const [locationLoading, setLocationLoading] = useState(false);
+  const [attachmentNotice, setAttachmentNotice] = useState(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const cameraRef = useRef(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -180,7 +182,18 @@ export function ChatComposer({
   }, [recorder]);
 
   function reportError(error, fallback) {
+    const notice = chatAttachmentNotice(error);
+    if (notice) {
+      onAttachmentError?.("");
+      setAttachmentNotice(notice);
+      return;
+    }
     onAttachmentError?.(error?.message ?? fallback);
+  }
+
+  async function openPermissionSettings() {
+    try { await Linking.openSettings(); }
+    catch { setAttachmentNotice({ text: "Abra os ajustes do celular e procure as permissões do Brasil Cashback.", settings: false }); }
   }
 
   async function useSelectedMedia(selected, type) {
@@ -196,10 +209,11 @@ export function ChatComposer({
   }
 
   async function pickMedia(type) {
+    setAttachmentNotice(null);
     setPreparing(true);
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) throw new Error("Permita acesso as fotos e videos para anexar no chat.");
+      if (!permission.granted) throw attachmentPermissionError("photos", permission);
       const result = await ImagePicker.launchImageLibraryAsync({
         allowsEditing: false,
         mediaTypes: type === "VIDEO" ? ["videos"] : ["images"],
@@ -217,9 +231,10 @@ export function ChatComposer({
   }
 
   async function capturePhoto() {
+    setAttachmentNotice(null);
     try {
       const permission = cameraPermission?.granted ? cameraPermission : await requestCameraPermission();
-      if (!permission.granted) throw new Error("Permita o uso da camera para tirar uma foto no chat.");
+      if (!permission.granted) throw attachmentPermissionError("camera", permission);
       setActionsOpen(false);
       setCameraOpen(true);
     } catch (error) {
@@ -244,12 +259,14 @@ export function ChatComposer({
   }
 
   async function selectLocation() {
+    setAttachmentNotice(null);
     setPreparing(true);
     setLocationLoading(true);
     setActionsOpen(false);
     try {
       const permission = await Location.requestForegroundPermissionsAsync();
-      if (!permission.granted) throw new Error("Permita o uso da localizacao para compartilhar onde voce esta.");
+      if (!permission.granted) throw attachmentPermissionError("location", permission);
+      if (!await Location.hasServicesEnabledAsync()) throw new Error("GPS desativado");
       const cached = await waitForPosition(
         Location.getLastKnownPositionAsync({ maxAge: 60_000, requiredAccuracy: 100 }),
         5_000,
@@ -257,7 +274,10 @@ export function ChatComposer({
       const current = cached ?? await waitForPosition(Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
       setAttachment({ label: "Ponto GPS atual", latitude: current.coords.latitude, longitude: current.coords.longitude, type: "LOCATION" });
     } catch (error) {
-      reportError(error, "Nao foi possivel obter sua localizacao.");
+      onAttachmentError?.("");
+      setAttachmentNotice(chatAttachmentNotice(error) ?? {
+        text: "Não conseguimos localizar você agora. Tente novamente ou envie o endereço por escrito.", settings: false,
+      });
     } finally {
       setLocationLoading(false);
       setPreparing(false);
@@ -329,6 +349,7 @@ export function ChatComposer({
 
   async function startRecording(event) {
     if (!canAttach || preparing || recordingVisible || holdActiveRef.current) return;
+    setAttachmentNotice(null);
 
     recordingStartXRef.current = event?.nativeEvent?.pageX ?? 0;
     holdActiveRef.current = true;
@@ -340,7 +361,7 @@ export function ChatComposer({
     setActionsOpen(false);
     try {
       const permission = await requestRecordingPermissionsAsync();
-      if (!permission.granted) throw new Error("Permita o uso do microfone para enviar audio.");
+      if (!permission.granted) throw attachmentPermissionError("microphone", permission);
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       const recorderStatus = recorder.getStatus();
       if (!recorderStatus.canRecord || recorderStatus.mediaServicesDidReset) {
@@ -409,6 +430,20 @@ export function ChatComposer({
   return (
     <View style={[styles.composer, style, keyboardVisible && styles.composerWithKeyboard]}>
       {accessory}
+      {attachmentNotice ? (
+        <View accessibilityLiveRegion="polite" style={styles.attachmentNotice}>
+          <Ionicons color={colors.textSecondary} name="information-circle-outline" size={19} />
+          <View style={styles.locationStatusCopy}>
+            <Text style={styles.locationStatusHint}>{attachmentNotice.text}</Text>
+            {attachmentNotice.settings ? <Pressable accessibilityRole="button" onPress={openPermissionSettings} style={styles.noticeSettings}>
+              <Text style={styles.locationStatusTitle}>Abrir ajustes</Text>
+            </Pressable> : null}
+          </View>
+          <Pressable accessibilityLabel="Fechar aviso" accessibilityRole="button" hitSlop={10} onPress={() => setAttachmentNotice(null)}>
+            <Ionicons color={colors.textSecondary} name="close" size={18} />
+          </Pressable>
+        </View>
+      ) : null}
       {locationLoading ? (
         <View accessibilityLiveRegion="polite" style={styles.locationStatus}>
           <ActivityIndicator color={colors.primaryDark} size="small" />
@@ -561,6 +596,8 @@ const styles = StyleSheet.create({
   cameraShutterInner: { backgroundColor: colors.primaryDark, borderRadius: 31, height: 62, width: 62 },
   cameraTitle: { color: colors.card, fontFamily: fonts.bold, fontSize: typography.body },
   locationStatus: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.md, flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  attachmentNotice: { alignItems: "center", backgroundColor: colors.cardMuted, borderRadius: radius.md, flexDirection: "row", gap: spacing.sm, padding: spacing.md },
+  noticeSettings: { alignSelf: "flex-start", paddingVertical: spacing.sm },
   locationStatusCopy: { flex: 1, gap: 2 },
   locationStatusHint: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.caption },
   locationStatusTitle: { color: colors.primaryDark, fontFamily: fonts.semiBold, fontSize: typography.caption },

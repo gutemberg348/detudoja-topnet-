@@ -27,6 +27,7 @@ import {
 } from "../services/personal-chats.api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import { useAuthStore } from "../stores/useAuthStore";
+import { chatMessagePreview } from "../utils/chat-preview";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
 
 function formatConversationDate(value) {
@@ -297,7 +298,7 @@ export function PersonalChatsInboxScreen({ navigation, route }) {
                       <Text style={styles.friendDate}>{formatConversationDate(conversation.updatedAt)}</Text>
                     </View>
                     <Text numberOfLines={1} style={styles.personMeta}>
-                      {conversation.lastMessage?.text ?? `@${conversation.person?.publicId}`}
+                      {chatMessagePreview(conversation.lastMessage, `@${conversation.person?.publicId ?? "contato"}`)}
                     </Text>
                   </View>
                   {conversation.unreadCount > 0 ? (

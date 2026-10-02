@@ -81,7 +81,7 @@ export function createAdminNetworkRepository(database = prisma) {
       },
       orderBy: [{ posicao_matriz: "asc" }, { criado_em: "asc" }],
       where: {
-        alocado_sob_usuario_id: { in: parentIds },
+        alocado_sob_usuario_id: parentIds ? { in: parentIds } : { not: null },
         status: { in: visibleIndicationStatuses },
       },
     });
