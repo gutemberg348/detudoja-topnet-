@@ -446,7 +446,7 @@ function pushServiceNotification(conversation, recipientUserId, body, reason) {
   if (!recipientUserId) return;
   void sendExpoPushToUsers({
     body,
-    channelId: "messages",
+    channelId: reason === "service-request-created" ? "service-calls" : "messages",
     data: {
       conversationId: conversation.id,
       reason,

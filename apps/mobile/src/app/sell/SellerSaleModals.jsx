@@ -1,4 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { FeedbackLayer } from "../../components/FeedbackProvider";
 import { useEffect, useState } from "react";
 import {
   KeyboardAvoidingView,
@@ -82,6 +83,7 @@ export function SaleModal({ error, form, isSaving, onChange, onClose, onSubmit, 
           </ScrollView>
         </View>
       </View>
+      <FeedbackLayer />
     </Modal>
   );
 }
@@ -148,6 +150,7 @@ export function SaleDestinationModal({ onClose, onSelectAutonomous, onSelectStor
           </ScrollView>
         </View>
       </View>
+      <FeedbackLayer />
     </Modal>
   );
 }
@@ -295,6 +298,7 @@ export function StoreChargeModal({
           </ScrollView>
         </View>
       </KeyboardAvoidingView>
+      <FeedbackLayer />
     </Modal>
   );
 }

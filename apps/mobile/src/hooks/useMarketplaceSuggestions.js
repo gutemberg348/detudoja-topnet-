@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
 import { getMarketplaceSuggestions } from "../services/marketplace.api";
+import { readQueryKey } from "../services/read-cache";
+import { useAuthStore } from "../stores/useAuthStore";
 import { normalizeSearchText } from "../utils/search";
+import { useCachedQuery } from "./useCachedQuery";
 import { useLiveRefresh } from "./useLiveRefresh";
 import { realtimeEvents } from "../services/realtime";
 
@@ -15,58 +17,23 @@ export function useMarketplaceSuggestions(
     showInitial = false,
   } = {},
 ) {
-  const [isLoading, setIsLoading] = useState(false);
-  const [suggestions, setSuggestions] = useState([]);
+  const { session } = useAuthStore();
   const search = normalizeSearchText(query);
-  const [revision, setRevision] = useState(0);
-  useLiveRefresh({ accessToken,
-    enabled: enabled && ((showInitial && !search) || search.length >= minimumCharacters),
-    events: [realtimeEvents.serviceAvailabilityUpdated],
-    onRefresh: () => setRevision((current) => current + 1),
+  const canQuery = enabled && Boolean(accessToken && session?.user?.id)
+    && ((showInitial && !search) || search.length >= minimumCharacters);
+  const results = useCachedQuery({
+    key: canQuery ? readQueryKey("marketplace-suggestions", session.user.id, scope, search, limit) : null,
+    enabled: canQuery,
+    delayMs: search ? 220 : 0,
+    load: () => getMarketplaceSuggestions(accessToken, { limit, search: search || undefined }),
+    requestVersion: accessToken,
+    staleTimeMs: 15000,
   });
-
-  useEffect(() => {
-    let active = true;
-
-    const canLoadInitial = showInitial && search.length === 0;
-    const canAutocomplete = search.length >= minimumCharacters;
-
-    if (!enabled || !accessToken || (!canLoadInitial && !canAutocomplete)) {
-      setSuggestions([]);
-      setIsLoading(false);
-      return () => {
-        active = false;
-      };
-    }
-
-    setIsLoading(true);
-
-    const timeout = setTimeout(async () => {
-      try {
-        const response = await getMarketplaceSuggestions(accessToken, {
-          limit,
-          search: search || undefined,
-        });
-
-        if (active) {
-          setSuggestions(response.suggestions ?? []);
-        }
-      } catch {
-        if (active) {
-          setSuggestions([]);
-        }
-      } finally {
-        if (active) {
-          setIsLoading(false);
-        }
-      }
-    }, 220);
-
-    return () => {
-      active = false;
-      clearTimeout(timeout);
-    };
-  }, [accessToken, enabled, limit, minimumCharacters, scope, search, showInitial, revision]);
-
-  return { isLoading, suggestions };
+  useLiveRefresh({ accessToken,
+    enabled: canQuery,
+    events: [realtimeEvents.serviceAvailabilityUpdated],
+    refreshOnFocus: false,
+    onRefresh: results.refresh,
+  });
+  return { isLoading: results.isLoading, suggestions: results.data?.suggestions ?? [] };
 }

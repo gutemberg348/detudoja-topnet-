@@ -7,6 +7,7 @@ import { colors, fonts, radius, shadowSoft, spacing, typography } from "../../ut
 import { countNewStoreOrders, formatStatus } from "./seller.utils";
 import { serviceModalityDescription, serviceOperationSummary } from "../../utils/service-operations";
 import { serviceIconName } from "../../utils/service-icons";
+import { StatePanel } from "../../components/StatePanel";
 
 const chargeStatusCopy = {
   ATIVA: "Aguardando",
@@ -34,6 +35,8 @@ const staffRoleLabels = {
 
 export function SellerDashboard({
   charges,
+  chargesStatus = "ready",
+  servicesStatus = "ready",
   payoutAccount,
   onCreateSale,
   onOpenServiceDesk,
@@ -56,6 +59,7 @@ export function SellerDashboard({
   const [chargesOpen, setChargesOpen] = useState(false);
   const payoutReady = payoutAccount?.status === "ATIVA";
   const activeCharges = charges.filter((charge) => ["ATIVA", "PROCESSANDO"].includes(charge.status)).length;
+  const activeChargesLabel = chargesStatus === "loading" ? "..." : chargesStatus === "error" ? "—" : String(activeCharges);
   const paidRecentCents = charges
     .filter((charge) => charge.status === "PAGA")
     .reduce((total, charge) => total + Number(charge.amountCents ?? 0), 0);
@@ -143,7 +147,7 @@ export function SellerDashboard({
                 value={String(totalNewOrders)}
               />
               <View style={styles.metricDivider} />
-              <HeroMetric icon="time-outline" label="QR em aberto" value={String(activeCharges)} />
+              <HeroMetric icon="time-outline" label="QR em aberto" value={activeChargesLabel} />
             </View>
           </>
         ) : (
@@ -161,12 +165,13 @@ export function SellerDashboard({
               value={String(totalNewOrders)}
             />
             <View style={styles.metricDivider} />
-            <HeroMetric icon="time-outline" label="QR em aberto" value={String(activeCharges)} />
+            <HeroMetric icon="time-outline" label="QR em aberto" value={activeChargesLabel} />
           </View>
         )}
       </View>
 
       <ServiceSection
+        status={servicesStatus}
         callsCount={serviceCallsCount}
         notificationCount={serviceNotificationCount}
         onOpen={onOpenServiceDesk}
@@ -298,7 +303,9 @@ export function SellerDashboard({
         <View style={styles.sectionCopy}>
           <Text style={styles.sectionTitle}>Cobrancas recentes</Text>
           <Text style={styles.sectionSubtitle}>
-            {chargesOpen ? "Ultimas movimentacoes por QR" : `${charges.length} cobranca${charges.length === 1 ? "" : "s"} recentes`}
+            {chargesStatus === "loading" ? "Carregando suas cobrancas..." : chargesStatus === "error"
+              ? "Nao foi possivel atualizar as cobrancas agora" : chargesOpen ? "Ultimas movimentacoes por QR"
+                : `${charges.length} cobranca${charges.length === 1 ? "" : "s"} recentes`}
           </Text>
         </View>
         {activeCharges > 0 ? (
@@ -318,7 +325,10 @@ export function SellerDashboard({
             <Text style={styles.historyLinkText}>Ver historico completo</Text>
             <Ionicons color={colors.primaryDark} name="arrow-forward" size={16} />
           </Pressable>
-          {charges.length ? (
+          {chargesStatus !== "ready" ? (
+            <StatePanel loading={chargesStatus === "loading"} icon="qr-code-outline"
+              text={chargesStatus === "loading" ? "Buscando suas cobrancas..." : "Nao foi possivel carregar as cobrancas agora."} />
+          ) : charges.length ? (
             <View style={styles.list}>
               {charges.slice(0, 5).map((charge) => (
                 <ChargeRow charge={charge} key={charge.id} onPress={onOpenCharge} />
@@ -410,6 +420,7 @@ function CommerceSection({ onCreateStore, onOpenStore, storeChatUnreadByStore, s
 }
 
 function ServiceSection({
+  status = "ready",
   callsCount,
   notificationCount,
   onOpen,
@@ -419,15 +430,19 @@ function ServiceSection({
   return (
     <>
       <SectionHeading
-        action={services.length ? "Gerenciar" : "Comecar"}
+        action={status !== "ready" ? "Abrir" : services.length ? "Gerenciar" : "Comecar"}
         icon="briefcase-outline"
         onPress={onOpen}
-        subtitle={onlineServices.length
+        subtitle={status === "loading" ? "Carregando suas atividades..." : status === "error"
+          ? "Nao foi possivel atualizar as atividades agora" : onlineServices.length
           ? `Online como: ${onlineServices.map((service) => service.name).join(", ")}`
           : "Nenhuma atividade online no momento"}
         title="Central de servicos"
       />
-      {services.length ? (
+      {status !== "ready" ? (
+        <StatePanel loading={status === "loading"} icon="briefcase-outline"
+          text={status === "loading" ? "Buscando suas atividades..." : "Abra a central para tentar novamente."} />
+      ) : services.length ? (
         <View style={styles.list}>
           {services.map((service) => (
             <ServiceOperationRow key={service.id} onPress={onOpen} service={service} />

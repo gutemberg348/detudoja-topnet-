@@ -4,7 +4,7 @@ import { AppState } from "react-native";
 import { getRealtimeSocket } from "../services/realtime";
 import { createLiveRefresh } from "../utils/live-refresh";
 
-export function useLiveRefresh({ accessToken, enabled = true, scopeKey = "", events = [], acceptEvent, onRefresh, intervalMs = 20000 }) {
+export function useLiveRefresh({ accessToken, enabled = true, scopeKey = "", events = [], acceptEvent, onRefresh, intervalMs = 20000, refreshOnFocus = true }) {
   const focused = useIsFocused();
   const latest = useRef({ onRefresh, acceptEvent });
   latest.current = { onRefresh, acceptEvent };
@@ -30,7 +30,7 @@ export function useLiveRefresh({ accessToken, enabled = true, scopeKey = "", eve
       if (active && !wasActive) queue.resume();
     });
     const timer = intervalMs > 0 ? setInterval(queue.resume, intervalMs) : null;
-    queue.resume();
+    if (refreshOnFocus) queue.resume();
     return () => {
       active = false;
       queue.dispose();
@@ -39,5 +39,5 @@ export function useLiveRefresh({ accessToken, enabled = true, scopeKey = "", eve
       socket?.off("connect", queue.request);
       events.forEach((event) => socket?.off(event, onEvent));
     };
-  }, [accessToken, enabled, eventsKey, focused, intervalMs, scopeKey]);
+  }, [accessToken, enabled, eventsKey, focused, intervalMs, refreshOnFocus, scopeKey]);
 }

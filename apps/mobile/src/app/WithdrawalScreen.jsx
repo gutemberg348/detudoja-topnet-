@@ -1,4 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useFeedback } from "../components/FeedbackProvider";
+import { withdrawalFeedback } from "../utils/action-feedback";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -68,6 +70,7 @@ function requestKey() {
 }
 
 export function WithdrawalScreen() {
+  const { notify } = useFeedback();
   const { session } = useAuthStore();
   const [accountForm, setAccountForm] = useState(initialAccountForm);
   const [accountError, setAccountError] = useState("");
@@ -175,6 +178,7 @@ export function WithdrawalScreen() {
     try {
       await saveWithdrawalPixAccount(session.accessToken, accountForm);
       setAccountModalOpen(false);
+      notify("Chave Pix salva", "A chave para receber seus saques foi atualizada.");
       await load();
     } catch (requestError) {
       if (requestError instanceof ApiError && requestError.status === 428) {
@@ -203,6 +207,7 @@ export function WithdrawalScreen() {
       });
       idempotencyKeyRef.current = requestKey();
       setSourceAmounts({});
+      notify(...withdrawalFeedback(response.withdrawal?.status));
       await load();
       if (["FALHOU", "CANCELADO"].includes(response.withdrawal?.status)) {
         setError("O Pix nao foi enviado. Todo o valor voltou para o seu saldo; confira a chave antes de tentar novamente.");
@@ -218,6 +223,7 @@ export function WithdrawalScreen() {
     setError("");
     try {
       await cancelWithdrawal(session.accessToken, item.id);
+      notify("Saque cancelado", "O cancelamento foi registrado. Confira seu saldo atualizado.");
       await load();
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel cancelar o saque.");

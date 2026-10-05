@@ -1,7 +1,6 @@
 import * as Clipboard from "expo-clipboard";
 import * as FileSystem from "expo-file-system/legacy";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import * as MediaLibrary from "expo-media-library";
 import * as Sharing from "expo-sharing";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Image, Platform, Pressable, Share, StyleSheet, Text, View } from "react-native";
@@ -49,9 +48,10 @@ export function StorePermanentQrScreen({ route }) {
       if (Platform.OS === "web") {
         await Share.share({ message: data.store.payload, title: `QR de ${data.store.name}` });
       } else {
+        const MediaLibrary = await import("expo-media-library");
         const permission = await MediaLibrary.requestPermissionsAsync(true, ["photo"]);
         if (!permission.granted) throw new Error("Permita o acesso as fotos para salvar o QR.");
-        await MediaLibrary.saveToLibraryAsync(await qrFile());
+        await MediaLibrary.Asset.create(await qrFile());
         Alert.alert("QR salvo", "A imagem foi adicionada a sua galeria e ja pode ser impressa.");
       }
     } catch (saveError) {

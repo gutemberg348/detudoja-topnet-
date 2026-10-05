@@ -1,4 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useFeedback } from "../components/FeedbackProvider";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
@@ -251,6 +252,7 @@ function compactOrderCode(value = "") {
 }
 
 export function CustomerOrderDetailsScreen({ navigation, route }) {
+  const { notify } = useFeedback();
   const insets = useSafeAreaInsets();
   const { session } = useAuthStore();
   const chatScrollRef = useRef(null);
@@ -578,6 +580,9 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
           },
         );
       }
+      notify(action === "accept" ? "Proposta aceita" : "Proposta recusada", action === "accept"
+        ? "Confira o pagamento para continuar com o pedido."
+        : "A loja recebeu sua resposta. Você pode combinar outra proposta pelo chat.");
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel responder a proposta.");
     } finally {
@@ -605,6 +610,7 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
         highlightOrderId: completedOrder.id,
         initialView: "history",
       });
+      notify("Recebimento confirmado", "Seu pedido foi concluído. Obrigado pela confirmação!");
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel confirmar o recebimento.");
     } finally {
@@ -656,6 +662,7 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
       const response = await cancelCustomerOrder(session.accessToken, order.id, {
         refundDestination,
       });
+      notify("Cancelamento registrado", "Acompanhe o pedido para conferir o status da devolução do pagamento.", "info");
       if (response.order) setOrder(response.order);
       if (response.message) {
         setChatMessages((current) => appendUniqueMessage(current, response.message));
@@ -678,6 +685,7 @@ export function CustomerOrderDetailsScreen({ navigation, route }) {
 
     try {
       const response = await cancelCustomerOrder(session.accessToken, order.id);
+      notify("Pedido cancelado", "O cancelamento do seu pedido foi registrado.");
       setOrder(response.order ?? order);
       await loadOrder({ silent: true });
     } catch (requestError) {

@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { env } from "./config/env.js";
+import { startPushDeliveryWorker, stopPushDeliveryWorker } from "./modules/notifications/push-delivery.worker.js";
 import { prisma } from "./config/prisma.js";
 import { assertSandboxLedgerIsolation } from "./modules/payments/sandbox-approval.js";
 import { closeRedis, initializeRedis } from "./config/redis.js";
@@ -73,6 +74,7 @@ async function shutdown(signal) {
   await stopPayoutWorker();
   await stopWithdrawalWorker();
   await stopKycAnalysisWorker();
+  await stopPushDeliveryWorker();
   await closeRealtimeServer();
   await closeRedis();
   await prisma.$disconnect();
@@ -96,6 +98,7 @@ async function startServer() {
   startPayoutWorker();
   startWithdrawalWorker();
   startKycAnalysisWorker();
+  startPushDeliveryWorker();
 
   server.listen(env.port, env.host, () => {
     recordComponentSuccess("api", { host: env.host, port: env.port });

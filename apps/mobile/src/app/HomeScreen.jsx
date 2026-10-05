@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { SearchBar } from "../components/SearchBar";
 import { useMarketplaceSuggestions } from "../hooks/useMarketplaceSuggestions";
+import { useMarketplaceLocation, usePrefetchMarketplace } from "../hooks/useMarketplaceData";
 import { useAuthStore } from "../stores/useAuthStore";
 import { normalizeSearchText } from "../utils/search";
 import { colors, fonts, spacing, typography } from "../utils/theme";
@@ -15,10 +16,13 @@ export function HomeScreen({ navigation }) {
   const { session } = useAuthStore();
   const [query, setQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
+  const { location } = useMarketplaceLocation();
+  usePrefetchMarketplace(location, { ready: !searchFocused });
   const { isLoading: suggestionsLoading, suggestions } = useMarketplaceSuggestions(session?.accessToken, query, {
-    enabled: searchFocused,
     limit: 12,
     minimumCharacters: 2,
+    scope: location ? `${location.city}|${location.state}` : "",
+    enabled: searchFocused && Boolean(location),
     showInitial: true,
   });
   const recent = useHomeConversations(session?.accessToken);
@@ -154,7 +158,7 @@ export function HomeScreen({ navigation }) {
       >
         <View style={styles.content}>
           <SearchBar
-            expandedSuggestions
+            fullscreen
             initialSuggestionsTitle="Sugestoes para voce"
             loading={suggestionsLoading}
             onChangeText={setQuery}

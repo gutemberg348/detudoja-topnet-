@@ -1,14 +1,17 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { ActivityIndicator, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { resolveMediaUrl } from "../utils/media";
 import { serviceIconName } from "../utils/service-icons";
+import { RecentConversationsCarousel } from "./RecentConversationsCarousel";
 import { colors, fonts, radius, shadow, spacing, typography } from "../utils/theme";
 
 export function SearchBar({
   compact = false,
   containerStyle,
   expandedSuggestions = false,
+  fullscreen = false,
   initialSuggestionsTitle = "Sugestoes perto de voce",
   loading = false,
   onChangeText,
@@ -23,6 +26,7 @@ export function SearchBar({
 }) {
   const [focused, setFocused] = useState(false);
   const blurTimeoutRef = useRef(null);
+  const inputRef = useRef(null);
   const { height: windowHeight } = useWindowDimensions();
   const visibleSuggestions = focused && (loading || suggestions.length > 0 || recentSuggestions.length > 0);
   const rowHeight = expandedSuggestions ? 82 : 72;
@@ -33,10 +37,9 @@ export function SearchBar({
     maximumListHeight,
     Math.max(rowHeight, suggestions.length * rowHeight),
   );
-  // Expanded Home results belong to the page's scroll area. Android cannot
-  // reliably hit-test an absolute dropdown extending outside its parent.
-  const SuggestionsList = expandedSuggestions ? View : ScrollView;
-  const suggestionsListProps = expandedSuggestions ? { style: styles.suggestionsContent } : {
+  // Fullscreen results share one scroll area, keeping the search header fixed.
+  const SuggestionsList = fullscreen || expandedSuggestions ? View : ScrollView;
+  const suggestionsListProps = fullscreen || expandedSuggestions ? { style: styles.suggestionsContent } : {
     bounces: false,
     contentContainerStyle: styles.suggestionsContent,
     keyboardShouldPersistTaps: "always",
@@ -68,11 +71,16 @@ export function SearchBar({
     }, 180);
   }
 
-  function selectSuggestion(suggestion) {
-    const nextValue = suggestion.label ?? suggestion.name ?? String(suggestion);
+  function closeSuggestions() {
     clearBlurTimeout();
     setFocused(false);
     onFocusChange?.(false);
+    if (fullscreen) Keyboard.dismiss();
+  }
+
+  function selectSuggestion(suggestion) {
+    const nextValue = suggestion.label ?? suggestion.name ?? String(suggestion);
+    closeSuggestions();
     const handled = onSelectSuggestion?.(suggestion);
 
     if (handled === true) {
@@ -82,12 +90,13 @@ export function SearchBar({
     onChangeText(nextValue);
   }
 
-  return (
-    <View style={[styles.wrapper, containerStyle]}>
+  function renderSearchField(inScreen = false) {
+    return (
       <View style={[
         styles.search,
         compact && styles.searchCompact,
         focused && styles.searchFocused,
+        inScreen && styles.screenSearch,
       ]}>
         <Ionicons color={colors.textWeak} name="search-outline" size={25} />
         <TextInput
@@ -95,58 +104,55 @@ export function SearchBar({
           autoCapitalize="none"
           autoComplete="off"
           autoCorrect={false}
-          onBlur={closeSuggestionsSoon}
+          onBlur={fullscreen ? undefined : closeSuggestionsSoon}
           onChangeText={onChangeText}
-          onFocus={openSuggestions}
-          onSubmitEditing={() => onSubmit?.(value.trim())}
-          placeholder={placeholder}
+          onFocus={fullscreen ? undefined : openSuggestions}
+          onSubmitEditing={() => {
+            if (fullscreen) closeSuggestions();
+            onSubmit?.(value.trim());
+          }}
+          placeholder={inScreen ? "Pesquisar" : placeholder}
           placeholderTextColor={colors.textWeak}
           returnKeyType="search"
-          style={[styles.input, compact && styles.inputCompact]}
+          ref={inputRef}
+          style={[styles.input, (compact || inScreen) && styles.inputCompact]}
           value={value}
         />
         {value ? (
           <Pressable
             accessibilityLabel="Limpar pesquisa"
+            accessibilityRole="button"
             hitSlop={10}
             onPress={() => onChangeText("")}
+            style={inScreen && styles.screenClear}
           >
             <Ionicons color={colors.textWeak} name="close-circle" size={21} />
           </Pressable>
-        ) : showVoice ? (
+        ) : showVoice && !inScreen ? (
           <View accessibilityLabel="Busca por voz" style={styles.voiceIcon}>
             <Ionicons color={colors.primary} name="mic" size={25} />
           </View>
         ) : null}
       </View>
+    );
+  }
 
-      {visibleSuggestions ? (
+  function renderSuggestions(inScreen = false) {
+    return (
         <View
-          style={[styles.suggestions, compact && styles.suggestionsCompact, expandedSuggestions && styles.suggestionsInline]}
+          style={inScreen ? styles.screenSuggestions : [styles.suggestions, compact && styles.suggestionsCompact, expandedSuggestions && styles.suggestionsInline]}
         >
           {!value.trim() && recentSuggestions.length ? (
             <View style={styles.recentsSection}>
               <View style={styles.recentsHeading}>
                 <Text style={styles.recentsTitle}>Conversas recentes</Text>
               </View>
-              <ScrollView
-                contentContainerStyle={styles.recentsContent}
-                horizontal
-                keyboardShouldPersistTaps="always"
-                showsHorizontalScrollIndicator={false}
-              >
-                {recentSuggestions.slice(0, 8).map((suggestion) => (
-                  <Pressable
-                    accessibilityLabel={`Abrir conversa com ${suggestion.label}`}
-                    key={`recent:${suggestion.id}`}
-                    onPress={() => selectSuggestion(suggestion)}
-                    style={({ pressed }) => [styles.recentItem, pressed && styles.suggestionPressed]}
-                  >
-                    <SuggestionArtwork recent suggestion={suggestion} visual={suggestionVisual("conversation")} />
-                    <Text numberOfLines={2} style={styles.recentLabel}>{suggestion.label}</Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
+              <RecentConversationsCarousel
+                items={recentSuggestions.slice(0, 8)}
+                onInteraction={clearBlurTimeout}
+                onSelect={selectSuggestion}
+                renderArtwork={(suggestion) => <SuggestionArtwork recent suggestion={suggestion} visual={suggestionVisual("conversation")} />}
+              />
             </View>
           ) : null}
           {loading || suggestions.length ? (
@@ -171,6 +177,8 @@ export function SearchBar({
 
               return (
                 <Pressable
+                  accessibilityLabel={`Abrir ${label}`}
+                  accessibilityRole="button"
                   key={key}
                   onPress={() => selectSuggestion(suggestion)}
                   style={({ pressed }) => [
@@ -197,7 +205,74 @@ export function SearchBar({
               );
             })}
           </SuggestionsList> : null}
+          {inScreen && !loading && !suggestions.length && (value.trim() || !recentSuggestions.length) ? (
+            <View style={styles.emptyState}>
+              <Ionicons color={colors.textMuted} name="search-outline" size={32} />
+              <Text style={styles.emptyTitle}>{value.trim().length >= 2 ? "Nenhum resultado por aqui" : "O que você está procurando?"}</Text>
+              <Text style={styles.emptyText}>{value.trim().length >= 2 ? "Tente outro nome de produto, serviço ou loja." : "Digite pelo menos duas letras para encontrar produtos, serviços, lojas ou conversas."}</Text>
+            </View>
+          ) : null}
         </View>
+    );
+  }
+
+  return (
+    <View style={[styles.wrapper, containerStyle]}>
+      {fullscreen ? (
+        <Pressable
+          accessibilityHint="Abre a busca em tela cheia"
+          accessibilityLabel="Pesquisar"
+          accessibilityRole="button"
+          onPress={openSuggestions}
+          style={({ pressed }) => [styles.search, pressed && styles.suggestionPressed]}
+        >
+          <Ionicons color={colors.textWeak} name="search-outline" size={25} />
+          <Text numberOfLines={1} style={[styles.triggerText, !value && styles.triggerPlaceholder]}>{value || placeholder}</Text>
+          {showVoice ? <View style={styles.voiceIcon}><Ionicons color={colors.primary} name="mic" size={25} /></View> : null}
+        </Pressable>
+      ) : renderSearchField()}
+      {!fullscreen && visibleSuggestions ? renderSuggestions() : null}
+      {fullscreen ? (
+        <Modal
+          animationType="fade"
+          onRequestClose={closeSuggestions}
+          onShow={() => inputRef.current?.focus()}
+          presentationStyle="fullScreen"
+          statusBarTranslucent
+          navigationBarTranslucent
+          visible={focused}
+        >
+          {/* A native Modal has its own view tree and needs its own inset provider. */}
+          <SafeAreaProvider style={styles.screenSafeArea}>
+            <SafeAreaView edges={["top", "left", "right", "bottom"]} style={styles.screenSafeArea}>
+              <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.screenShell}>
+                <View style={styles.screenHeader}>
+                  <View style={styles.screenHeaderContent}>
+                    <View style={styles.screenField}>{renderSearchField(true)}</View>
+                    <Pressable
+                      accessibilityHint="Fecha as sugestões e volta para a tela inicial"
+                      accessibilityLabel="Fechar busca"
+                      accessibilityRole="button"
+                      onPress={closeSuggestions}
+                      style={({ pressed }) => [styles.screenClose, pressed && styles.suggestionPressed]}
+                    >
+                      <Ionicons color={colors.textPrimary} name="close" size={27} />
+                    </Pressable>
+                  </View>
+                </View>
+                <ScrollView
+                  contentContainerStyle={styles.screenScrollContent}
+                  keyboardDismissMode="on-drag"
+                  keyboardShouldPersistTaps="always"
+                  showsVerticalScrollIndicator
+                  style={styles.screenScroll}
+                >
+                  {renderSuggestions(true)}
+                </ScrollView>
+              </KeyboardAvoidingView>
+            </SafeAreaView>
+          </SafeAreaProvider>
+        </Modal>
       ) : null}
     </View>
   );
@@ -332,6 +407,22 @@ function suggestionVisual(type) {
 }
 
 const styles = StyleSheet.create({
+  emptyState: { alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.xl, paddingVertical: spacing.xxxl },
+  emptyTitle: { color: colors.textPrimary, fontFamily: fonts.semiBold, fontSize: typography.body, textAlign: "center" },
+  emptyText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.small, lineHeight: 20, textAlign: "center" },
+  screenShell: { backgroundColor: colors.card, flex: 1 },
+  screenSafeArea: { backgroundColor: colors.background, flex: 1 },
+  screenHeader: { backgroundColor: colors.background, borderBottomColor: colors.border, borderBottomWidth: 1 },
+  screenHeaderContent: { alignItems: "center", alignSelf: "center", flexDirection: "row", gap: spacing.sm, maxWidth: 560, padding: spacing.lg, width: "100%" },
+  screenField: { flex: 1, minWidth: 0 },
+  screenClear: { alignItems: "center", justifyContent: "center", height: 44, width: 32 },
+  screenSearch: { backgroundColor: colors.cardMuted, minHeight: 54, paddingHorizontal: spacing.md, gap: spacing.sm },
+  screenClose: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.round, borderWidth: 1, height: 48, justifyContent: "center", width: 48 },
+  screenScroll: { flex: 1 },
+  screenScrollContent: { alignItems: "center", flexGrow: 1, paddingBottom: spacing.xl },
+  screenSuggestions: { maxWidth: 560, paddingTop: spacing.sm, width: "100%" },
+  triggerText: { color: colors.textPrimary, flex: 1, fontFamily: fonts.medium, fontSize: typography.body, minWidth: 0 },
+  triggerPlaceholder: { color: colors.textWeak },
   input: {
     color: colors.textPrimary,
     flex: 1,
@@ -339,6 +430,7 @@ const styles = StyleSheet.create({
     fontSize: typography.body,
     fontWeight: "500",
     minHeight: 64,
+    ...Platform.select({ web: { outlineStyle: "none" } }),
   },
   inputCompact: { minHeight: 50 },
   recentAvatar: {
@@ -346,25 +438,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     height: 64,
     width: 64,
-  },
-  recentItem: {
-    alignItems: "center",
-    borderRadius: radius.lg,
-    gap: 7,
-    paddingVertical: spacing.sm,
-    width: 82,
-  },
-  recentLabel: {
-    color: colors.textPrimary,
-    fontFamily: fonts.medium,
-    fontSize: 12,
-    lineHeight: 16,
-    textAlign: "center",
-  },
-  recentsContent: {
-    gap: spacing.md,
-    paddingBottom: spacing.md,
-    paddingHorizontal: spacing.md,
   },
   recentsHeading: {
     paddingHorizontal: spacing.lg,

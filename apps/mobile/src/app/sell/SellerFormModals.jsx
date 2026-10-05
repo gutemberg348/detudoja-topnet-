@@ -1,4 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { FeedbackLayer } from "../../components/FeedbackProvider";
 import { useEffect, useState } from "react";
 import {
   Image,
@@ -240,6 +241,7 @@ export function OnboardingModal({
           </ScrollView>
         </View>
       </View>
+      <FeedbackLayer />
     </Modal>
   );
 }
@@ -549,6 +551,7 @@ export function StoreModal({
           </ScrollView>
         </View>
       </View>
+      <FeedbackLayer />
     </Modal>
   );
 }
@@ -814,6 +817,7 @@ export function StoreEditModal({
           </ScrollView>
         </View>
       </View>
+      <FeedbackLayer />
     </Modal>
   );
 }
@@ -895,6 +899,7 @@ export function StoreMediaModal({
           </ScrollView>
         </View>
       </View>
+      <FeedbackLayer />
     </Modal>
   );
 }
@@ -1186,6 +1191,7 @@ export function ProductModal({
           </ScrollView>
         </View>
       </View>
+      <FeedbackLayer />
     </Modal>
   );
 }

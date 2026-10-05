@@ -1,6 +1,15 @@
 # DeTudoJa - auditoria geral e apresentacao
 
-Ultima atualizacao: 2026-09-04
+Ultima atualizacao: 2026-10-04
+
+## Disponibilidade e avisos (2026-10-04)
+
+Prestadores continuam na busca ao sair do app ate pausarem suas atividades.
+Notificacoes ganharam fila persistente, novas tentativas, recibos e teste por
+aparelho; cliente tambem recebe aviso do aceite da corrida. Perfil e Servicos
+mostram permissoes/pendencias. Codigo e validacoes locais prontos; publicacao,
+APNs/FCM e entrega em aparelhos reais pendentes. Safari/site ainda nao tem push
+com a pagina fechada. Ver [notificacoes.md](notificacoes.md).
 
 ## Resumo
 
@@ -20,7 +29,7 @@ de teste.
 | Area | Resultado |
 | --- | --- |
 | Banco e migrations | Schema valido e migrations alinhadas |
-| Banco | PostgreSQL, 64 modelos Prisma, IDs `Int` auto-incrementais |
+| Banco | PostgreSQL, entidades com IDs `Int`, fila push com UUID |
 | API | Express, Prisma, JWT, RBAC, Socket.IO e Asaas |
 | Testes API | 85 de 85 aprovados |
 | Carga | 3 de 3 cenarios aprovados: 50 contas, QR concorrente e Socket.IO |

@@ -1,4 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useFeedback } from "../components/FeedbackProvider";
+import { serviceActionFeedback } from "../utils/action-feedback";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -80,6 +82,7 @@ const conversationStatusCopy = {
 };
 
 export function ServiceConversationScreen({ navigation, route }) {
+  const { notify } = useFeedback();
   const { session } = useAuthStore();
   const insets = useSafeAreaInsets();
   const initial = route.params?.conversation;
@@ -506,6 +509,7 @@ export function ServiceConversationScreen({ navigation, route }) {
 
     try {
       await action();
+      if (serviceActionFeedback[key]) notify(...serviceActionFeedback[key]);
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel concluir esta acao.");
     } finally {

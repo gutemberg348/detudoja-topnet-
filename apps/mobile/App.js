@@ -7,17 +7,14 @@ import { useFonts } from "expo-font";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { AppState, Keyboard, Pressable, StyleSheet, Text, View } from "react-native";
+import { Keyboard, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { GlobalIncomingServiceAlert } from "./src/components/GlobalIncomingServiceAlert";
+import { FeedbackLayer, FeedbackProvider } from "./src/components/FeedbackProvider";
 import { CartFeedbackLayer, CartFeedbackProvider, useCartFeedback } from "./src/components/CartFeedbackProvider";
 import { AppNavigator, navigationRef } from "./src/navigation/AppNavigator";
-import { heartbeatSellerServices } from "./src/services/service-chats.api";
-import {
-  getInitialPushNotificationData,
-  registerDeviceForPushNotifications,
-  subscribePushNotificationResponses,
-} from "./src/services/push-notifications";
+import { PushNotificationsProvider } from "./src/components/PushNotificationsProvider";
+import { usePushNavigation } from "./src/hooks/usePushNavigation";
 import {
   AuthStoreProvider,
   useAuthStore,
@@ -25,46 +22,17 @@ import {
 import { CartStoreProvider, useCartStore } from "./src/stores/useCartStore";
 import { colors, fonts, radius, shadow, spacing } from "./src/utils/theme";
 
-function openPushNotification(data, attempt = 0) {
-  if (!data?.screen) return;
-  if (!navigationRef.isReady()) {
-    if (attempt < 8) setTimeout(() => openPushNotification(data, attempt + 1), 350);
-    return;
-  }
-
-  const conversationId = Number(data.conversationId) || undefined;
-  const orderId = Number(data.orderId) || undefined;
-  if (data.screen === "ServiceDesk") {
-    navigationRef.navigate("ServiceDesk", { courierRequestId: Number(data.requestId) || undefined });
-  } else if (data.screen === "PersonalConversation" && conversationId) {
-    navigationRef.navigate("PersonalConversation", { conversation: { id: conversationId } });
-  } else if (data.screen === "StoreConversation" && (conversationId || Number(data.storeId))) {
-    const storeId = Number(data.storeId) || undefined;
-    navigationRef.navigate("StoreConversation", {
-      ...(conversationId ? { conversation: { id: conversationId } } : {}),
-      ...(orderId ? { openOrderId: orderId } : {}),
-      ...(storeId ? { store: { id: storeId }, storeId } : {}),
-      scope: data.scope,
-    });
-  } else if (data.screen === "ServiceConversation" && conversationId) {
-    navigationRef.navigate("ServiceConversation", { conversation: { id: conversationId } });
-  } else if (data.screen === "CustomerOrderDetails" && orderId) {
-    navigationRef.navigate("CustomerOrderDetails", { order: { id: orderId } });
-  } else if (data.screen === "SellerOrders") {
-    navigationRef.navigate("Main", {
-      params: { notificationOrderId: orderId, notificationStoreId: Number(data.storeId) || undefined },
-      screen: "Vender",
-    });
-  }
-}
-
 export function App() {
   return (
     <SafeAreaProvider>
       <AuthStoreProvider>
         <CartStoreProvider>
           <CartFeedbackProvider>
-            <AppContent />
+            <FeedbackProvider>
+              <PushNotificationsProvider>
+                <AppContent />
+              </PushNotificationsProvider>
+            </FeedbackProvider>
           </CartFeedbackProvider>
         </CartStoreProvider>
       </AuthStoreProvider>
@@ -83,47 +51,7 @@ function AppContent() {
     Inter_800ExtraBold,
   });
 
-  useEffect(() => {
-    const token = session?.accessToken;
-    if (!token) return undefined;
-    let appState = AppState.currentState;
-    let timer = null;
-    const sendHeartbeat = () => { heartbeatSellerServices(token).catch(() => {}); };
-    const stop = () => {
-      if (timer) clearInterval(timer);
-      timer = null;
-    };
-    const start = () => {
-      sendHeartbeat();
-      timer = setInterval(sendHeartbeat, 45_000);
-    };
-    const subscription = AppState.addEventListener("change", (nextState) => {
-      const becameActive = appState !== "active" && nextState === "active";
-      appState = nextState;
-      if (becameActive) {
-        stop();
-        start();
-      } else if (nextState !== "active") {
-        stop();
-      }
-    });
-    if (appState === "active") start();
-    return () => {
-      stop();
-      subscription.remove();
-    };
-  }, [session?.accessToken]);
-
-  useEffect(() => {
-    registerDeviceForPushNotifications(session?.accessToken).catch(() => {});
-  }, [session?.accessToken]);
-
-  useEffect(() => {
-    if (!session?.accessToken) return undefined;
-    const subscription = subscribePushNotificationResponses(openPushNotification);
-    getInitialPushNotificationData().then(openPushNotification).catch(() => {});
-    return () => subscription.remove();
-  }, [session?.accessToken]);
+  usePushNavigation({ navigationRef, session, activeRouteName });
 
   if (!fontsLoaded) {
     return <View style={styles.app} />;
@@ -136,6 +64,7 @@ function AppContent() {
       <CartFeedbackLayer />
       <GlobalCartButton activeRouteName={activeRouteName} />
       <GlobalIncomingServiceAlert navigationRef={navigationRef} />
+      <FeedbackLayer />
     </View>
   );
 }

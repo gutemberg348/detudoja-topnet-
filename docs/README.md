@@ -6,6 +6,9 @@ quando ela altera regra de negocio, banco, rota, tela, infraestrutura ou risco.
 
 ## Referencias por assunto
 
+- `notificacoes.md`: disponibilidade persistente, fila push, permissoes,
+  configuracao nativa e conferencia de avisos com o app fora da tela.
+
 - `codex.md`: resumo de continuidade, decisoes recentes e regra de atualizacao.
 - `apresentacao-empresa.md`: visao executiva, sistemas, riscos e status para
   apresentar a empresa.

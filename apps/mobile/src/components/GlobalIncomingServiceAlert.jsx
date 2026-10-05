@@ -42,29 +42,51 @@ export function GlobalIncomingServiceAlert({ navigationRef }) {
   const { session } = useAuthStore();
   const [alert, setAlert] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [appActive, setAppActive] = useState(AppState.currentState === "active");
+  const currentSessionRef = useRef(session);
+  currentSessionRef.current = session;
+  const appActiveRef = useRef(appActive);
   const alertRef = useRef(null);
   const dismissedRef = useRef(new Set());
   const refreshRunningRef = useRef(null);
+
+  useEffect(() => {
+    setAlert(null);
+    alertRef.current = null;
+    dismissedRef.current.clear();
+    refreshRunningRef.current = null;
+    setLoading(false);
+  }, [session?.user?.id]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", state => {
+      appActiveRef.current = state === "active";
+      setAppActive(state === "active");
+    });
+    return () => subscription.remove();
+  }, []);
 
   useEffect(() => {
     alertRef.current = alert;
   }, [alert]);
 
   const showAlert = useCallback((nextAlert) => {
-    if (!nextAlert || dismissedRef.current.has(alertKey(nextAlert))) return;
+    if (!appActiveRef.current || !nextAlert || dismissedRef.current.has(alertKey(nextAlert))) return;
+    if (nextAlert.expiresAt && new Date(nextAlert.expiresAt).getTime() <= Date.now()) return;
     setAlert((current) => (
       alertKey(current) === alertKey(nextAlert) ? current : nextAlert
     ));
   }, []);
 
   const refresh = useCallback(async () => {
-    if (!session?.accessToken) return;
+    if (!session?.accessToken || !appActiveRef.current) return;
     if (refreshRunningRef.current) return refreshRunningRef.current;
 
     const request = Promise.allSettled([
       getCourierRequests(session.accessToken),
       getServiceConversations(session.accessToken),
     ]).then(([courierResult, serviceResult]) => {
+      if (!appActiveRef.current || currentSessionRef.current?.user?.id !== session.user?.id) return;
       const courierRequests = courierResult.status === "fulfilled"
         ? courierResult.value.requests ?? []
         : [];
@@ -82,7 +104,7 @@ export function GlobalIncomingServiceAlert({ navigationRef }) {
         && (conversation.isNewForSeller || Number(conversation.unreadCount ?? 0) > 0)
       ));
       const availableKeys = new Set([
-        ...courierRequests.map((item) => `courier:${item.id}`),
+        ...courierRequests.filter(item => item.status === "PENDENTE" && new Date(item.expiresAt).getTime() > now).map((item) => `courier:${item.id}`),
         ...serviceConversations
           .filter((item) => item.status === "ABERTA")
           .map((item) => `service:${item.id}`),
@@ -105,25 +127,17 @@ export function GlobalIncomingServiceAlert({ navigationRef }) {
 
     refreshRunningRef.current = request;
     return request;
-  }, [session?.accessToken, showAlert]);
+  }, [session?.accessToken, session?.user?.id, showAlert]);
 
   useEffect(() => {
-    if (!session?.accessToken) {
-      setAlert(null);
-      dismissedRef.current.clear();
-      return undefined;
-    }
+    if (!session?.accessToken || !appActive) return undefined;
 
     refresh();
     const timer = setInterval(refresh, pollIntervalMs);
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") refresh();
-    });
     return () => {
       clearInterval(timer);
-      subscription.remove();
     };
-  }, [refresh, session?.accessToken]);
+  }, [refresh, session?.accessToken, appActive]);
 
   useEffect(() => {
     if (!session?.accessToken) return undefined;
@@ -152,7 +166,7 @@ export function GlobalIncomingServiceAlert({ navigationRef }) {
   }, [refresh, session?.accessToken, session?.user?.id, showAlert]);
 
   useEffect(() => {
-    if (!alert || Platform.OS === "web") return undefined;
+    if (!alert || !appActive || Platform.OS === "web") return undefined;
     const ring = () => Vibration.vibrate([0, 350, 160, 500]);
     ring();
     const timer = setInterval(ring, 4_500);
@@ -160,7 +174,14 @@ export function GlobalIncomingServiceAlert({ navigationRef }) {
       clearInterval(timer);
       Vibration.cancel();
     };
-  }, [alert]);
+  }, [alert, appActive]);
+
+  useEffect(() => {
+    if (!alert?.expiresAt || !appActive) return undefined;
+    const remaining = new Date(alert.expiresAt).getTime() - Date.now();
+    const timer = setTimeout(() => { setAlert(null); void refresh(); }, Math.max(0, remaining));
+    return () => clearTimeout(timer);
+  }, [alert, appActive, refresh]);
 
   function dismiss() {
     if (alert) dismissedRef.current.add(alertKey(alert));
@@ -179,6 +200,7 @@ export function GlobalIncomingServiceAlert({ navigationRef }) {
       const response = alert.kind === "courier"
         ? await acceptCourierRequest(session.accessToken, alert.id)
         : await acceptServiceConversation(session.accessToken, alert.id);
+      if (currentSessionRef.current?.user?.id !== session.user?.id) return;
       dismissedRef.current.add(alertKey(alert));
       setAlert(null);
       if (navigationRef.isReady()) {
@@ -189,11 +211,12 @@ export function GlobalIncomingServiceAlert({ navigationRef }) {
         }
       }
     } catch {
+      if (currentSessionRef.current?.user?.id !== session.user?.id) return;
       setAlert(null);
       refresh();
       if (navigationRef.isReady()) navigationRef.navigate("ServiceDesk");
     } finally {
-      setLoading(false);
+      if (currentSessionRef.current?.user?.id === session.user?.id) setLoading(false);
     }
   }
 
@@ -206,20 +229,22 @@ export function GlobalIncomingServiceAlert({ navigationRef }) {
       } else {
         await cancelServiceConversation(session.accessToken, alert.id);
       }
+      if (currentSessionRef.current?.user?.id !== session.user?.id) return;
       dismissedRef.current.add(alertKey(alert));
       setAlert(null);
       refresh();
     } catch {
+      if (currentSessionRef.current?.user?.id !== session.user?.id) return;
       setAlert(null);
       refresh();
     } finally {
-      setLoading(false);
+      if (currentSessionRef.current?.user?.id === session.user?.id) setLoading(false);
     }
   }
 
   return (
     <IncomingServiceAlert
-      alert={alert}
+      alert={appActive ? alert : null}
       loading={loading}
       onAccept={accept}
       onClose={dismiss}

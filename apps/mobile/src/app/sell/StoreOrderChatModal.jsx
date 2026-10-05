@@ -1,4 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { FeedbackLayer, useFeedback } from "../../components/FeedbackProvider";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -49,6 +50,7 @@ export function StoreOrderChatModal({
   order,
   store,
 }) {
+  const { notify } = useFeedback();
   const insets = useSafeAreaInsets();
   const chatScrollRef = useRef(null);
   const [chatError, setChatError] = useState("");
@@ -182,6 +184,7 @@ export function StoreOrderChatModal({
       }
       setProposalDescription("");
       setProposalOpen(false);
+      notify("Proposta enviada", "O cliente poderá conferir o valor e responder pelo chat.");
     } catch (requestError) {
       setChatError(requestError.message ?? "Nao foi possivel enviar a proposta.");
     } finally {
@@ -371,6 +374,7 @@ export function StoreOrderChatModal({
           />
         </View>
       </KeyboardAvoidingView>
+      <FeedbackLayer />
     </Modal>
   );
 }

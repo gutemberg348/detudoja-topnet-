@@ -21,7 +21,9 @@ import {
 } from "../services/auth.api";
 import { disconnectRealtimeSocket } from "../services/realtime";
 import { unregisterExpoPushToken } from "../services/notifications.api";
+import { cancelPushRegistration } from "../services/push-notifications";
 import { signOutNativeGoogle } from "../services/google-sign-in";
+import { clearMobileReadCache, readCache, readQueryKey } from "../services/read-cache";
 
 const accessTokenKey = "detudoja.mobile.accessToken";
 const refreshTokenKey = "detudoja.mobile.refreshToken";
@@ -161,6 +163,10 @@ export function AuthStoreProvider({ children }) {
         try {
           const nextSession = await refreshAppSession(currentSession.refreshToken);
           await persistTokens(nextSession);
+          if (["kycLevel", "kycStatus"].some((field) => nextSession.user?.[field] !== currentSession.user?.[field])) {
+            const profileKey = readQueryKey("profile", currentSession.user?.id);
+            readCache.invalidate((key) => key === profileKey);
+          }
           sessionRef.current = nextSession;
           disconnectRealtimeSocket();
           setSession(nextSession);
@@ -168,6 +174,7 @@ export function AuthStoreProvider({ children }) {
         } catch (error) {
           if (isAuthenticationFailure(error)) {
             disconnectRealtimeSocket();
+            clearMobileReadCache();
             await clearTokens();
             sessionRef.current = null;
             setSession(null);
@@ -261,6 +268,7 @@ export function AuthStoreProvider({ children }) {
   async function login(credentials) {
     const nextSession = await loginApp(credentials);
     await persistTokens(nextSession);
+    clearMobileReadCache();
     sessionRef.current = nextSession;
     setSession(nextSession);
   }
@@ -268,6 +276,7 @@ export function AuthStoreProvider({ children }) {
   async function socialLogin(data) {
     const nextSession = await loginWithSocialApp(data);
     await persistTokens(nextSession);
+    clearMobileReadCache();
     sessionRef.current = nextSession;
     setSession(nextSession);
   }
@@ -275,6 +284,7 @@ export function AuthStoreProvider({ children }) {
   async function register(data) {
     const nextSession = await registerApp(data);
     await persistTokens(nextSession);
+    clearMobileReadCache();
     sessionRef.current = nextSession;
     setSession(nextSession);
   }
@@ -292,6 +302,7 @@ export function AuthStoreProvider({ children }) {
   }
 
   async function logout() {
+    cancelPushRegistration();
     try {
       if (session?.accessToken && session?.refreshToken) {
         const pushToken = await getStorageItem("detudoja.mobile.expoPushToken");
@@ -309,10 +320,16 @@ export function AuthStoreProvider({ children }) {
     await clearTokens();
     sessionRef.current = null;
     setSession(null);
+    clearMobileReadCache();
     await signOutNativeGoogle();
   }
 
   const updateSessionUser = useCallback((user) => {
+    const knownUser = sessionRef.current?.user;
+    if (knownUser && ["kycLevel", "kycStatus"].some((field) => user[field] !== undefined && user[field] !== knownUser[field])) {
+      const profileKey = readQueryKey("profile", knownUser.id);
+      readCache.invalidate((key) => key === profileKey);
+    }
     setSession((currentSession) => {
       if (!currentSession) return currentSession;
 

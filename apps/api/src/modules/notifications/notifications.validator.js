@@ -7,6 +7,7 @@ const expoPushToken = z.string().trim().regex(
 
 export const registerPushTokenSchema = z.object({
   platform: z.enum(["android", "ios"]),
+  channels: z.array(z.enum(["general", "messages", "orders", "courier-calls", "service-calls"])).max(5).optional(),
   token: expoPushToken,
 });
 

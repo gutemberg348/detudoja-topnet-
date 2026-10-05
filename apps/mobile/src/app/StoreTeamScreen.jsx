@@ -1,4 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useFeedback } from "../components/FeedbackProvider";
 import QRCode from "react-native-qrcode-svg";
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Image, Modal, Pressable, StyleSheet, Switch, Text, View } from "react-native";
@@ -17,6 +18,7 @@ import { resolveMediaUrl } from "../utils/media";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
 
 export function StoreTeamScreen({ route }) {
+  const { notify } = useFeedback();
   const { session } = useAuthStore();
   const store = route.params?.store;
   const [data, setData] = useState({ invitations: [], members: [] });
@@ -82,6 +84,7 @@ export function StoreTeamScreen({ route }) {
           onPress: async () => {
             try {
               await removeStoreStaffMember(session.accessToken, store.id, member.id);
+              notify("Atendente removido", "O acesso dessa pessoa à loja foi encerrado.");
               await load();
             } catch (requestError) {
               setError(requestError.message ?? "Nao foi possivel remover o funcionario.");
@@ -110,6 +113,7 @@ export function StoreTeamScreen({ route }) {
     }));
     try {
       await updateStoreStaffPermissions(session.accessToken, store.id, member.id, permissions);
+      notify("Permissões salvas", `O acesso de ${member.user?.name ?? "este atendente"} foi atualizado.`);
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel alterar as permissoes.");
       await load();

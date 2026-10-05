@@ -1,5 +1,16 @@
 # Sistema DeTudoJa
 
+## Atualizacao 2026-10-04: disponibilidade e fila push
+
+Disponibilidade e uma escolha persistida por servico, independente de conexao
+Socket.IO ou heartbeat do app. Pausa, KYC, cidade, bloqueios e ocupacao continuam
+decidindo elegibilidade. `push-delivery` processa a fila PostgreSQL com lease,
+retry e recibos do Expo, separando ticket aceito de entrega ao provedor.
+Chamados encerrados e dispositivos com outra conta sao descartados. Perfil e
+Servicos conferem permissao/cadastro e oferecem teste autenticado. Publicacao,
+credenciais APNs/FCM e conferencia fisica pendentes; disponibilidade corrigida
+tambem na web, que ainda nao tem Web Push. Ver [notificacoes.md](notificacoes.md).
+
 ## Atualizacao 2026-09-16: entrada configuravel em servicos
 
 O catalogo de prestacao separa atividades disponiveis das ja cadastradas. O
@@ -72,7 +83,7 @@ cadastro, carteiras e perfil comercial. Os comandos sao separados por papel:
   remove disponibilidade e chamadas de plataforma imediatamente.
 - Liberar um servico exige conta ativa, CPF e KYC `APROVADO`. Servico de
   entrega local exige tambem perfil de motoboy ativo. A liberacao nao coloca o
-  profissional online: ele ainda precisa enviar heartbeat pelo app.
+  profissional online: ele ainda precisa ativar a disponibilidade pelo app.
 - KYC e decidido na fila `Compliance / KYC` ou no controle do detalhe do
   participante, sempre sobre um envio de documentos existente e com
   justificativa. A decisao sincroniza o status KYC de lojista e vendedor.
@@ -2574,12 +2585,10 @@ quando configurou `horarios_funcionamento`, dentro da janela semanal no fuso
 `America/Sao_Paulo`. Loja que ainda nao configurou horarios preserva o
 comportamento legado: a chave manual de abertura decide.
 
-Prestadores e motoboys nao ficam mais online para sempre. O app envia
-`POST /api/app/service-chats/seller-services/heartbeat` somente em primeiro
-plano, ao abrir e a cada 45 segundos. A disponibilidade expira depois de
-`SERVICE_AVAILABILITY_TIMEOUT_SECONDS` (padrao: 120 segundos); busca,
-chamada, aceite e listas ignoram presenca vencida. O endpoint possui limite
-proprio por usuario.
+Atualizado em 2026-10-04: prestadores e motoboys permanecem disponiveis ate
+pausa manual ou bloqueio, mesmo com o app fechado. Heartbeat de versoes antigas
+continua aceito, mas timestamp/timeout nao decide a disponibilidade. Busca,
+chamada, aceite e equipe continuam validando elegibilidade e ocupacao.
 
 Criar atendimento direto agora usa lock consultivo PostgreSQL e indice unico
 parcial para uma conversa ativa por cliente e servico. Dois cliques ou duas

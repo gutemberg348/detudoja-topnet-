@@ -1,4 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useFeedback } from "../components/FeedbackProvider";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { AppButton } from "../components/AppButton";
@@ -18,6 +19,7 @@ import { resolveMediaUrl } from "../utils/media";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
 
 export function StoreCourierTeamScreen({ navigation, route }) {
+  const { notify } = useFeedback();
   const { session } = useAuthStore();
   const store = route.params?.store;
   const [adding, setAdding] = useState(false);
@@ -84,6 +86,7 @@ export function StoreCourierTeamScreen({ navigation, route }) {
         return [...remaining, response.member];
       });
       setPhone("");
+      notify("Profissional adicionado", `${response.member.courier.displayName} está na equipe de corridas da loja.`);
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel adicionar o profissional.");
     } finally {
@@ -115,6 +118,7 @@ export function StoreCourierTeamScreen({ navigation, route }) {
     setError("");
     try {
       await removeStoreCourier(session.accessToken, store.id, member.id);
+      notify("Profissional removido", `${member.courier.displayName} foi removido da equipe desta loja.`);
       setMembers((current) => current.filter((item) => item.id !== member.id));
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel remover o profissional.");

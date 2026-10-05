@@ -385,7 +385,9 @@ export async function createCourierRequest(userId, storeId, data) {
     emitCourierRequestCreated({ request, targetUserIds: targetUsers });
     void sendExpoPushToUsers({
       body: `Uma chamada de ${type.nome} esta aguardando o primeiro aceite.`,
-      data: { requestId: request.id, screen: "ServiceDesk", type: "courier_request" },
+      channelId: "courier-calls",
+      expiresAt: request.expiresAt,
+      data: { expiresAt: request.expiresAt, requestId: request.id, screen: "ServiceDesk", type: "courier_request" },
       title: `${type.nome}: nova chamada`,
       userIds: targetUsers,
     });
@@ -437,7 +439,9 @@ export async function createCustomerCourierRequest(userId, data) {
     emitCourierRequestCreated({ request, targetUserIds });
     void sendExpoPushToUsers({
       body: `Uma chamada de ${type.nome} na sua cidade esta aguardando o primeiro aceite.`,
-      data: { requestId: request.id, screen: "ServiceDesk", type: "courier_request" },
+      channelId: "courier-calls",
+      expiresAt: request.expiresAt,
+      data: { expiresAt: request.expiresAt, requestId: request.id, screen: "ServiceDesk", type: "courier_request" },
       title: `${type.nome}: nova chamada`,
       userIds: targetUserIds,
     });
@@ -638,6 +642,13 @@ export async function acceptCourierRequest(userId, requestId) {
     return repository.updateCourierRequest({ include: requestInclude, data: { conversa_servico_id: conversation.id }, where: { id } });
   });
   const response = await getServiceConversation(userId, result.conversa_servico_id);
+  void sendExpoPushToUsers({
+    title: "Sua corrida foi aceita",
+    body: "O profissional aceitou sua chamada. Abra a conversa para combinar os detalhes.",
+    channelId: "messages",
+    data: { screen: "ServiceConversation", conversationId: result.conversa_servico_id, reason: "courier-request-accepted" },
+    userIds: [original.solicitante_usuario_id],
+  });
   const candidates = original.tipo_chamada === "PLATAFORMA"
     ? await onlineCandidates(
         original.loja?.endereco ?? original.solicitante.enderecos[0],

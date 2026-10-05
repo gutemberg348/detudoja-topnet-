@@ -1,4 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useFeedback } from "../components/FeedbackProvider";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { AppInput } from "../components/AppInput";
@@ -27,6 +28,7 @@ function suggestionLabel(address) {
 }
 
 export function StoreCourierRequestScreen({ navigation, route }) {
+  const { notify } = useFeedback();
   const { session } = useAuthStore();
   const store = route.params?.store;
   const [description, setDescription] = useState("");
@@ -139,6 +141,7 @@ export function StoreCourierRequestScreen({ navigation, route }) {
         ...(teamMemberId ? { teamMemberId } : {}),
       });
       setDispatch((current) => ({ ...current, currentRequest: response.request }));
+      notify("Chamada enviada", "Estamos aguardando um profissional aceitar. Você pode acompanhar por aqui.", "info");
     } catch (requestError) { setError(requestError.message ?? `Nao foi possivel chamar ${serviceName.toLowerCase()}.`); }
     finally { setSaving(false); }
   }
@@ -146,7 +149,11 @@ export function StoreCourierRequestScreen({ navigation, route }) {
   async function cancel() {
     if (!dispatch.currentRequest || saving) return;
     setSaving(true);
-    try { await cancelCourierRequest(session.accessToken, dispatch.currentRequest.id); await load({ silent: true }); }
+    try {
+      await cancelCourierRequest(session.accessToken, dispatch.currentRequest.id);
+      notify("Chamada cancelada", "A busca por um profissional foi encerrada.");
+      await load({ silent: true });
+    }
     catch (requestError) { setError(requestError.message ?? "Nao foi possivel cancelar a chamada."); }
     finally { setSaving(false); }
   }

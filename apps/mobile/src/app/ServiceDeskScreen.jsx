@@ -1,7 +1,10 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, Vibration, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { PageHeader } from "../components/PageHeader";
+import { NotificationReadinessCard } from "../components/NotificationReadinessCard";
+import { useFeedback } from "../components/FeedbackProvider";
+import { serviceRegistrationFeedback } from "../utils/action-feedback";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { StatePanel } from "../components/StatePanel";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
@@ -43,6 +46,7 @@ function conversationStatus(conversation) {
 }
 
 export function ServiceDeskScreen({ navigation }) {
+  const { notify } = useFeedback();
   const { session } = useAuthStore();
   const [conversations, setConversations] = useState([]);
   const [accountAddress, setAccountAddress] = useState(null);
@@ -144,16 +148,6 @@ export function ServiceDeskScreen({ navigation }) {
     return () => clearTimeout(timer);
   }, [courierRequests, load]);
 
-  useEffect(() => {
-    if (!courierRequests.length || Platform.OS === "web") return undefined;
-    Vibration.vibrate([0, 180, 110, 220]);
-    const timer = setInterval(() => Vibration.vibrate([0, 180, 110, 220]), 8000);
-    return () => {
-      clearInterval(timer);
-      Vibration.cancel();
-    };
-  }, [courierRequests.length]);
-
   useLiveRefresh({ accessToken: session?.accessToken,
     events: [realtimeEvents.serviceChatCreated, realtimeEvents.serviceChatMessageCreated,
       realtimeEvents.serviceAvailabilityUpdated, realtimeEvents.serviceChatUpdated,
@@ -184,6 +178,9 @@ export function ServiceDeskScreen({ navigation }) {
       setServices((current) => current.map((item) => (
         item.id === service.id ? { ...item, available: !item.available, enabled: true } : item
       )));
+      notify(service.available ? "Serviço pausado" : "Você está disponível", service.available
+        ? `Você deixou de receber novos chamados de ${service.name}.`
+        : `Sua disponibilidade para ${service.name} foi ativada.`);
       await load({ silent: true });
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel atualizar a disponibilidade.");
@@ -221,6 +218,9 @@ export function ServiceDeskScreen({ navigation }) {
           serviceTypeId: service.id,
         });
       }
+      notify(available ? "Disponibilidade ativada" : "Atendimentos pausados", available
+        ? "Sua disponibilidade continua ativa ao sair do app. Confira as notificações para receber os chamados."
+        : "Você deixou de receber novos chamados. Os atendimentos em andamento continuam.");
     } catch (requestError) {
       setAvailabilityError(requestError.message ?? "Nao foi possivel atualizar sua disponibilidade.");
     } finally {
@@ -248,6 +248,7 @@ export function ServiceDeskScreen({ navigation }) {
     setError("");
     try {
       await updateSellerService(session.accessToken, { available: true, serviceTypeId: service.id });
+      notify("Serviço cadastrado", `${service.name} foi adicionado aos seus serviços, com disponibilidade ativada.`);
       await load({ silent: true });
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel cadastrar este servico.");
@@ -268,6 +269,7 @@ export function ServiceDeskScreen({ navigation }) {
         serviceTypeId: service.id,
       });
       setFixedPriceService(null);
+      notify(service.enabled ? "Preço atualizado" : "Serviço cadastrado", `${service.name}: ${formatarDinheiro(priceCents)}. Seu novo preço foi salvo.`);
       await load({ silent: true });
     } catch (requestError) {
       setFixedPriceError(requestError.message ?? "Nao foi possivel salvar o preco do servico.");
@@ -281,8 +283,9 @@ export function ServiceDeskScreen({ navigation }) {
     setRegisteringService(true);
     setRegisterServiceError("");
     try {
-      await registerSellerService(session.accessToken, data);
+      const response = await registerSellerService(session.accessToken, data);
       setRegisterServiceOpen(false);
+      notify(...serviceRegistrationFeedback(response.service, data));
       await load({ silent: true });
     } catch (requestError) {
       setRegisterServiceError(requestError.message ?? "Nao foi possivel cadastrar este servico.");
@@ -333,6 +336,9 @@ export function ServiceDeskScreen({ navigation }) {
 
       setPendingCourierService(null);
       setCourierModalOpen(false);
+      notify(pendingCourierService ? "Serviço cadastrado" : "Cadastro de transporte salvo", pendingCourierService
+        ? `${pendingCourierService.name} foi adicionado, com disponibilidade ativada.`
+        : "Os dados do seu veículo e cadastro foram atualizados.");
       await load({ silent: true });
     } catch (requestError) {
       setCourierError(requestError.message ?? "Nao foi possivel salvar o cadastro de transporte.");
@@ -348,6 +354,9 @@ export function ServiceDeskScreen({ navigation }) {
     try {
       const response = await updateCourierDispatchScope(session.accessToken, acceptsPlatformCalls);
       setCourierProfile(response.profile);
+      notify("Preferência salva", acceptsPlatformCalls
+        ? "Você poderá receber chamadas gerais quando estiver disponível."
+        : "Você receberá apenas as chamadas permitidas para sua equipe.");
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel atualizar onde voce recebe chamadas.");
     } finally {
@@ -362,6 +371,7 @@ export function ServiceDeskScreen({ navigation }) {
     try {
       const response = await acceptCourierRequest(session.accessToken, request.id);
       setCourierRequests((current) => current.filter((item) => item.id !== request.id));
+      notify("Chamada aceita", "O chat está pronto para combinar os detalhes do atendimento.");
       navigation.navigate("ServiceConversation", { conversation: response.conversation });
     } catch (requestError) {
       setError(requestError.message ?? "Esta chamada nao esta mais disponivel.");
@@ -456,6 +466,8 @@ export function ServiceDeskScreen({ navigation }) {
             </View>
           ) : null}
           {availabilityError ? <Text style={styles.mainAvailabilityError}>{availabilityError}</Text> : null}
+          <Text style={styles.availabilityExplanation}>Você continua disponível ao sair do app ou bloquear o celular. Pause as atividades quando não puder atender.</Text>
+          <NotificationReadinessCard />
 
           {hasRegisteredServices ? (
             <MoreServicesPanel
@@ -951,6 +963,7 @@ function CourierDispatchScope({ acceptsPlatformCalls, canUseTeamOnly, isBusy, is
 }
 
 const styles = StyleSheet.create({
+  availabilityExplanation: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: 13, lineHeight: 20 },
   availabilityBadge: { borderRadius: radius.round, paddingHorizontal: spacing.sm, paddingVertical: 4, backgroundColor: colors.cardMuted },
   availabilityBadgeOnline: { backgroundColor: colors.primarySoft },
   availabilityBadgeText: { color: colors.textSecondary, fontFamily: fonts.bold, fontSize: 11 },

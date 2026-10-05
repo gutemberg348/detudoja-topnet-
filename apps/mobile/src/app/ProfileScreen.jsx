@@ -1,4 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { NotificationReadinessCard } from "../components/NotificationReadinessCard";
+import { useFeedback } from "../components/FeedbackProvider";
 import * as ImagePicker from "expo-image-picker";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { useCallback, useEffect, useState } from "react";
@@ -15,6 +17,8 @@ import { AppButton } from "../components/AppButton";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { ProfileEditModal } from "./profile/ProfileEditModal";
 import { useRealtimeOrders } from "../hooks/useRealtimeOrders";
+import { useCachedQuery } from "../hooks/useCachedQuery";
+import { readCache, readQueryKey } from "../services/read-cache";
 import { getCustomerOrders } from "../services/orders.api";
 import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import { getServiceConversations } from "../services/service-chats.api";
@@ -91,6 +95,7 @@ function countUnreadCustomerMessages(orders) {
 }
 
 export function ProfileScreen({ navigation }) {
+  const { notify } = useFeedback();
   const { logout, session, updateSessionUser } = useAuthStore();
   const isFocused = useIsFocused();
   const wallet = useWalletStore();
@@ -98,7 +103,6 @@ export function ProfileScreen({ navigation }) {
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState({});
-  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isPhotoSaving, setIsPhotoSaving] = useState(false);
   const [name, setName] = useState("");
@@ -117,31 +121,26 @@ export function ProfileScreen({ navigation }) {
   const [unreadServiceCount, setUnreadServiceCount] = useState(0);
   const [unreadStoreChatCount, setUnreadStoreChatCount] = useState(0);
   const [phone, setPhone] = useState("");
-  const [profile, setProfile] = useState(null);
   const [workProfile, setWorkProfile] = useState({ invitations: [], workplaces: [] });
+  const profileKey = session?.user?.id ? readQueryKey("profile", session.user.id) : null;
+  const profileQuery = useCachedQuery({
+    key: profileKey,
+    enabled: isFocused && Boolean(session?.accessToken),
+    load: () => getCurrentUser(session.accessToken),
+    requestVersion: session?.accessToken,
+  });
+  const profile = profileQuery.data?.user ?? null;
+  const isLoading = profileQuery.isLoading;
+  const setProfile = (user) => readCache.set(profileKey, { user });
+  const loadProfile = useCallback(() => profileQuery.refresh().catch(() => {}), [profileQuery.refresh]);
 
-  const loadProfile = useCallback(async () => {
-    if (!session?.accessToken) {
-      return;
+  useEffect(() => {
+    if (!profile) return;
+    if (!editing) fillForm(profile);
+    if (readCache.isFresh(profileKey, 30000)) {
+      updateSessionUser({ kycLevel: profile.kycLevel, kycStatus: profile.kycStatus });
     }
-
-    setError("");
-    setIsLoading(true);
-
-    try {
-      const response = await getCurrentUser(session.accessToken);
-      setProfile(response.user);
-      fillForm(response.user);
-      updateSessionUser({
-        kycLevel: response.user.kycLevel,
-        kycStatus: response.user.kycStatus,
-      });
-    } catch (requestError) {
-      setError(requestError.message ?? "Nao foi possivel carregar o perfil.");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [session?.accessToken]);
+  }, [editing, profile, profileKey, updateSessionUser]);
 
   const loadOrders = useCallback(async () => {
     if (!session?.accessToken) {
@@ -213,12 +212,11 @@ export function ProfileScreen({ navigation }) {
 
   useFocusEffect(
     useCallback(() => {
-      loadProfile();
       loadOrders();
       loadServices();
       loadStoreChats();
       loadWorkProfile();
-    }, [loadOrders, loadProfile, loadServices, loadStoreChats, loadWorkProfile]),
+    }, [loadOrders, loadServices, loadStoreChats, loadWorkProfile]),
   );
 
   const handleRealtimeOrder = useCallback(() => {
@@ -227,6 +225,7 @@ export function ProfileScreen({ navigation }) {
 
   useRealtimeOrders({
     accessToken: session?.accessToken,
+    active: isFocused,
     onMessageEvent: handleRealtimeOrder,
     onOrderEvent: handleRealtimeOrder,
   });
@@ -339,6 +338,7 @@ export function ProfileScreen({ navigation }) {
         phone: response.user.phone,
       });
       setEditing(false);
+      notify("Perfil atualizado", "Seu nome, contato e endereço foram salvos.");
     } catch (requestError) {
       if (requestError instanceof ApiError && requestError.status === 409) {
         setError(requestError.message);
@@ -373,6 +373,7 @@ export function ProfileScreen({ navigation }) {
       const response = await updateCurrentUserPhoto(session.accessToken, photo);
       setProfile(response.user);
       updateSessionUser({ photoUrl: response.user.photoUrl });
+      notify("Foto atualizada", "Sua nova foto de perfil foi salva.");
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel atualizar sua foto.");
     } finally {
@@ -397,7 +398,7 @@ export function ProfileScreen({ navigation }) {
           name="person-circle-outline"
           size={38}
         />
-        <Text style={styles.errorText}>{error}</Text>
+        <Text style={styles.errorText}>{error || profileQuery.error?.message || "Nao foi possivel carregar o perfil."}</Text>
         <AppButton onPress={loadProfile} title="Tentar novamente" />
       </View>
     );
@@ -448,6 +449,7 @@ export function ProfileScreen({ navigation }) {
       } else {
         await declineStoreStaffInvitation(session.accessToken, invitation.id);
         await loadWorkProfile();
+        notify("Convite recusado", "Você não foi adicionado à equipe desta loja.");
       }
     } catch (requestError) {
       Alert.alert("Nao foi possivel concluir", requestError.message ?? "Tente novamente.");
@@ -541,6 +543,8 @@ export function ProfileScreen({ navigation }) {
         onPhotoPress={chooseProfilePhoto}
         profile={profile}
       />
+
+      <NotificationReadinessCard />
 
       <WorkProfilePanel
         invitations={workProfile.invitations ?? []}

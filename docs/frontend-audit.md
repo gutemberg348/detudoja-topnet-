@@ -1,6 +1,40 @@
 # Auditoria Frontend Mobile
 
-Ultima atualizacao: 2026-08-10.
+Ultima atualizacao: 2026-10-04.
+
+## Correcao da busca no iPhone (2026-10-04)
+
+A busca em Modal passou a ter seu proprio `SafeAreaProvider`, para o campo e
+o X respeitarem a area de status e as laterais do dispositivo. Setas e bolinhas
+do carrossel foram removidas, mantendo paginas completas de tres/quatro
+contatos e centralizacao do ultimo grupo. Exports iOS/Android e sete testes
+pertinentes aprovados; ensaio no Chrome verifica oito larguras/insets com
+adaptadores simulados. A renderizacao nativa ainda precisa de conferencia.
+
+## Revisao de retorno das acoes e conversas recentes (2026-10-03)
+
+A revisao encontrou falta de confirmacao depois de mutacoes bem-sucedidas em
+servicos, transporte, lojas/produtos, perfil, equipes, pedidos e saques. Esses
+fluxos agora usam avisos contextuais compartilhados; recarga, pagamento,
+checkout, KYC, copia e convites ja possuíam retorno proprio e foram preservados.
+Falhas continuam nos formularios, sem emitir sucesso antes da resposta da API.
+Saques pendentes/conciliacao e devolucoes nao sao anunciados como liquidados.
+
+O carrossel de conversas da pesquisa tinha itens de largura fixa e mostrava
+o proximo contato cortado. Foi trocado por paginas medidas de tres/quatro
+contatos inteiros e centralizados, inclusive a ultima pagina incompleta.
+A rolagem lateral encaixa paginas completas, sem setas ou bolinhas.
+Na Home, a busca agora abre em tela cheia, com campo e X fixos no topo e
+sugestoes na area restante. Tirar foco/recolher teclado nao fecha o modo;
+fechar pelo X restaura a Home e selecionar um resultado mantem seu destino.
+
+Validacao local: 52 testes mobile e exports iOS/Android aprovados. Ensaio
+isolado dos componentes no Chrome conferiu paginas, selecao de contato e
+ciclo dos avisos (fechamento, substituicao, expiracao e troca de conta), com
+adaptadores nativos simulados. Resta conferir a interface em Android/iPhone
+reais com safe area, teclado e modais nativos.
+Esta etapa nao altera API nem banco. As secoes seguintes registram a auditoria
+anterior, de 2026-08-10.
 
 ## Escopo
 

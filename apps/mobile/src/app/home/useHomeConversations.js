@@ -150,7 +150,7 @@ export function useHomeConversations(accessToken) {
     };
   }, [accessToken, load, loadSellerServices]));
 
-  useLiveRefresh({ accessToken, intervalMs: 0,
+  useLiveRefresh({ accessToken, intervalMs: 0, refreshOnFocus: false,
     onRefresh: () => { load(); loadSellerServices(); } });
 
   useEffect(() => {

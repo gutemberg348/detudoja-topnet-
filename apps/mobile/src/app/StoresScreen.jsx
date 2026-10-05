@@ -1,5 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useIsFocused } from "@react-navigation/native";
+import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -18,6 +19,8 @@ import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { StatePanel } from "../components/StatePanel";
 import { StoreCard } from "../components/StoreCard";
 import { useMarketplaceSuggestions } from "../hooks/useMarketplaceSuggestions";
+import { useCachedQuery } from "../hooks/useCachedQuery";
+import { marketplaceKey, marketplaceLocationKey, useMarketplaceLocation, usePrefetchMarketplace } from "../hooks/useMarketplaceData";
 import {
   getMarketplaceCategories,
   getMarketplaceProducts,
@@ -25,7 +28,8 @@ import {
 } from "../services/marketplace.api";
 import { realtimeEvents } from "../services/realtime";
 import { getServiceTypes } from "../services/service-chats.api";
-import { getCurrentUserAddresses, updateCurrentUser } from "../services/users.api";
+import { updateCurrentUser } from "../services/users.api";
+import { readCache } from "../services/read-cache";
 import { useAuthStore } from "../stores/useAuthStore";
 import { resolveMediaUrl } from "../utils/media";
 import { matchesSearchText, normalizeSearchText, serviceSearchScore } from "../utils/search";
@@ -40,6 +44,7 @@ import {
 
 const SERVICES_CATEGORY_ID = "__servicos__";
 const RESULT_MODES = ["stores", "products", "services"];
+const EMPTY_ITEMS = [];
 
 function initialResultMode(route) {
   if (route.params?.category === SERVICES_CATEGORY_ID) return "services";
@@ -48,23 +53,59 @@ function initialResultMode(route) {
 
 export function StoresScreen({ navigation, route }) {
   const { session } = useAuthStore();
+  const focused = useIsFocused();
   const [category, setCategory] = useState(
     route.params?.category === SERVICES_CATEGORY_ID ? "todas" : route.params?.category ?? "todas",
   );
-  const [categories, setCategories] = useState([]);
-  const [error, setError] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
   const [locationPromptOpen, setLocationPromptOpen] = useState(false);
   const [marketplaceSearch, setMarketplaceSearch] = useState(route.params?.query ?? "");
-  const [marketplaceLocation, setMarketplaceLocation] = useState(null);
-  const [products, setProducts] = useState([]);
   const [resultMode, setResultMode] = useState(() => initialResultMode(route));
   const [searchFocused, setSearchFocused] = useState(false);
-  const [serviceTypes, setServiceTypes] = useState([]);
   const [search, setSearch] = useState(route.params?.query ?? "");
-  const [stores, setStores] = useState([]);
+  const locationQuery = useMarketplaceLocation();
+  const marketplaceLocation = locationQuery.location;
+  const canLoad = focused && Boolean(session?.accessToken && session?.user?.id && marketplaceLocation);
+  const hasMarketplaceSearch = Boolean(marketplaceSearch.trim());
+  const params = { categoryId: category === "todas" ? "" : category, search: marketplaceSearch };
+  const categoriesQuery = useCachedQuery({
+    key: marketplaceLocation ? marketplaceKey("categories", session?.user?.id, marketplaceLocation) : null,
+    enabled: canLoad,
+    load: () => getMarketplaceCategories(session.accessToken),
+    requestVersion: session?.accessToken,
+    staleTimeMs: 60000,
+  });
+  const servicesQuery = useCachedQuery({
+    key: marketplaceLocation ? marketplaceKey("service-types", session?.user?.id, marketplaceLocation) : null,
+    enabled: canLoad,
+    load: () => getServiceTypes(session.accessToken),
+    requestVersion: session?.accessToken,
+    staleTimeMs: 10000,
+  });
+  const storesQuery = useCachedQuery({
+    key: marketplaceLocation ? marketplaceKey("stores", session?.user?.id, marketplaceLocation, params) : null,
+    enabled: canLoad && (hasMarketplaceSearch || resultMode === "stores"),
+    load: () => getMarketplaceStores(session.accessToken, params),
+    requestVersion: session?.accessToken,
+  });
+  const productsQuery = useCachedQuery({
+    key: marketplaceLocation ? marketplaceKey("products", session?.user?.id, marketplaceLocation, params) : null,
+    enabled: canLoad && (hasMarketplaceSearch || resultMode === "products"),
+    load: () => getMarketplaceProducts(session.accessToken, params),
+    requestVersion: session?.accessToken,
+  });
+  const categories = categoriesQuery.data?.categories ?? EMPTY_ITEMS;
+  const serviceTypes = servicesQuery.data?.serviceTypes ?? EMPTY_ITEMS;
+  const stores = storesQuery.data?.stores ?? EMPTY_ITEMS;
+  const products = productsQuery.data?.products ?? EMPTY_ITEMS;
+  usePrefetchMarketplace(marketplaceLocation, {
+    categoryId: params.categoryId,
+    resultMode: resultMode === "stores" ? "products" : "stores",
+    ready: !search.trim() && !searchFocused && (
+      (resultMode === "stores" && storesQuery.hasData) || (resultMode === "products" && productsQuery.hasData)
+    ),
+  });
   const { isLoading: suggestionsLoading, suggestions } = useMarketplaceSuggestions(session?.accessToken, search, {
-    enabled: Boolean(marketplaceLocation) && searchFocused,
+    enabled: focused && Boolean(marketplaceLocation) && searchFocused,
     limit: 12,
     minimumCharacters: 2,
     scope: marketplaceLocation
@@ -73,7 +114,6 @@ export function StoresScreen({ navigation, route }) {
     showInitial: true,
   });
   const hasSearch = Boolean(search.trim());
-  const hasMarketplaceSearch = Boolean(marketplaceSearch.trim());
   const regularCategories = useMemo(
     () => categories.filter((item) => !isServiceStoreCategory(item)),
     [categories],
@@ -114,71 +154,27 @@ export function StoresScreen({ navigation, route }) {
   const showServiceResults = hasSearch || resultMode === "services";
   const showStoreResults = hasSearch || resultMode === "stores";
   const showProductResults = hasSearch || resultMode === "products";
+  const storesLoading = locationQuery.isLoading || storesQuery.isLoading;
+  const productsLoading = locationQuery.isLoading || productsQuery.isLoading;
+  const servicesLoading = locationQuery.isLoading || servicesQuery.isLoading;
+  const isDebouncing = search !== marketplaceSearch;
+  const isLoading = (showStoreResults && storesLoading)
+    || (showProductResults && productsLoading) || (showServiceResults && servicesLoading);
+  const error = storesQuery.error || productsQuery.error || servicesQuery.error;
   const hasAnySearchResult = Boolean(
     matchingCategories.length || matchingServiceTypes.length || visibleStores.length || products.length,
   );
   const showGlobalEmptySearch = hasSearch
     && !isLoading
+    && !isDebouncing
     && !error
     && !hasAnySearchResult;
 
   useEffect(() => {
-    if (!session?.accessToken || !marketplaceLocation) return undefined;
-    let active = true;
-
-    void Promise.allSettled([
-      getMarketplaceCategories(session.accessToken),
-      getServiceTypes(session.accessToken),
-    ]).then(([categoriesResult, servicesResult]) => {
-      if (!active) return;
-      if (categoriesResult.status === "fulfilled") {
-        setCategories(categoriesResult.value.categories ?? []);
-      }
-      if (servicesResult.status === "fulfilled") {
-        setServiceTypes(servicesResult.value.serviceTypes ?? []);
-      }
-    });
-
-    return () => { active = false; };
-  }, [session?.accessToken, marketplaceLocation?.city, marketplaceLocation?.state]);
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadLocation() {
-      if (!session?.accessToken) return;
-
-      try {
-        const response = await getCurrentUserAddresses(session.accessToken);
-        const address = (response.addresses ?? []).find(
-          (item) => item.cidade && item.estado,
-        );
-        const savedLocation = response.marketplaceLocation;
-
-        if (!active) return;
-
-        if (savedLocation) {
-          setMarketplaceLocation(savedLocation);
-        } else if (address) {
-          setMarketplaceLocation({ city: address.cidade, state: address.estado });
-        } else {
-          setLocationPromptOpen(true);
-          setIsLoading(false);
-        }
-      } catch {
-        if (active) {
-          setLocationPromptOpen(true);
-          setIsLoading(false);
-        }
-      }
+    if (focused && !marketplaceLocation && (locationQuery.hasData || locationQuery.error)) {
+      setLocationPromptOpen(true);
     }
-
-    loadLocation();
-
-    return () => {
-      active = false;
-    };
-  }, [session?.accessToken]);
+  }, [focused, locationQuery.error, locationQuery.hasData, marketplaceLocation]);
 
   useEffect(() => {
     if (route.params?.category) {
@@ -208,78 +204,23 @@ export function StoresScreen({ navigation, route }) {
   }, [route.params?.query]);
 
   useEffect(() => {
-    setIsLoading(true);
     const timeout = setTimeout(() => setMarketplaceSearch(search), 280);
     return () => clearTimeout(timeout);
   }, [search]);
 
-  useEffect(() => {
-    let active = true;
-
-    async function loadMarketplace() {
-      if (!session?.accessToken || !marketplaceLocation) {
-        setIsLoading(false);
-        return;
-      }
-
-      setError("");
-      setIsLoading(true);
-
-      try {
-        const [storesResponse, productsResponse] = await Promise.all([
-          !hasMarketplaceSearch && resultMode !== "stores"
-            ? Promise.resolve({ stores: [] })
-            : getMarketplaceStores(session.accessToken, {
-                categoryId: category === "todas" ? "" : category,
-                search: marketplaceSearch,
-              }),
-          !hasMarketplaceSearch && resultMode !== "products"
-            ? Promise.resolve({ products: [] })
-            : getMarketplaceProducts(session.accessToken, {
-                categoryId: category === "todas" ? "" : category,
-                search: marketplaceSearch,
-              }),
-        ]);
-
-        if (!active) {
-          return;
-        }
-
-        setStores(storesResponse.stores ?? []);
-        setProducts(productsResponse.products ?? []);
-      } catch (requestError) {
-        if (active) {
-          setError(requestError.message ?? "Nao foi possivel carregar as lojas.");
-        }
-      } finally {
-        if (active) {
-          setIsLoading(false);
-        }
-      }
-    }
-
-    loadMarketplace();
-
-    return () => {
-      active = false;
-    };
-  }, [category, hasMarketplaceSearch, marketplaceLocation, marketplaceSearch, resultMode, session?.accessToken]);
-
-  const refreshServiceTypes = useCallback(async () => {
-    if (!session?.accessToken) {
-      return;
-    }
-
-    try {
-      const response = await getServiceTypes(session.accessToken);
-      setServiceTypes(response.serviceTypes ?? []);
-    } catch {
-      // A tela continua com o ultimo estado valido caso a conexao oscile.
-    }
-  }, [session?.accessToken]);
-
   useLiveRefresh({ accessToken: session?.accessToken,
-    events: [realtimeEvents.serviceAvailabilityUpdated], onRefresh: refreshServiceTypes });
+    enabled: Boolean(marketplaceLocation),
+    scopeKey: marketplaceLocation ? `${marketplaceLocation.city}|${marketplaceLocation.state}` : "",
+    events: [realtimeEvents.serviceAvailabilityUpdated], onRefresh: servicesQuery.refresh });
+
+  useLiveRefresh({
+    accessToken: session?.accessToken,
+    enabled: canLoad && (showStoreResults || showProductResults),
+    scopeKey: marketplaceLocation ? `${marketplaceLocation.city}|${marketplaceLocation.state}|${category}|${marketplaceSearch}` : "",
+    intervalMs: 30000,
+    refreshOnFocus: false,
+    onRefresh: () => Promise.allSettled([storesQuery.refresh(), productsQuery.refresh()]),
+  });
 
   function openStore(store) {
     navigation.navigate("StoreConversation", { store, storeId: store.id });
@@ -388,7 +329,8 @@ export function StoresScreen({ navigation, route }) {
     if (!session?.accessToken) return;
 
     const response = await updateCurrentUser(session.accessToken, { location });
-    setMarketplaceLocation(response.user.marketplaceLocation ?? location);
+    const key = marketplaceLocationKey(session.user.id);
+    readCache.set(key, { ...readCache.get(key).data, marketplaceLocation: response.user.marketplaceLocation ?? location });
     setLocationPromptOpen(false);
   }
 
@@ -530,8 +472,10 @@ export function StoresScreen({ navigation, route }) {
             </View>
           </View>
 
-          {isLoading && !serviceTypes.length ? (
+          {servicesLoading ? (
             <StatePanel icon="briefcase-outline" loading text="Buscando servicos..." />
+          ) : servicesQuery.error && !servicesQuery.hasData ? (
+            <StatePanel danger icon="alert-circle-outline" text={servicesQuery.error.message} title="Nao foi possivel buscar" />
           ) : matchingServiceTypes.length ? (
             <View style={styles.serviceList}>
               {matchingServiceTypes.map((serviceType) => (
@@ -559,7 +503,7 @@ export function StoresScreen({ navigation, route }) {
             <Text numberOfLines={1} style={styles.sectionSubtitle}>{resultDescription}</Text>
           </View>
           <View style={styles.resultCount}>
-            {isLoading ? (
+            {storesLoading || storesQuery.isRefreshing || isDebouncing ? (
               <ActivityIndicator color={colors.primaryDark} size="small" />
             ) : (
               <Text style={styles.resultCountText}>{visibleStores.length}</Text>
@@ -567,10 +511,10 @@ export function StoresScreen({ navigation, route }) {
           </View>
         </View>
 
-        {isLoading ? (
+        {storesLoading ? (
           <StatePanel icon="storefront-outline" loading text="Buscando lojas..." />
-        ) : error ? (
-          <StatePanel danger icon="alert-circle-outline" text={error} title="Nao foi possivel buscar" />
+        ) : storesQuery.error && !storesQuery.hasData ? (
+          <StatePanel danger icon="alert-circle-outline" text={storesQuery.error.message} title="Nao foi possivel buscar" />
         ) : visibleStores.length ? (
           <View style={styles.storeList}>
             {visibleStores.map((store) => (
@@ -594,7 +538,7 @@ export function StoresScreen({ navigation, route }) {
               <Text numberOfLines={1} style={styles.sectionSubtitle}>{resultDescription}</Text>
             </View>
             <View style={styles.resultCount}>
-              {isLoading ? (
+              {productsLoading || productsQuery.isRefreshing || isDebouncing ? (
                 <ActivityIndicator color={colors.primaryDark} size="small" />
               ) : (
                 <Text style={styles.resultCountText}>{products.length}</Text>
@@ -602,10 +546,10 @@ export function StoresScreen({ navigation, route }) {
             </View>
           </View>
 
-          {isLoading ? (
+          {productsLoading ? (
             <StatePanel icon="cube-outline" loading text="Buscando produtos..." />
-          ) : error ? (
-            <StatePanel danger icon="alert-circle-outline" text={error} title="Nao foi possivel buscar" />
+          ) : productsQuery.error && !productsQuery.hasData ? (
+            <StatePanel danger icon="alert-circle-outline" text={productsQuery.error.message} title="Nao foi possivel buscar" />
           ) : products.length ? (
             <View style={styles.productList}>
               {chunkItems(products, 2).map((row, rowIndex) => (

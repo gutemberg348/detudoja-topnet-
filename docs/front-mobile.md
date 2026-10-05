@@ -1,5 +1,141 @@
 # Front Mobile
 
+## Navegacao e cache de leitura (2026-10-04)
+
+- `Inicio` prepara cidade, lojas e categorias da busca. `Buscar` reaproveita
+  respostas por usuario, cidade/UF, categoria e termo; lojas e produtos carregam
+  independentemente. A lista anterior da mesma consulta permanece visivel
+  durante atualizacoes e falhas temporarias. Mudar cidade/filtro troca a chave,
+  sem mostrar resultados de outro contexto.
+- Cache apenas em memoria, limitado a 100 consultas: lojas/produtos/perfil
+  ficam frescos por 30 s, cidade/categorias por 60 s, sugestoes por 15 s e tipos
+  de servico por 10 s. Segmentos/categorias do vendedor usam 5 min. Logout e
+  nova autenticacao limpam os dados; renovar token da mesma conta preserva as
+  chaves. Escritas relevantes invalidam os recursos envolvidos e respostas
+  anteriores a invalidacao nao podem sobrescrever o estado confirmado.
+  CPF/KYC e mudancas de KYC na sessao tambem invalidam o perfil; uma copia
+  invalidada nao pode reverter o status mais recente da conta.
+- `useCachedQuery` mostra o cache imediatamente e atualiza ao retornar a tela.
+  Busca atualiza listas em segundo plano a cada 30 s e ao retomar o app;
+  disponibilidade mantem eventos Socket.IO e verificacao de 20 s. Autocomplete
+  conserva debounce, mas abrir sugestoes iniciais nao aguarda esse atraso.
+- `apiRequest` compartilha somente GETs simultaneos com token, URL, cabecalhos
+  e timeout iguais. Nao guarda respostas financeiras entre chamadas e nao
+  agrupa POST/PATCH/DELETE. Carteira, pagamentos e comandos continuam buscando
+  o estado atual do servidor.
+- `Vendas` libera o painel quando perfil, segmentos, categorias e conta de
+  recebimento ficam prontos; conversas e historico nao bloqueiam o painel.
+  Atividades/cobrancas ainda nao recebidas mostram seu proprio carregamento,
+  sem apresentar zero/nenhum cadastro como se a resposta ja tivesse chegado.
+  Atualizacoes preservam o conteudo e as telas ocultas de Vendas/Perfil deixam
+  de repetir consultas de pedidos por eventos.
+- A biblioteca de galeria passou a carregar apenas ao salvar no app nativo.
+  Isso corrige a tela Web em branco causada por `ExpoMediaLibraryNext`.
+  Download de imagem no navegador usa Blob; QR nativo usa `Asset.create`,
+  conforme a [API atual do Expo](https://docs.expo.dev/versions/latest/sdk/media-library/).
+- Pronto no codigo: 85 testes mobile e exports Android/iOS/Web. No Edge com
+  viewport 390x844 e respostas simuladas de 3 s, abrir a busca preparada levou
+  66 ms e produtos 44 ms; quatro retornos mantiveram uma unica consulta de
+  lojas. Troca de cidade e falha de revalidacao passaram, sem erro JavaScript.
+  Painel Vendas apareceu em 136 ms com historico/conversas ainda pendentes,
+  mostrando carregamento proprio das listas. KYC refletiu o novo status ao
+  retornar a Perfil mesmo com cache recente.
+  O primeiro carregamento sem cache continua dependendo da rede/API; cache nao persiste
+  apos encerrar o processo. Publicacao e medicao na VPS/aparelhos reais pendentes.
+
+## Disponibilidade e preparo de notificacoes (2026-10-04)
+
+- Sair do app nao desativa os servicos. A central explica que o usuario deve
+  pausar as atividades quando nao puder atender; heartbeat removido de App.js.
+- Perfil e Servicos mostram permissao/cadastro push e oferecem ativacao,
+  ajustes ou teste do proprio aparelho. Cadastro e renovado ao retornar e
+  trocar token, com novas tentativas limitadas em falhas temporarias.
+- Tocar numa notificacao aguarda login/navegacao prontos, confere a conta,
+  consome a resposta inicial e abre conversa/pedido/carteira correto. Chamados
+  vencidos nao recebem selecao automatica. Polling/popup/vibracao global
+  funcionam somente com app ativo; loop duplicado de vibracao da central removido.
+- 62 testes mobile e exports iOS/Android/web aprovados. APNs/FCM, instalacao
+  dos builds e entrega fisica pendentes. Safari/site continua sem Web Push;
+  Expo Go nao e usado para conferir entrega. Guia: [notificacoes.md](notificacoes.md).
+
+## Busca abaixo da barra de status e carrossel sem indicadores (2026-10-04)
+
+- A busca em tela cheia monta `SafeAreaProvider` dentro do proprio Modal.
+  O `SafeAreaView` usa os insets dessa superficie nativa, evitando que campo e
+  X fiquem sob relogio, sinal ou bateria no iPhone. Topo, base e laterais sao
+  medidos pelo dispositivo, inclusive em orientacao horizontal; nao ha altura
+  fixa por modelo. O fundo da area de status acompanha o cabecalho.
+- `RecentConversationsCarousel` nao exibe setas ou bolinhas. Continua com
+  rolagem horizontal por paginas inteiras (`pagingEnabled`), tres contatos
+  abaixo de 400 pontos e quatro a partir de 400, medindo a largura disponivel.
+  Espacamento igual e ultima pagina centralizada foram preservados.
+- Validacao: sete testes de busca/layout/feedback e exports iOS/Android
+  aprovados. Ensaio isolado no Chrome verifica oito combinacoes de largura e
+  insets (320 a 852 pontos, iPhone com recorte, Android, tablet e horizontal),
+  ausencia de indicadores, rolagem com encaixe, grupos inteiros/centralizados
+  e fechamento/selecao/reabertura. A simulacao exige um provider na arvore
+  da propria superficie do Modal, em vez de aceitar apenas contexto React.
+  Insets nativos/API/icones sao simulados; renderizacao e teclado ainda
+  precisam ser conferidos na versao atualizada em aparelhos reais.
+
+## Busca da Home em tela cheia (2026-10-03)
+
+- Ao tocar na busca da Home, `SearchBar` com `fullscreen` abre um Modal que
+  ocupa a tela. O campo fica no topo com foco automatico e um X de 48 pontos
+  para fechar. Safe area e teclado sao considerados na area disponivel.
+- Conversas recentes e sugestoes compartilham a rolagem vertical abaixo do
+  cabecalho fixo. O carrossel conserva tres/quatro contatos inteiros por pagina.
+  Recolher o teclado ou tirar o foco do campo nao fecha as sugestoes.
+- O X e o retorno do sistema fecham a busca, recolhem o teclado e devolvem a
+  Home com a consulta e a posicao anteriores preservadas. Selecionar uma
+  sugestao ou enviar a pesquisa fecha o Modal e usa os destinos existentes.
+  Nenhum resultado exibe orientacao para tentar outro termo.
+- O modo e usado apenas na Home. As buscas internas de lojas continuam com
+  seu comportamento de autocomplete.
+- Validacao: sete testes de busca/layout/feedback e exports iOS/Android
+  aprovados. Ensaio no Chrome com Home, SearchBar e Modal React Native Web
+  reais conferiu foco, tela inteira, tres/quatro contatos, rolagem com X fixo,
+  fechar/reabrir/Escape, estado vazio, selecao de conversa/produto e envio da
+  consulta. API/hooks/safe area foram simulados; teclado e retorno fisico em
+  Android/iPhone ainda precisam de conferencia no aparelho atualizado.
+
+## Conversas recentes centralizadas e confirmacoes de acoes (2026-10-03)
+
+- O bloco de conversas recentes da pesquisa usa `RecentConversationsCarousel`:
+  tres contatos por pagina em areas menores que 400 pontos e quatro nas mais
+  largas, medindo a largura real do bloco. Cada pagina mostra itens inteiros,
+  com espacamento igual; a ultima pagina tambem fica centralizada. A rolagem
+  horizontal tem encaixe, sem indicadores ou botoes (ajuste de 2026-10-04).
+- `FeedbackProvider`/`FeedbackLayer` exibem avisos curtos apos a resposta da API,
+  com titulo, explicacao, botao de fechar e anuncio de acessibilidade. Duram sete
+  segundos, sobrevivem a navegacao e sao limpos ao trocar/sair da conta. Um novo
+  aviso substitui o anterior. O chat de pedido e os modais de vendas/cadastro
+  possuem camada dentro do Modal nativo para as confirmacoes continuarem
+  visiveis inclusive ao avancar para outra etapa do cadastro.
+- Foram revisados servicos/transporte, conversas de servico, Vender, perfil,
+  equipes de atendentes e corridas, chamadas, pedidos do cliente, conversas
+  pessoais e saques. Cadastros, precos, disponibilidade, dados/foto, produtos,
+  permissoes, propostas, conclusao, avaliacao, cancelamento e bloqueio receberam
+  confirmacoes onde antes havia apenas atualizacao de estado/recarregamento.
+- Cadastro de servico informa o nome canonico e a disponibilidade retornados
+  pela API, inclusive quando ela reutiliza um servico existente. Saque apenas
+  diz `Pix enviado` se o status for `PAGO`; pendencia/conciliacao e falhas possuem
+  mensagens diferentes. Cancelamento pago orienta acompanhar a devolucao, sem
+  anunciar estorno concluido antes da confirmacao.
+- Fluxos que ja tinham confirmacao (Pix/recarga, checkout, copia, KYC e convites)
+  mantem seus avisos. Atualizacao automatica, heartbeat e envio de cada mensagem
+  nao geram avisos extras. Erros e validacao continuam nos formularios existentes.
+- Validacao: 52 testes mobile aprovados; exports iOS/Android aprovados. Ensaio
+  isolado no Chrome com componentes React Native Web verificou alinhamento de
+  tres/quatro contatos, ultima pagina, navegacao/selecao, fechamento do aviso,
+  substituicao sem interferencia do timer anterior, expiracao e troca de conta.
+  O chat de pedido tambem foi verificado: montar/fechar o modal ou receber
+  erro da API nao emite sucesso; enviar a proposta com resposta bem-sucedida
+  emite a confirmacao. Adaptadores nativos/API/chat foram simulados no ensaio.
+  Confirmacao em aparelhos
+  reais, especialmente teclado, safe area e transicao de Modal no iPhone,
+  ainda precisa ser feita na versao atualizada do app.
+
 ## Mensagens visiveis com teclado no iPhone (2026-10-02)
 
 - `useChatTimeline` reposiciona o fim da conversa mesmo quando o conteudo cabe
@@ -1437,9 +1573,9 @@ Enquanto aguarda, o prestador ve `Aceitar` e `Recusar`; o cliente ve
 `Cancelar`. Recusar ou cancelar encerra a conversa pendente e remove os badges
 em tempo real, evitando chamados presos quando o prestador nao puder atender.
 
-Essa notificacao depende da conexao Socket.IO ativa. Para avisar com o app
-completamente encerrado sera necessario cadastrar tokens por dispositivo e
-adicionar push nativo com Expo Notifications/FCM/APNs.
+Atualizado em 2026-10-04: Socket.IO e popup atendem primeiro plano; push nativo
+usa tokens por dispositivo e fila com recibos. Instalacao, APNs/FCM e teste
+fisico continuam pendentes. Safari/site nao tem Web Push nesta versao.
 
 ### Central operacional do motoboy (2026-08-24)
 

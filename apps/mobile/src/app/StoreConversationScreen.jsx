@@ -1,4 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useFeedback } from "../components/FeedbackProvider";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -57,6 +58,7 @@ import {
 } from "../utils/theme";
 
 export function StoreConversationScreen({ navigation, route }) {
+  const { notify } = useFeedback();
   const { session } = useAuthStore();
   const {
     addItem,
@@ -457,6 +459,7 @@ export function StoreConversationScreen({ navigation, route }) {
             setError("");
             try {
               await cancelCustomerOrder(session.accessToken, order.id, { refundDestination });
+              notify("Cancelamento registrado", "Confira no pedido o status da devolução do pagamento.", "info");
               await loadCustomerOrders();
             } catch (requestError) {
               setError(requestError.message ?? "Nao foi possivel cancelar o pedido.");

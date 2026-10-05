@@ -1,11 +1,113 @@
 # Codex Handoff - DeTudoJa
 
-Ultima atualizacao: 2026-09-08
+Ultima atualizacao: 2026-10-04
 
 Este arquivo e o resumo principal para qualquer novo Codex continuar o projeto
 sem precisar reconstruir todo o contexto pela conversa. Sempre que uma regra,
 rota, tela, schema, comando ou fluxo importante mudar, atualize este arquivo.
 O indice e a regra completa de documentacao ficam em `docs/README.md`.
+
+## Atualizacao 2026-10-04: demora ao trocar abas
+
+- Causa encontrada: o Redis cacheia correspondencias textuais da busca, mas o
+  mobile refazia as leituras, substituia as listas pelo loading e esperava
+  lojas/produtos juntos. Vendas tambem esperava oito fontes antes de renderizar.
+- `utils/query-cache.js`, `services/read-cache.js` e `hooks/useCachedQuery.js`
+  implementam cache em memoria com TTL de frescor, limite de 100 consultas,
+  assinaturas React, compartilhamento de chamadas concorrentes, invalidacao e
+  protecao contra respostas atrasadas. Chaves incluem usuario/cidade/filtro;
+  login/logout limpam cache, refresh da mesma conta nao.
+- Cidade e prefetch do marketplace ficam em `hooks/useMarketplaceData.js`.
+  Home prepara a primeira lista; Buscar guarda resultados separados, preaquece
+  o outro modo depois de carregar e revalida em segundo plano. Autocomplete e
+  Perfil usam o mesmo cache; categorias/segmentos do vendedor sao reaproveitados.
+- Cliente HTTP deduplica apenas GET simultaneo, sem cache de respostas de
+  carteira/pagamento e sem deduplicar mutacoes. Escritas de perfil, loja e
+  disponibilidade invalidam as leituras relacionadas. Historico/conversas de
+  Vendas nao seguram o painel; Perfil/Vendas so escutam pedidos quando focados.
+  Listas pendentes de atividades/cobrancas mostram carregamento proprio,
+  evitando contadores zerados ou convite para cadastrar enquanto aguardam.
+- Teste real da entrada Web descobriu importacao nativa de MediaLibrary que
+  deixava a pagina vazia. ChatAttachment e StorePermanentQrScreen carregam a
+  galeria sob demanda; QR usa Asset.create e imagem Web baixa Blob autenticado.
+- CPF/KYC e alteracao de KYC em sessao/refresh invalidam Perfil para nao
+  atrasar verificacao nem reverter status com uma copia antiga.
+- Validacao automatizada: 85 testes mobile e exports Android/iOS/Web. Browser
+  Edge 390x844, API simulada de 3 s: busca preparada 66 ms, produtos 44 ms,
+  Vendas 136 ms com historico pendente; quatro retornos nao repetiram a leitura
+  de lojas. Cidade/falha temporaria/Perfil/KYC/todas as abas passaram sem erro JS.
+  Medicao da VPS e entrega em aparelhos reais ainda nao feitas. Sem nova migration ou
+  mudanca de backend nesta etapa. Regras e limites em `front-mobile.md`.
+
+## Atualizacao 2026-10-04: disponibilidade persistente e notificacoes
+
+- `disponivel_agora` permanece ativo ao suspender/fechar o app, ate pausa
+  manual ou bloqueio. Busca, chamadas e equipe usam a mesma regra; KYC/cidade,
+  elegibilidade e profissional ocupado continuam validados. Heartbeat antigo
+  permanece como endpoint de compatibilidade, sem expirar disponibilidade.
+- `notificacoes_push` e migration `20261004043000_notificacoes_push_fila`
+  adicionam fila persistente, lease, backoff, expiracao e recibos do Expo.
+  Worker inicia com a API quando push habilitado, cancela chamados encerrados
+  e itens de dispositivos transferidos a outra conta, e registra erros.
+  Canais declarados pelo aparelho permitem fallback para builds Android antigos.
+- Chamados usam canais Android proprios; cliente recebe push do aceite da
+  corrida. Perfil/Servicos mostram ativacao, pendencias e teste autenticado
+  do proprio aparelho. Cadastro acompanha retorno/token, tem retry e cancela
+  registro tardio no logout. Toque inicial aguarda login/navegacao e nao repete.
+- Validado: Prisma/schema/client, 66 migrations em PostgreSQL isolado,
+  teste de fila no banco real, 62 testes mobile, exports iOS/Android/web e
+  18 testes API pertinentes e suite completa com 225 aprovados, zero falhas
+  e 12 ignorados pelas condicoes da suite. A integracao da fila rodou no banco isolado.
+  Nenhum push real enviado; banco
+  da aplicacao e VPS nao alterados.
+- Publicacao da API/migration, builds instalados e credenciais APNs/FCM devem
+  ser conferidos para entrega fisica. Safari/site sem Web Push nesta versao.
+  Guia completo e limites: [notificacoes.md](notificacoes.md).
+
+## Atualizacao 2026-10-04: busca respeita area de status e carrossel sem setas
+
+- `SearchBar fullscreen` possui `SafeAreaProvider` dentro do Modal. Campo/X
+  ficam abaixo da area de status e respeitam base/laterais da superficie nativa,
+  sem valores fixos de altura por aparelho. Corrige a sobreposicao no iPhone.
+- Setas e bolinhas removidas de `RecentConversationsCarousel`; rolagem lateral
+  continua por paginas inteiras de tres/quatro contatos centralizados conforme
+  largura real. Ultimo grupo incompleto permanece centralizado.
+- Sete testes pertinentes e exports iOS/Android aprovados. Ensaio no Chrome
+  verifica oito combinacoes de largura/insets, incluindo recortes e horizontal,
+  com adaptadores nativos/API simulados. Conferencia fisica ainda pendente;
+  detalhes em `docs/front-mobile.md`.
+
+## Atualizacao 2026-10-03: busca da Home em tela cheia
+
+- Home usa `SearchBar fullscreen`: tocar abre Modal com campo no topo, foco
+  automatico e X de 48 pontos. Sugestoes ocupam a area restante e rolam abaixo
+  do cabecalho; perder foco/recolher teclado nao fecha o modo de busca.
+- Fechar preserva consulta e posicao da Home. Selecionar conversa, produto,
+  loja, categoria ou servico e enviar pesquisa mantem os destinos existentes.
+  Buscas internas continuam com autocomplete; API/contratos nao mudaram.
+- Sete testes pertinentes, exports iOS/Android e ensaio isolado da Home no
+  Chrome aprovados. Teclado/safe area/retorno em aparelhos reais pendentes;
+  limites e detalhes em `docs/front-mobile.md`.
+
+## Atualizacao 2026-10-03: alinhamento de conversas e avisos amigaveis
+
+- Pesquisa da Home usa paginas de tres/quatro contatos inteiros, de acordo
+  com a largura medida, e centraliza grupos incompletos. Novo componente
+  `RecentConversationsCarousel` com paginas centralizadas e contatos acessiveis;
+  indicadores removidos no ajuste de 2026-10-04.
+- `FeedbackProvider` envolve `AppContent`; `FeedbackLayer` confirma acoes
+  manuais bem-sucedidas com mensagem contextual, sem depender da posicao da
+  rolagem da tela. Chat de pedido e modais de vendas/cadastro montam camada
+  tambem no Modal nativo.
+- Foram adicionadas confirmacoes em servicos, cadastro de transporte,
+  disponibilidade, lojas/produtos, perfil, equipes/permissoes, chamadas,
+  propostas, entrega/conclusao/avaliacao, cancelamentos, apelido/bloqueio e saques.
+- Avisos seguem a resposta da API. Nome de servico usa o nome canonico retornado;
+  saque pago e solicitado/conciliacao nao sao confundidos. Erros existentes e
+  fluxos com confirmacao propria foram preservados. API/schema nao mudaram.
+- Testes: 52/52 mobile, exports iOS/Android e ensaio isolado dos componentes
+  no Chrome aprovados. Detalhes e limites de validacao em `docs/front-mobile.md`;
+  aparelho real ainda precisa ser conferido.
 
 ## Atualizacao 2026-10-02: teste isolado Pix Sicredi na VPS
 
@@ -315,8 +417,8 @@ O indice e a regra completa de documentacao ficam em `docs/README.md`.
   para a Central de Servicos. Badges continuam sincronizados pelos eventos de
   atualizacao.
 - Socket.IO cobre o app aberto ou conectado em segundo plano conforme o SO.
-  Aviso garantido com o app encerrado exige uma etapa futura de push nativo com
-  token por dispositivo (Expo Notifications/FCM/APNs).
+  Atualizado em 2026-10-04: push nativo tem fila persistente, token por aparelho
+  e recibos. Entrega fisica depende de APNs/FCM e permissao; guia notificacoes.md.
 - Validacao: 33 testes da API aprovados, incluindo cidade, equipe, chamada
   publica, clique duplo, aceite concorrente, autorizacao do chat e aceite de
   servico. O export web do Expo tambem concluiu sem erro.
@@ -4193,9 +4295,9 @@ etapa.
 - A loja respeita `horarios_funcionamento` no fuso de Sao Paulo, inclusive
   intervalos que atravessam meia-noite. Sem grade cadastrada, permanece a
   compatibilidade com a abertura manual existente.
-- `servicos_vendedor.disponibilidade_atualizada_em` recebe heartbeat do app em
-  primeiro plano. Depois do timeout configurado, `disponivel_agora = true` nao
-  basta para aparecer ou aceitar chamada.
+- Atualizado em 2026-10-04: `disponivel_agora` e uma escolha persistida, sem
+  depender de heartbeat. O timestamp permanece como historico/compatibilidade;
+  KYC, bloqueios, cidade e ocupacao continuam validados.
 - A criacao de conversa direta usa `pg_advisory_xact_lock` e o indice parcial
   `conversas_servico_cliente_servico_ativas_key`; uma conversa ativa por
   cliente/prestador e uma unica cobranca subsequente.

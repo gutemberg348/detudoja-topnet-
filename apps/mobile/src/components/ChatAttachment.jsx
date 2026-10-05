@@ -1,7 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import { File, Paths } from "expo-file-system";
-import * as MediaLibrary from "expo-media-library";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Animated, Image, Linking, Modal, Platform, Pressable, StatusBar, StyleSheet, Text, View } from "react-native";
@@ -149,6 +148,19 @@ function ImageAttachment({ accessToken, attachment }) {
     if (saving || !media.source?.uri) return;
     setSaving(true);
     try {
+      if (Platform.OS === "web") {
+        const token = await getValidAccessToken(accessToken);
+        const response = await fetch(media.source.uri, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+        if (!response.ok) throw new Error("Nao foi possivel baixar esta imagem.");
+        const url = URL.createObjectURL(await response.blob());
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = attachment.fileName || `foto.${extensionFor(attachment)}`;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        return;
+      }
+      const MediaLibrary = await import("expo-media-library");
       const permission = await MediaLibrary.requestPermissionsAsync(true, ["photo"]);
       if (!permission.granted) throw new Error("Permita salvar fotos para baixar esta imagem.");
       await MediaLibrary.Asset.create(media.source.uri);

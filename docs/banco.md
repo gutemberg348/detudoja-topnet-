@@ -1,6 +1,21 @@
 # Banco de dados - DeTudoJa
 
-Ultima atualizacao: 2026-09-04
+Ultima atualizacao: 2026-10-04
+
+## Fila de notificacoes (2026-10-04)
+
+`NotificacaoPush` / `notificacoes_push` usa UUID para identificar cada envio,
+FKs Int para dispositivo/destinatario, JSONB para conteudo e datas timestamptz
+para tentativa, lease e expiracao. Estados PENDENTE/AGUARDANDO_RECIBO sao
+consultados pelo indice `(status, proxima_tentativa_em)`; indices de destinatario
+e data atendem diagnostico e retencao. CASCADE remove itens ao apagar dispositivo
+ou conta. Envio confere o dono atual do token antes de processar item antigo.
+CONFIRMADA indica recibo do provedor, nao leitura/entrega visivel no aparelho.
+Migration `20261004043000_notificacoes_push_fila` validada em banco isolado;
+aplicacao/VPS pendentes. Regra e operacao: [notificacoes.md](notificacoes.md).
+Essa migration tambem adiciona `dispositivos_push.canais_notificacao` (TEXT[],
+vazio por padrao). O registro nativo informa seus canais; aparelhos legados
+usam fallback para um canal existente ao receber chamados de servico.
 
 Este documento descreve o banco PostgreSQL conforme
 `apps/api/prisma/schema.prisma`. Ele e a referencia para modelagem, consultas,
@@ -12,9 +27,9 @@ deve ser atualizado.
 - Banco: PostgreSQL, acessado pela API com Prisma (`@prisma/client`).
 - Connection string: `DATABASE_URL` em `apps/api/.env`; ela nunca deve ir para
   Git ou para documentacao publica.
-- Todas as 64 tabelas atuais usam `id Int @id @default(autoincrement())`:
-  no PostgreSQL sao chaves primarias inteiras sequenciais. Relacoes usam o
-  mesmo tipo `Int` nas colunas `*_id`.
+- Entidades comerciais usam `id Int @id @default(autoincrement())`, chaves
+  inteiras sequenciais no PostgreSQL e FKs do mesmo tipo. Filas tecnicas como
+  `notificacoes_push` usam UUID para identificar itens independentemente.
 - Valores financeiros usam `BigInt` em centavos. Exemplo: `R$ 37,90` e salvo
   como `3790`; nunca use `float` para dinheiro.
 - Percentuais usam `Decimal(7,4)`. Exemplo: `3.0000` representa 3%.
@@ -799,7 +814,8 @@ uma loja ser exibida.
 
 ## 12. Checklist para uma nova tabela
 
-1. Usar `id Int @id @default(autoincrement())` e nomes `*_id` para FKs.
+1. Usar `id Int @id @default(autoincrement())` nas entidades comerciais e
+   nomes `*_id` para FKs. Filas tecnicas podem usar UUID com justificativa.
 2. Definir explicitamente `onDelete` em toda relacao.
 3. Colocar `@unique`/`@@unique` nas invariantes do negocio; nao confundir com
    `@@index`.
@@ -815,8 +831,8 @@ uma loja ser exibida.
 
 - `servicos_vendedor.disponibilidade_atualizada_em` registra o ultimo
   heartbeat. O indice composto com `disponivel_agora` atende as consultas de
-  busca e despacho; a API considera ativo somente timestamp acima do timeout
-  configurado.
+  historico/compatibilidade. Desde 2026-10-04, disponibilidade segue a escolha
+  persistida `disponivel_agora`, sem expirar por suspensao do app.
 - `conversas_servico_cliente_servico_ativas_key` e um indice unico parcial em
   `(cliente_usuario_id, servico_vendedor_id)` para conversas diretas com status
   `ABERTA`, `ACORDADA` ou `AGUARDANDO_CONFIRMACAO`. Conversas de loja/pedido

@@ -1,4 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useFeedback } from "../components/FeedbackProvider";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -32,6 +33,7 @@ import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils
 const activeStatuses = new Set(["ABERTA", "ACORDADA", "AGUARDANDO_CONFIRMACAO"]);
 
 export function CourierDispatchScreen({ navigation, route }) {
+  const { notify } = useFeedback();
   const { session } = useAuthStore();
   const store = route.params?.store;
   const [conversations, setConversations] = useState([]);
@@ -140,6 +142,7 @@ export function CourierDispatchScreen({ navigation, route }) {
         storeId: store.id,
       });
       setSelectedProvider(null);
+      notify("Solicitação enviada", "Acompanhe a resposta e os detalhes pelo chat.", "info");
       navigation.navigate("ServiceConversation", { conversation: response.conversation });
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel chamar este motoboy.");

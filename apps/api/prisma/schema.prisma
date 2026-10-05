@@ -687,6 +687,7 @@ model Usuario {
   sessoes_autenticacao       SessaoAutenticacao[]
   tokens_recuperacao_senha   TokenRecuperacaoSenha[]
   dispositivos_push          DispositivoPush[]
+  notificacoes_push          NotificacaoPush[]
   auditorias_administrativas AuditoriaAdministrativa[]
   loja_origem_cadastro       Loja?                     @relation("UsuariosCadastroOrigemLoja", fields: [loja_origem_cadastro_id], references: [id], onDelete: SetNull)
 
@@ -705,6 +706,7 @@ model DispositivoPush {
   usuario_id    Int
   token         String   @unique @db.VarChar(255)
   plataforma    String   @db.VarChar(20)
+  canais_notificacao String[] @default([])
   ativo         Boolean  @default(true)
   ultimo_uso_em DateTime @default(now()) @db.Timestamptz(3)
   criado_em     DateTime @default(now()) @db.Timestamptz(3)
@@ -712,9 +714,35 @@ model DispositivoPush {
 
   usuario Usuario @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
 
+  notificacoes NotificacaoPush[]
+
   @@index([usuario_id, ativo])
   @@index([ultimo_uso_em])
   @@map("dispositivos_push")
+}
+
+model NotificacaoPush {
+  id                       String    @id @default(uuid()) @db.Uuid
+  dispositivo_id           Int
+  destinatario_usuario_id   Int
+  conteudo                 Json
+  status                   String    @default("PENDENTE") @db.VarChar(30)
+  tentativas               Int       @default(0)
+  proxima_tentativa_em      DateTime  @default(now()) @db.Timestamptz(3)
+  bloqueado_ate             DateTime? @db.Timestamptz(3)
+  expira_em                DateTime  @db.Timestamptz(3)
+  ticket_id                String?   @db.VarChar(255)
+  ultimo_erro              String?   @db.VarChar(80)
+  criado_em                DateTime  @default(now()) @db.Timestamptz(3)
+  atualizado_em            DateTime  @updatedAt @db.Timestamptz(3)
+
+  dispositivo  DispositivoPush @relation(fields: [dispositivo_id], references: [id], onDelete: Cascade)
+  destinatario Usuario         @relation(fields: [destinatario_usuario_id], references: [id], onDelete: Cascade)
+
+  @@index([status, proxima_tentativa_em])
+  @@index([destinatario_usuario_id, criado_em])
+  @@index([criado_em])
+  @@map("notificacoes_push")
 }
 
 model ConversaPessoal {

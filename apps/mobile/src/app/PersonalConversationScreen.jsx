@@ -1,4 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useFeedback } from "../components/FeedbackProvider";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { mergeConversationSnapshot } from "../utils/live-refresh";
 import { useFocusEffect } from "@react-navigation/native";
@@ -40,6 +41,7 @@ import { useAuthStore } from "../stores/useAuthStore";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
 
 export function PersonalConversationScreen({ navigation, route }) {
+  const { notify } = useFeedback();
   const { session } = useAuthStore();
   const insets = useSafeAreaInsets();
   const initialConversation = route.params?.conversation;
@@ -187,6 +189,7 @@ export function PersonalConversationScreen({ navigation, route }) {
       );
       setConversation((current) => ({ ...current, ...response.conversation }));
       setAliasOpen(false);
+      notify("Nome salvo", "Esse nome aparece somente para você.");
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -210,6 +213,7 @@ export function PersonalConversationScreen({ navigation, route }) {
                 conversationId,
               );
               navigation.goBack();
+              notify("Contato bloqueado", "Essa pessoa não poderá continuar a conversa com você.");
             } catch (requestError) {
               setError(requestError.message);
             } finally {

@@ -1,4 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useFeedback } from "../components/FeedbackProvider";
 import { useIsFocused, useNavigation } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -29,6 +30,7 @@ import {
   countNewStoreOrders as countNewStoreOrdersValue,
   formatCep as formatCepValue,
   formatPhone as formatPhoneValue,
+  formatOrderStatus as formatOrderStatusValue,
   parseEstimatedTimeToMinutes as parseEstimatedTimeToMinutesValue,
   parseMoneyToCents as parseMoneyToCentsValue,
   splitEstimatedTime as splitEstimatedTimeValue,
@@ -88,6 +90,7 @@ import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import { updateCurrentUser } from "../services/users.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { ApiError } from "../services/api";
+import { readCache, readQueryKey } from "../services/read-cache";
 import { colors } from "../utils/theme";
 
 const activeServiceConversationStatuses = new Set([
@@ -101,6 +104,7 @@ function countNewStoreOrders(store) {
 }
 
 export function SellScreen() {
+  const { notify } = useFeedback();
   const navigation = useNavigation();
   const isFocused = useIsFocused();
   const { session } = useAuthStore();
@@ -109,6 +113,8 @@ export function SellScreen() {
   const [storeChargeOpen, setStoreChargeOpen] = useState(false);
   const [error, setError] = useState("");
   const [generatedCharges, setGeneratedCharges] = useState([]);
+  const [chargesStatus, setChargesStatus] = useState("loading");
+  const [servicesStatus, setServicesStatus] = useState("loading");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [mediaForm, setMediaForm] = useState(initialStoreMediaForm);
@@ -149,6 +155,10 @@ export function SellScreen() {
   const guideCheckedUserRef = useRef(null);
   const storeChatRefreshTimerRef = useRef(null);
   const serviceRefreshVersionRef = useRef(0);
+  const sellerLoadVersionRef = useRef(0);
+  const sellerLoadedRef = useRef(false);
+  const chargesLoadedRef = useRef(false);
+  const servicesLoadedRef = useRef(false);
 
   const autonomousSegment = useMemo(
     () => segments.find((segment) => segment.slug === "venda-autonoma"),
@@ -180,39 +190,60 @@ export function SellScreen() {
     }
 
     const servicesVersion = ++serviceRefreshVersionRef.current;
-    try {
-      const [segmentsResponse, categoriesResponse, profileResponse, chargesResponse, servicesResponse, conversationsResponse, storeConversationsResponse, payoutResponse] = await Promise.all([
-        getSellerSegments(session.accessToken),
-        getSellerStoreCategories(session.accessToken),
-        getSellerProfile(session.accessToken),
-        getGeneratedCharges(session.accessToken),
-        getSellerServices(session.accessToken),
-        getServiceConversations(session.accessToken),
-        getStoreConversations(session.accessToken, { scope: "seller" }),
-        getPayoutAccount(session.accessToken),
-      ]);
+    const loadVersion = ++sellerLoadVersionRef.current;
+    const current = () => loadVersion === sellerLoadVersionRef.current;
+    if (!chargesLoadedRef.current) setChargesStatus("loading");
+    if (!servicesLoadedRef.current) setServicesStatus("loading");
+    // The dashboard does not wait for conversation/history requests to finish.
+    const core = Promise.all([
+      readCache.fetch(readQueryKey("seller-segments", session.user.id),
+        () => getSellerSegments(session.accessToken), { staleTimeMs: 300000 }),
+      readCache.fetch(readQueryKey("seller-categories", session.user.id),
+        () => getSellerStoreCategories(session.accessToken), { staleTimeMs: 300000 }),
+      getSellerProfile(session.accessToken),
+      getPayoutAccount(session.accessToken),
+    ]).then(([segmentsResponse, categoriesResponse, profileResponse, payoutResponse]) => {
+      if (!current()) return;
       setSegments(segmentsResponse.segments ?? []);
       setStoreCategories(categoriesResponse.categories ?? []);
       setProfile(profileResponse.profile);
       setSales(profileResponse.sales ?? []);
       setStores(profileResponse.stores ?? []);
-      setGeneratedCharges(chargesResponse.charges ?? []);
-      if (servicesVersion === serviceRefreshVersionRef.current) {
-        setSellerServices(servicesResponse.services ?? []);
-      }
-      setServiceConversations((conversationsResponse.conversations ?? []).filter((conversation) => conversation.isSeller));
-      setStoreConversations(storeConversationsResponse.conversations ?? []);
       setPayoutAccount(payoutResponse.account ?? null);
-    } catch (requestError) {
-      if (!silent) {
-        setError(requestError.message ?? "Nao foi possivel carregar vendas.");
-      }
-    } finally {
-      if (!silent) {
-        setIsLoading(false);
-      }
-    }
-  }, [session?.accessToken]);
+      sellerLoadedRef.current = true;
+    }).catch((requestError) => {
+      if (current() && !silent) setError(requestError.message ?? "Nao foi possivel carregar vendas.");
+    }).finally(() => {
+      if (current()) setIsLoading(false);
+    });
+    const receive = (promise, apply, onFailure) => promise.then((response) => {
+      if (current()) apply(response);
+    }).catch((requestError) => {
+      if (current()) onFailure?.();
+      if (current() && !silent) setError(requestError.message ?? "Nao foi possivel atualizar uma das listas.");
+    });
+    await Promise.allSettled([
+      core,
+      receive(getGeneratedCharges(session.accessToken), (response) => {
+        setGeneratedCharges(response.charges ?? []);
+        chargesLoadedRef.current = true;
+        setChargesStatus("ready");
+      }, () => { if (!chargesLoadedRef.current) setChargesStatus("error"); }),
+      receive(getSellerServices(session.accessToken), (response) => {
+        if (servicesVersion === serviceRefreshVersionRef.current) {
+          setSellerServices(response.services ?? []);
+          servicesLoadedRef.current = true;
+          setServicesStatus("ready");
+        }
+      }, () => { if (!servicesLoadedRef.current) setServicesStatus("error"); }),
+      receive(getServiceConversations(session.accessToken), (response) => setServiceConversations(
+        (response.conversations ?? []).filter((conversation) => conversation.isSeller))),
+      receive(getStoreConversations(session.accessToken, { scope: "seller" }),
+        (response) => setStoreConversations(response.conversations ?? [])),
+    ]);
+  }, [session?.accessToken, session?.user?.id]);
+
+  useEffect(() => () => { sellerLoadVersionRef.current++; }, [session?.user?.id]);
 
   useLiveRefresh({
     accessToken: session?.accessToken,
@@ -224,6 +255,8 @@ export function SellScreen() {
       const response = await getSellerServices(session.accessToken);
       if (version === serviceRefreshVersionRef.current) {
         setSellerServices(response.services ?? []);
+        servicesLoadedRef.current = true;
+        setServicesStatus("ready");
       }
     },
   });
@@ -359,6 +392,7 @@ export function SellScreen() {
 
   useRealtimeOrders({
     accessToken: session?.accessToken,
+    active: isFocused,
     onStoreEvent: handleSellerRealtime,
     storeIds: sellerStoreIds,
   });
@@ -578,6 +612,7 @@ export function SellScreen() {
       });
       setProfile(response.profile);
       setOnboardingOpen(false);
+      notify("Cadastro salvo", "Seu perfil de vendedor foi criado. Continue configurando sua atividade.");
       if (onboardingFlow === "sale") {
         if (hasActivePayoutAccount) {
           showAutonomousSale();
@@ -740,6 +775,7 @@ export function SellScreen() {
       setSelectedStore(response.store);
       setStoreOpen(false);
       setStoreDetailsOpen(true);
+      notify("Loja cadastrada", `${response.store.name} foi salva. Agora você pode configurar os produtos e a loja.`);
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel cadastrar a loja.");
     } finally {
@@ -769,6 +805,7 @@ export function SellScreen() {
       );
       setSelectedStore(response.store);
       setStoreEditOpen(false);
+      notify("Loja atualizada", "Os dados e as configurações da sua loja foram salvos.");
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel editar a loja.");
     } finally {
@@ -788,6 +825,9 @@ export function SellScreen() {
       const response = await updateSellerStore(session.accessToken, store.id, {
         openForOrders: store.openForOrders === false,
       });
+      notify(response.store.openForOrders === false ? "Pedidos pausados" : "Pedidos ativados", response.store.openForOrders === false
+        ? "Sua loja deixou de aceitar novos pedidos. Os pedidos em andamento continuam."
+        : "Sua loja está configurada para aceitar novos pedidos, conforme seus horários.");
       setStores((current) =>
         current.map((item) => (item.id === response.store.id ? response.store : item)),
       );
@@ -812,6 +852,7 @@ export function SellScreen() {
       setStores((current) => current.filter((item) => item.id !== store.id));
       setSelectedStore(null);
       setStoreDetailsOpen(false);
+      notify("Loja excluída", `${store.name} foi removida da sua lista de lojas.`);
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel excluir a loja.");
     } finally {
@@ -951,6 +992,7 @@ export function SellScreen() {
       );
       setSelectedStore(response.store);
       setMediaOpen(false);
+      notify("Imagens atualizadas", "A logo e o banner da loja foram salvos.");
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel salvar logo e banner.");
     } finally {
@@ -1022,6 +1064,7 @@ export function SellScreen() {
       }
 
       setProductOpen(false);
+      notify(editingProduct ? "Produto atualizado" : "Produto cadastrado", `${productForm.name} foi salvo na sua loja.`);
       setEditingProduct(null);
       await loadSeller();
     } catch (requestError) {
@@ -1041,6 +1084,7 @@ export function SellScreen() {
 
     try {
       await deleteStoreProduct(session.accessToken, store.id, product.id);
+      notify("Produto excluído", `${product.name} foi removido da loja.`);
       await loadSeller();
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel excluir o produto.");
@@ -1093,6 +1137,7 @@ export function SellScreen() {
       setSelectedStore((current) =>
         current?.id === store.id ? replaceOrder(current) : current,
       );
+      notify("Pedido atualizado", `O pedido está ${formatOrderStatusValue(updatedOrder.status)}.`);
     } catch (requestError) {
       setError(requestError.message ?? "Nao foi possivel atualizar o pedido.");
     } finally {
@@ -1100,7 +1145,7 @@ export function SellScreen() {
     }
   }
 
-  if (isLoading) {
+  if (isLoading && !sellerLoadedRef.current) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator color={colors.primaryDark} size="large" />
@@ -1233,6 +1278,8 @@ export function SellScreen() {
     <ScreenContainer contentContainerStyle={styles.content}>
       <SellerDashboard
         charges={generatedCharges}
+        chargesStatus={chargesStatus}
+        servicesStatus={servicesStatus}
         payoutAccount={payoutAccount}
         profile={profile}
         onCreateSale={() => requestSellerAction("sale")}

@@ -1,4 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { FeedbackLayer } from "../../components/FeedbackProvider";
 import {
   KeyboardAvoidingView,
   Modal,
@@ -331,6 +332,7 @@ export function PayoutAccountModal({
           </View>
         </View>
       </KeyboardAvoidingView>
+      <FeedbackLayer />
     </Modal>
   );
 }

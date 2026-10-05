@@ -1,5 +1,15 @@
 # Monitoramento e CI
 
+## Notificacoes (2026-10-04)
+
+Com push habilitado, `push-delivery` registra ciclo, totais e falhas no monitor
+existente. `notifications.enqueue_failed` identifica falha ao persistir aviso;
+`notificacoes_push.ultimo_erro` guarda codigo sanitizado de ticket/recibo.
+`CONFIRMADA` nao significa leitura no aparelho. API autenticada de status nao
+expoe tokens, e teste e limitado por usuario. Testes usam envio simulado e banco
+PostgreSQL isolado; entrega real/credenciais permanecem pendentes. Ver
+[notificacoes.md](notificacoes.md).
+
 ## Estado atual
 
 ### Logs e erros

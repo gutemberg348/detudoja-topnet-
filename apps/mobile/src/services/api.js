@@ -1,6 +1,7 @@
 import Constants from "expo-constants";
 import { fetch as expoFetch } from "expo/fetch";
 import { NativeModules, Platform } from "react-native";
+import { invalidateReadCacheForMutation, requestFlights } from "./read-cache";
 
 function hostnameFromValue(value) {
   if (typeof value !== "string" || !value.trim()) {
@@ -95,10 +96,23 @@ export async function apiRequest(
   options = {},
   canRetryAfterRefresh = true,
 ) {
-  const { body, headers: customHeaders, method = "GET", timeoutMs, token } = options;
+  const { token, refreshAuth = true } = options;
+  const requestToken = refreshAuth ? await getValidAccessToken(token) : token;
+  const method = (options.method ?? "GET").toUpperCase();
+  const requestOptions = { ...options, method, token: requestToken };
+  if (method === "GET" && !options.body) {
+    const key = JSON.stringify([path, requestToken ?? "", options.timeoutMs ?? null,
+      Object.entries(options.headers ?? {}).sort(([a], [b]) => a.localeCompare(b)), refreshAuth, canRetryAfterRefresh]);
+    return requestFlights.run(key, () => performApiRequest(path, requestOptions, canRetryAfterRefresh));
+  }
+  return performApiRequest(path, requestOptions, canRetryAfterRefresh);
+}
+
+async function performApiRequest(path, options, canRetryAfterRefresh) {
+  const { body, headers: customHeaders, method = "GET", timeoutMs, token, refreshAuth = true } = options;
   const headers = {};
   const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
-  let requestToken = await getValidAccessToken(token);
+  const requestToken = token;
 
   if (body && !isFormData) {
     headers["Content-Type"] = "application/json";
@@ -139,6 +153,10 @@ export async function apiRequest(
   }
 
   if (response.status === 204) {
+    if (!["GET", "HEAD"].includes(method)) {
+      requestFlights.clear();
+      invalidateReadCacheForMutation(path);
+    }
     return null;
   }
 
@@ -151,6 +169,7 @@ export async function apiRequest(
     response.status === 401
     && requestToken
     && canRetryAfterRefresh
+    && refreshAuth
     && accessTokenRefresher
   ) {
     const refreshedAccessToken = await accessTokenRefresher(
@@ -180,5 +199,9 @@ export async function apiRequest(
     );
   }
 
+  if (!["GET", "HEAD"].includes(method)) {
+    requestFlights.clear();
+    invalidateReadCacheForMutation(path);
+  }
   return data;
 }

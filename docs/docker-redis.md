@@ -1,5 +1,13 @@
 # Docker e Redis
 
+## Fila push (2026-10-04)
+
+`push-delivery` roda no processo da API, condicionado a `EXPO_PUSH_ENABLED`;
+nao necessita de container extra. Itens/leases ficam no PostgreSQL e sobrevivem
+ao reinicio. `api-migrate` precisa executar a migration
+`20261004043000_notificacoes_push_fila` na imagem atualizada antes de iniciar
+a API. Publicacao na VPS pendente; [guia](notificacoes.md).
+
 ## O que sobe
 
 `docker compose up --build` inicia cinco servicos:
