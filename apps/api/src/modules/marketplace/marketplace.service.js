@@ -13,6 +13,7 @@ import {
   marketplaceRepository,
   publicStoreWhere,
 } from "./marketplace.repository.js";
+import { encodeProductCursor, productPageOptions } from "./product-pagination.js";
 
 const serviceCategoryNames = new Set(["servicos"]);
 
@@ -328,6 +329,7 @@ export async function listMarketplaceStores(userId, query = {}) {
 }
 
 export async function listMarketplaceProducts(userId, query = {}) {
+  const page = productPageOptions(query);
   const baseAddress = await marketplaceRepository.getBaseAddress(userId);
   const search = String(query.search ?? "").trim();
   const categoryId =
@@ -340,13 +342,21 @@ export async function listMarketplaceProducts(userId, query = {}) {
     marketplaceRepository.listProducts(baseAddress, {
       categoryId,
       productIds: matches?.productIds,
+      page,
     }),
     marketplaceRepository.getEarningsDistribution(),
     marketplaceRepository.getPaymentPolicy(),
   ]);
 
+  const pageProducts = page ? products.slice(0, page.limit) : products;
+  const hasMore = Boolean(page && products.length > page.limit);
   return {
-    products: products
+    ...(page ? { pagination: {
+      limit: page.limit,
+      hasMore,
+      nextCursor: hasMore ? encodeProductCursor(pageProducts.at(-1)) : null,
+    } } : {}),
+    products: pageProducts
       .filter((product) => !isServiceStoreCategory(product.loja.categoria))
       .map((product) => ({
         product: serializeProduct(product),

@@ -1,8 +1,9 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useIsFocused } from "@react-navigation/native";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  FlatList,
   Image,
   Pressable,
   ScrollView,
@@ -20,10 +21,10 @@ import { StatePanel } from "../components/StatePanel";
 import { StoreCard } from "../components/StoreCard";
 import { useMarketplaceSuggestions } from "../hooks/useMarketplaceSuggestions";
 import { useCachedQuery } from "../hooks/useCachedQuery";
+import { useMarketplaceProducts } from "../hooks/useMarketplaceProducts";
 import { marketplaceKey, marketplaceLocationKey, useMarketplaceLocation, usePrefetchMarketplace } from "../hooks/useMarketplaceData";
 import {
   getMarketplaceCategories,
-  getMarketplaceProducts,
   getMarketplaceStores,
 } from "../services/marketplace.api";
 import { realtimeEvents } from "../services/realtime";
@@ -62,6 +63,7 @@ export function StoresScreen({ navigation, route }) {
   const [resultMode, setResultMode] = useState(() => initialResultMode(route));
   const [searchFocused, setSearchFocused] = useState(false);
   const [search, setSearch] = useState(route.params?.query ?? "");
+  const listRef = useRef(null);
   const locationQuery = useMarketplaceLocation();
   const marketplaceLocation = locationQuery.location;
   const canLoad = focused && Boolean(session?.accessToken && session?.user?.id && marketplaceLocation);
@@ -87,16 +89,17 @@ export function StoresScreen({ navigation, route }) {
     load: () => getMarketplaceStores(session.accessToken, params),
     requestVersion: session?.accessToken,
   });
-  const productsQuery = useCachedQuery({
+  const productsQuery = useMarketplaceProducts({
     key: marketplaceLocation ? marketplaceKey("products", session?.user?.id, marketplaceLocation, params) : null,
     enabled: canLoad && (hasMarketplaceSearch || resultMode === "products"),
-    load: () => getMarketplaceProducts(session.accessToken, params),
-    requestVersion: session?.accessToken,
+    accessToken: session?.accessToken,
+    params,
   });
   const categories = categoriesQuery.data?.categories ?? EMPTY_ITEMS;
   const serviceTypes = servicesQuery.data?.serviceTypes ?? EMPTY_ITEMS;
   const stores = storesQuery.data?.stores ?? EMPTY_ITEMS;
   const products = productsQuery.data?.products ?? EMPTY_ITEMS;
+  const productRows = useMemo(() => chunkItems(products, 2), [products]);
   usePrefetchMarketplace(marketplaceLocation, {
     categoryId: params.categoryId,
     resultMode: resultMode === "stores" ? "products" : "stores",
@@ -168,6 +171,7 @@ export function StoresScreen({ navigation, route }) {
     && !isLoading
     && !isDebouncing
     && !error
+    && !productsQuery.hasMore
     && !hasAnySearchResult;
 
   useEffect(() => {
@@ -208,6 +212,10 @@ export function StoresScreen({ navigation, route }) {
     return () => clearTimeout(timeout);
   }, [search]);
 
+  useEffect(() => {
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [category, marketplaceLocation?.city, marketplaceLocation?.state, marketplaceSearch, resultMode]);
+
   useLiveRefresh({ accessToken: session?.accessToken,
     enabled: Boolean(marketplaceLocation),
     scopeKey: marketplaceLocation ? `${marketplaceLocation.city}|${marketplaceLocation.state}` : "",
@@ -219,19 +227,23 @@ export function StoresScreen({ navigation, route }) {
     scopeKey: marketplaceLocation ? `${marketplaceLocation.city}|${marketplaceLocation.state}|${category}|${marketplaceSearch}` : "",
     intervalMs: 30000,
     refreshOnFocus: false,
-    onRefresh: () => Promise.allSettled([storesQuery.refresh(), productsQuery.refresh()]),
+    onRefresh: () => Promise.allSettled([
+      ...(showStoreResults ? [storesQuery.refresh()] : []),
+      // Don't repeatedly download the whole visited feed while the user scrolls.
+      ...(showProductResults && (productsQuery.data?.pageCount ?? 1) === 1 ? [productsQuery.refresh()] : []),
+    ]),
   });
 
-  function openStore(store) {
+  const openStore = useCallback((store) => {
     navigation.navigate("StoreConversation", { store, storeId: store.id });
-  }
+  }, [navigation]);
 
-  function openProduct(item) {
+  const openProduct = useCallback((item) => {
     navigation.navigate("ProductDetails", {
       product: item.product,
       store: item.store,
     });
-  }
+  }, [navigation]);
 
   function openStoreSuggestion(suggestion) {
     navigation.navigate("StoreConversation", {
@@ -321,7 +333,7 @@ export function StoresScreen({ navigation, route }) {
 
   function selectCategory(categoryId) {
     setCategory(categoryId);
-    setResultMode("stores");
+    setResultMode((mode) => mode === "products" ? "products" : "stores");
     setSearch("");
   }
 
@@ -345,8 +357,8 @@ export function StoresScreen({ navigation, route }) {
         ? `Produtos disponiveis em ${locationLabel}`
         : `Lojas disponiveis em ${locationLabel}`;
 
-  return (
-    <ScreenContainer contentContainerStyle={styles.content} padded={false}>
+  const listHeader = (
+    <>
       <View style={styles.hero}>
         <BrandLogo centered size="large" />
 
@@ -382,7 +394,7 @@ export function StoresScreen({ navigation, route }) {
         </View>
       </View>
 
-      <View style={styles.body}>
+      <View style={[styles.body, showProductResults && styles.bodyProducts]}>
         {!hasSearch ? <ResultModeSelector mode={resultMode} onChange={(mode) => {
           setResultMode(mode);
           setCategory("todas");
@@ -541,7 +553,7 @@ export function StoresScreen({ navigation, route }) {
               {productsLoading || productsQuery.isRefreshing || isDebouncing ? (
                 <ActivityIndicator color={colors.primaryDark} size="small" />
               ) : (
-                <Text style={styles.resultCountText}>{products.length}</Text>
+                <Text style={styles.resultCountText}>{products.length}{productsQuery.hasMore ? "+" : ""}</Text>
               )}
             </View>
           </View>
@@ -550,27 +562,7 @@ export function StoresScreen({ navigation, route }) {
             <StatePanel icon="cube-outline" loading text="Buscando produtos..." />
           ) : productsQuery.error && !productsQuery.hasData ? (
             <StatePanel danger icon="alert-circle-outline" text={productsQuery.error.message} title="Nao foi possivel buscar" />
-          ) : products.length ? (
-            <View style={styles.productList}>
-              {chunkItems(products, 2).map((row, rowIndex) => (
-                <View
-                  key={`product-row-${rowIndex}-${row[0]?.product?.id ?? "empty"}`}
-                  style={styles.productRow}
-                >
-                  {row.map((item) => (
-                    <MarketplaceProductCard
-                      item={item}
-                      key={`${item.store?.id}-${item.product?.id}`}
-                      onPress={openProduct}
-                      style={styles.productGridCard}
-                      variant="grid"
-                    />
-                  ))}
-                  {row.length < 2 ? <View style={styles.productGridSpacer} /> : null}
-                </View>
-              ))}
-            </View>
-          ) : !hasSearch ? (
+          ) : !products.length && !productsQuery.hasMore && !hasSearch ? (
             <StatePanel
               icon="location-outline"
               text={`Ainda nao encontramos produtos em ${locationLabel}. Toque na cidade acima para mudar a localizacao.`}
@@ -588,7 +580,70 @@ export function StoresScreen({ navigation, route }) {
         />
       ) : null}
       </View>
+    </>
+  );
 
+  const renderProductRow = useCallback(({ item: row }) => (
+    <View style={styles.virtualProductRow}>
+      {row.map((item) => (
+        <MarketplaceProductCard
+          item={item}
+          key={`${item.store?.id}-${item.product?.id}`}
+          onPress={openProduct}
+          style={styles.productGridCard}
+          variant="grid"
+        />
+      ))}
+      {row.length < 2 ? <View style={styles.productGridSpacer} /> : null}
+    </View>
+  ), [openProduct]);
+
+  return (
+    <ScreenContainer contentContainerStyle={styles.content} padded={false} scroll={false}>
+      <FlatList
+        ref={listRef}
+        data={showProductResults ? productRows : EMPTY_ITEMS}
+        renderItem={renderProductRow}
+        keyExtractor={productRowKey}
+        ListHeaderComponent={listHeader}
+        ListFooterComponent={showProductResults && productsQuery.hasData ? (
+          <View style={styles.paginationFooter}>
+            {productsQuery.isLoadingMore ? (
+              <View style={styles.paginationLoading}>
+                <ActivityIndicator color={colors.primaryDark} size="small" />
+                <Text style={styles.sectionSubtitle}>Carregando mais produtos...</Text>
+              </View>
+            ) : productsQuery.loadMoreError ? (
+              <>
+                <Text style={styles.sectionSubtitle}>Nao foi possivel carregar mais produtos.</Text>
+                <Pressable accessibilityRole="button" onPress={productsQuery.retryLoadMore} style={styles.retryPage}>
+                  <Text style={styles.retryPageText}>Tentar novamente</Text>
+                </Pressable>
+              </>
+            ) : !productsQuery.hasMore && products.length ? (
+              <Text style={styles.sectionSubtitle}>Voce viu todos os produtos desta busca.</Text>
+            ) : null}
+          </View>
+        ) : null}
+        onEndReached={showProductResults && !isDebouncing ? productsQuery.loadMore : undefined}
+        onEndReachedThreshold={0.4}
+        initialNumToRender={2}
+        maxToRenderPerBatch={2}
+        windowSize={3}
+        updateCellsBatchingPeriod={50}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.listContent, showProductResults && styles.listProductContent]}
+        style={styles.list}
+        refreshing={Boolean(storesQuery.isRefreshing || (productsQuery.isRefreshing && !productsQuery.isLoadingMore))}
+        onRefresh={() => {
+          void Promise.allSettled([
+            ...(showStoreResults ? [storesQuery.refresh()] : []),
+            ...(showProductResults ? [productsQuery.refresh()] : []),
+            ...(showServiceResults ? [servicesQuery.refresh()] : []),
+          ]);
+        }}
+      />
       <MarketplaceLocationModal
         canDismiss={Boolean(marketplaceLocation)}
         initialLocation={marketplaceLocation}
@@ -598,6 +653,10 @@ export function StoresScreen({ navigation, route }) {
       />
     </ScreenContainer>
   );
+}
+
+function productRowKey(row) {
+  return `product-row-${row[0]?.store?.id}-${row[0]?.product?.id}`;
 }
 
 function chunkItems(items, size) {
@@ -905,6 +964,24 @@ const styles = StyleSheet.create({
   },
   categoryTextActive: { color: colors.primaryDark },
   content: { paddingBottom: 0 },
+  bodyProducts: { paddingBottom: spacing.md },
+  list: { flex: 1, width: "100%" },
+  listContent: { flexGrow: 1 },
+  listProductContent: { paddingBottom: spacing.xxxl },
+  virtualProductRow: {
+    alignSelf: "center",
+    alignItems: "stretch",
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+    maxWidth: 560,
+    paddingHorizontal: spacing.lg,
+    width: "100%",
+  },
+  paginationFooter: { alignItems: "center", gap: spacing.sm, padding: spacing.lg },
+  paginationLoading: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
+  retryPage: { backgroundColor: colors.primarySoft, borderRadius: radius.round, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  retryPageText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: typography.caption },
   exploreCopy: { flex: 1, gap: 3 },
   exploreHeader: { alignItems: "center", flexDirection: "row" },
   globalSearchHint: {
@@ -980,12 +1057,8 @@ const styles = StyleSheet.create({
   },
   modeTextActive: { color: colors.card },
   pressed: { opacity: 0.78, transform: [{ scale: 0.98 }] },
-  productList: {
-    gap: spacing.sm,
-  },
   productGridCard: { flex: 1 },
   productGridSpacer: { flex: 1, minWidth: 0 },
-  productRow: { alignItems: "stretch", flexDirection: "row", gap: spacing.sm },
   resultCount: {
     alignItems: "center",
     backgroundColor: colors.primarySoft,

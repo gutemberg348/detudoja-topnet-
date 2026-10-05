@@ -1,11 +1,35 @@
 # Codex Handoff - DeTudoJa
 
-Ultima atualizacao: 2026-10-04
+Ultima atualizacao: 2026-10-05
 
 Este arquivo e o resumo principal para qualquer novo Codex continuar o projeto
 sem precisar reconstruir todo o contexto pela conversa. Sempre que uma regra,
 rota, tela, schema, comando ou fluxo importante mudar, atualize este arquivo.
 O indice e a regra completa de documentacao ficam em `docs/README.md`.
+
+## Atualizacao 2026-10-05: produtos por pagina e lista virtualizada
+
+- A aba Produtos montava 50 cartoes/imagens de uma vez no ScrollView. Buscar
+  agora usa uma FlatList vertical unica, com header e linhas de dois produtos;
+  janela de 3 telas, duas linhas por lote e cartoes memoizados. Categoria
+  selecionada em Produtos mantem o modo, sem mudar inadvertidamente para Lojas.
+- API marketplace/products aceita limit (1..50) e cursor opaco com destaque,
+  data e id. Banco consulta limit + 1, ordena destaque/data/id e aplica a fronteira
+  junto dos filtros de cidade, publicacao, KYC, categoria e pesquisa. Retorna
+  pagination.hasMore/nextCursor; chamadas sem pagina preservam o contrato antigo
+  e limite 50. Sem alteracao de schema/migration.
+- `utils/product-feed.js` e `hooks/useMarketplaceProducts.js` pedem 12 por vez,
+  agregam no cache com guardas de invalidacao e carregam mais perto do fim.
+  Prefetch pede somente a primeira pagina. Falha mostra retry sem apagar itens;
+  cursores repetidos encerram a paginacao. Revalidacao sequencial visita somente
+  paginas ja carregadas; polling nao refaz varias paginas durante a rolagem.
+- Validado: 93 testes mobile, API 232 passaram/13 ignorados em PostgreSQL e
+  Redis temporarios com as 66 migrations, incluindo integracao de 61 produtos
+  com empate de datas, cursor excluido e insercao antes da pagina. Navegador
+  com 61 itens simulados: 8 cartoes iniciais, 19 montados ao final; paginas de
+  12, eventos repetidos, retry, fim, cache/rolagem ao retornar, categoria e cidade
+  passaram sem erro JS. Exports Android/iOS/Web aprovados. VPS e aparelhos
+  fisicos ainda nao atualizados/conferidos. Detalhes em `front-mobile.md`.
 
 ## Atualizacao 2026-10-04: demora ao trocar abas
 

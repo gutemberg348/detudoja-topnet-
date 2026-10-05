@@ -6,6 +6,7 @@ import {
   getPaymentPolicy,
 } from "../earnings/order-earnings.config.js";
 import { availableServiceWhere } from "../service-chats/service-availability.js";
+import { productCursorWhere } from "./product-pagination.js";
 
 const publicStoreWhere = {
   excluido_em: null,
@@ -90,7 +91,7 @@ export const marketplaceRepository = {
     });
   },
 
-  listProducts(baseAddress, { categoryId, productIds }) {
+  listProducts(baseAddress, { categoryId, productIds, page }) {
     return prisma.produtoLoja.findMany({
       include: {
         loja: {
@@ -102,10 +103,11 @@ export const marketplaceRepository = {
           },
         },
       },
-      orderBy: [{ destaque: "desc" }, { criado_em: "desc" }],
-      take: 50,
+      orderBy: [{ destaque: "desc" }, { criado_em: "desc" }, { id: "desc" }],
+      take: page ? page.limit + 1 : 50,
       where: {
         excluido_em: null,
+        ...(page?.cursor ? { AND: [productCursorWhere(page.cursor)] } : {}),
         ...(productIds ? { id: { in: productIds } } : {}),
         loja: {
           ...publicStoreWhere,

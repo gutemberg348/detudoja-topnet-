@@ -17,6 +17,8 @@ export const marketplaceStoresQuerySchema = z.object({
 export const marketplaceProductsQuerySchema = z.object({
   categoryId: optionalPositiveInt("Categoria invalida"),
   search: z.string().trim().max(120).optional(),
+  limit: z.coerce.number().int().min(1).max(50).optional(),
+  cursor: z.string().min(1).max(512).regex(/^[\w-]+$/).optional(),
 });
 
 export const marketplaceSuggestionsQuerySchema = z.object({

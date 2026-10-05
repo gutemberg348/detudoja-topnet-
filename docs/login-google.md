@@ -7,6 +7,42 @@ fixo ou Client Secret no aplicativo. O SDK obtem a identidade a cada login.
 
 ## Android: configurar antes de gerar outro APK
 
+### Diagnostico em 05/10/2026: ID antigo no APK
+
+O APK mais recente, build `394d08b4-689b-4324-94d7-5c11c2720de2`
+(versionCode 10), foi baixado e inspecionado. O bundle compilado ainda usa
+o ID Web anterior, embora `apps/mobile/.env` ja contenha o cliente Web do
+novo projeto Google Cloud. O EAS `preview` ainda tinha o valor anterior;
+`production` nao tinha essa variavel. Alterar somente o `.env` local nao
+atualizou os builds remotos, pois esse arquivo e ignorado no envio.
+
+Foi atualizado `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` nos ambientes EAS
+`preview` e `production`, com leitura posterior confirmando igualdade
+com o valor local. A API local passou a aceitar tambem o novo cliente
+em `GOOGLE_OAUTH_CLIENT_IDS`, preservando o audience anterior. Esses
+arquivos `.env` sao ignorados pelo Git; a configuracao da VPS precisa
+ser atualizada separadamente.
+
+`apksigner` confirmou a assinatura do APK de 05/10 e `aapt` confirmou o pacote:
+
+```text
+Pacote: com.detudoja.mobile
+SHA-1: AE:91:85:9C:7F:46:77:21:ED:F9:0A:A7:67:61:24:FB:AD:5D:31:69
+```
+
+Ainda e necessario conferir/criar o cliente OAuth **Android** com esses
+dados no mesmo projeto Google Cloud do novo cliente **Web**. O cadastro
+nao pode ser confirmado pela configuracao local. Copiar o ID Web para
+`EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID` nao cria o cliente Android no Google.
+O cadastro Android autoriza a assinatura; atualizar a variavel Web exige
+compilar e instalar outro APK. O iOS continua exigindo um cliente proprio:
+o valor local ainda repete o Web.
+
+Validacao: configuracao Android local aprovada, 10 testes de autenticacao
+aprovados, audiences locais alinhados e EAS preview/production conferidos.
+Nao houve autenticacao real no aparelho, alteracao no Google Cloud ou
+deploy na VPS nesta verificacao.
+
 ### Diagnostico do APK de preview em 02/10/2026
 
 O APK do build `b0bd5b05-c563-486e-817f-dc0e785a9a2c` tinha o modulo nativo,
@@ -60,16 +96,18 @@ Cloud, a assinatura autorizada ou uma autenticacao real.
 4. `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID` nao e passado ao SDK nativo.
    Cadastrar o cliente Android no Google Cloud continua obrigatorio; nao copiar
    o ID Android no campo Web. O ID iOS tambem nao deve repetir o Web.
-5. Conferir publico/tela de consentimento e usuarios de teste no Google Cloud.
+5. Conferir publico/tela de consentimento no Google Cloud. Para o login basico
+   com `openid`, email e perfil, nao e necessario cadastrar cada pessoa como
+   usuario de teste; veja a [excecao do Google](https://support.google.com/cloud/answer/15549945).
 6. Definir o ID Web no ambiente **preview** do EAS (e production quando publicar).
    O `.env` da VPS nao e incorporado ao APK. Exemplo interativo, sem segredo:
 
    ```bash
-   npx eas-cli env:create --environment preview --name EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID --visibility plaintext
+   npx eas-cli env:set --environment preview --name EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID --visibility plaintext
    npx eas-cli build --platform android --profile preview
    ```
 
-   Se a variavel ja existir, edite-a no EAS. Instalar o APK novo; atualizar apenas
+   O comando cria ou atualiza a variavel no EAS. Instalar o APK novo; atualizar apenas
    JS/Metro ou API nao adiciona o modulo nativo a um APK antigo.
 
 ## API na VPS

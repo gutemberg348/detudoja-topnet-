@@ -1,5 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { CartAddButton } from "./CartAddButton";
 import { useCartFeedback } from "./CartFeedbackProvider";
@@ -9,7 +9,7 @@ import { resolveMediaUrl } from "../utils/media";
 import { formatarDinheiro } from "../utils/money";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../utils/theme";
 
-export function MarketplaceProductCard({ item, onPress, style, variant = "list" }) {
+export const MarketplaceProductCard = memo(function MarketplaceProductCard({ item, onPress, style, variant = "list" }) {
   const { addItem, items, removeItem, updateItemQuantity } = useCartStore();
   const { animateToCart } = useCartFeedback();
   const [imageFailed, setImageFailed] = useState(false);
@@ -114,7 +114,7 @@ export function MarketplaceProductCard({ item, onPress, style, variant = "list" 
       ) : null}
     </View>
   );
-}
+});
 
 function formatPercent(value) {
   return `${Number(value ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`;

@@ -1,5 +1,40 @@
 # Front Mobile
 
+## Produtos carregados ao rolar (2026-10-05)
+
+- Buscar > Produtos pedia ate 50 itens e montava todos os cartoes/imagens em um
+  ScrollView. Agora a tela inteira usa uma unica FlatList vertical, com linhas
+  de dois produtos, janela de renderizacao de 3 telas e lotes de duas linhas.
+  Header, categorias e resultados de lojas/servicos permanecem na mesma rolagem.
+  Cartoes de produto usam memo; abrir produto e adicionar ao carrinho continuam
+  usando os dados originais. Selecionar categoria em Produtos preserva esse modo.
+- API `GET /api/app/marketplace/products?limit=12&cursor=...` retorna
+  `products` e `pagination: { limit, hasMore, nextCursor }`. Cursor opaco guarda
+  destaque/data/id; a ordenacao usa esses tres campos, sem offset. Consulta busca
+  apenas limite + 1, preservando cidade/UF, categoria, pesquisa e elegibilidade.
+  Funciona mesmo ao excluir o produto do cursor e nao repete itens por datas
+  iguais. Requisicoes antigas sem limit/cursor continuam recebendo ate 50 itens
+  e a resposta anterior, permitindo publicar a API antes dos novos aplicativos.
+  Nao houve alteracao de schema ou nova migration.
+- Mobile solicita 12 itens iniciais, inclusive no prefetch, e pede mais apenas
+  perto do fim da lista. Cache agrega paginas por usuario/cidade/filtro/termo;
+  eventos de rolagem simultaneos nao duplicam requisicoes. Troca de contexto e
+  logout protegem contra respostas atrasadas. Falha ao carregar mais preserva
+  produtos e cursor, com botao Tentar novamente; fim do catalogo encerra chamadas.
+  Contador mostra itens carregados com `+` enquanto houver proxima pagina.
+- Revalidacao recria sequencialmente somente paginas ja visitadas, mantendo a
+  copia anterior ate concluir. Pull-to-refresh e retorno com cache vencido
+  atualizam o feed; polling automatico de 30 s atualiza produtos somente enquanto
+  ha uma pagina, evitando baixar o feed inteiro repetidamente durante a rolagem.
+- Validado: 93 testes mobile; API em PostgreSQL/Redis temporarios atualizados,
+  232 testes passaram e 13 ficaram ignorados pelos requisitos dos respectivos
+  testes. Integracao percorreu 61 produtos sem duplicatas, excluiu cidade/loja
+  inelegivel e tolerou exclusao do cursor/insercao antes dele. Exports
+  Android/iOS/Web e navegador Edge 390x844: 12 itens por chamada, 8 cartoes
+  montados inicialmente, 19 montados com 61 carregados na verificacao final; retry, fim, retorno,
+  categoria e troca de cidade passaram, sem erro JS. Publicacao na VPS e
+  validacao em aparelho fisico ainda pendentes; dados de navegador simulados.
+
 ## Navegacao e cache de leitura (2026-10-04)
 
 - `Inicio` prepara cidade, lojas e categorias da busca. `Buscar` reaproveita
