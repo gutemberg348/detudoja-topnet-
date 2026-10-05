@@ -24,6 +24,7 @@ import {
 } from "../earnings/order-earnings.config.js";
 import { releaseCommercialSettlement } from "../earnings/earnings-release.service.js";
 import { completePaidCourierRide, isCourierConversation, lockCourierConversation, shouldCompletePaidCourierRide } from "../service-chats/courier-completion.js";
+import { isServiceCompletedOutsideApp } from "../service-chats/service-closure.js";
 import {
   assertSellerMonthlyCpfLimit,
   assertStoreMonthlyCpfLimit,
@@ -112,6 +113,8 @@ const chargeInclude = {
       forma_pagamento: true,
       id: true,
       status: true,
+      concluido_em: true,
+      pago_em: true,
       conversa_servico: {
         select: {
           cliente_usuario_id: true,
@@ -264,6 +267,12 @@ function serializeCharge(charge, { includeQr = false, localRewardPolicy = undefi
     serviceConversationId: charge.proposta_servico?.conversa_servico?.id ?? null,
     servicePaymentMode: charge.proposta_servico?.forma_pagamento ?? null,
     serviceProposalId: charge.proposta_servico?.id ?? null,
+    serviceProposalStatus: charge.proposta_servico?.status ?? null,
+    serviceCompletedOutsideApp: charge.proposta_servico
+      ? isServiceCompletedOutsideApp({ ...charge.proposta_servico, cobranca: charge }) : false,
+    serviceConversationStatus: charge.proposta_servico?.conversa_servico?.status ?? null,
+    serviceLinkedOrder: Boolean(charge.proposta_servico?.conversa_servico?.loja_solicitante_id
+      || charge.proposta_servico?.conversa_servico?.pedido_loja_id),
     status: charge.status,
     title: charge.titulo,
   };

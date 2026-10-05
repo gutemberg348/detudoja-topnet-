@@ -1,5 +1,29 @@
 # Sistema DeTudoJa
 
+## Atualizacao 2026-10-05: conclusao de servico fora do app
+
+`POST /api/app/service-chats/:conversationId/complete-outside-app` recebe
+proposalId e permite ao prestador ativo com KYC aprovado concluir uma proposta
+ACEITA/QR_PRESENCIAL recebida fora do app. Conversa propria precisa estar
+ACORDADA (corrida independente tambem pode estar AGUARDANDO_CONFIRMACAO).
+Entregas vinculadas a loja/pedido sao bloqueadas. Transacao cancela a cobranca,
+grava proposta CONCLUIDA/concluido_em sem pago_em, encerra conversa e registra
+mensagem. Nao cria pagamento, lancamento de carteira, distribuicao, pool,
+cashback, rede ou repasse. Sem novas colunas/migrations: sinal externo resulta
+de proposta concluida sem pago_em e cobranca cancelada sem pagamento/paga_em.
+
+Conclusao externa e cancelamento reivindicam a cobranca com update condicional
+antes da proposta/conversa, compartilhando o bloqueio de linha do pagamento.
+Criacao/aceite de propostas e encerramento usam tambem um lock transacional
+por conversa, separado do lock de conclusao de corrida. Assim, cancelar ve a
+cobranca de um aceite concorrente ja confirmado, sem deixar um QR ativo.
+Pagamento ja vinculado, PROCESSANDO ou PAGA impede essas acoes. Se outra acao
+ganhar a corrida, a transacao perdedora reverte; tentativas repetidas apos
+conclusao/cancelamento nao duplicam mensagens. O aceite de proposta tambem
+verifica conversa ACORDADA dentro da transacao. QR invalidado e recusado no
+pagamento. Realtime e push comunicam conclusao/cancelamento; sem evento de
+carteira para recebimento externo. Testes financeiros usam DB isolado.
+
 ## Atualizacao 2026-10-04: disponibilidade e fila push
 
 Disponibilidade e uma escolha persistida por servico, independente de conexao

@@ -7,6 +7,90 @@ sem precisar reconstruir todo o contexto pela conversa. Sempre que uma regra,
 rota, tela, schema, comando ou fluxo importante mudar, atualize este arquivo.
 O indice e a regra completa de documentacao ficam em `docs/README.md`.
 
+## Atualizacao 2026-10-05: incentivo discreto ao cashback em servicos
+
+- Cliente ve aviso curto de cashback na escolha do prestador, na proposta
+  aceita e no modal de aceite, incluindo QR presencial pago dentro do app.
+  Conversa sem proposta explica o beneficio no aviso que ja existia.
+  Nao dispara push/toast/modal promocional extra, nem acrescenta chamadas API.
+- `ServiceCashbackNotice` centraliza a mensagem. Sem previa, condiciona o
+  beneficio a servicos elegiveis; com localRewardPolicy, informa cashback
+  previsto, ausencia ou valor minimo. Dinheiro/Pix por fora nao gera cashback.
+  `ChargePaymentScreen` usa o aviso antes do pagamento de servico; nao mostra
+  incentivo com cobranca paga/processando/cancelada. Aviso nao afirma que
+  cashback foi liberado antes de status PAGA. Regras financeiras inalteradas.
+- Modal de aceite possui altura limitada e rolagem para preservar botoes em
+  telas pequenas. Opcao `QR presencial` explica que o QR e lido pelo app do
+  cliente. Sem alteracao de API/schema; exige nova compilacao do mobile.
+- 96 testes mobile e exports Android/iOS/web passaram. App web compilado
+  passou 12 cenarios com API simulada: descoberta, aceite geral/corrida em
+  320x568, proposta online/QR, checkout com/sem cashback/abaixo do minimo,
+  cobranca processando/cancelada e chats pagos/concluidos fora do app. Avisos
+  nao iniciam pagamento/aceite, nao duplicam por tela e nao prometem credito
+  liberado antes de pagar. Validacao nativa em aparelhos permanece pendente.
+
+## Atualizacao 2026-10-05: encerrar servico recebido fora do app
+
+- Depois de `Exibir QR presencial`, o prestador pode escolher `Recebi fora do
+  app` ou `Cancelar atendimento`, com confirmacao explicita. Voltar para a
+  conversa apenas navega; nao registra pagamento. Servicos sem pagamento
+  tambem permitem cancelar pelo chat. Aviso de cashback liberado no QR do
+  servico aparece somente quando a cobranca esta PAGA.
+- `POST /api/app/service-chats/:conversationId/complete-outside-app` recebe
+  proposalId e exige prestador ativo/KYC aprovado, proposta ACEITA e modo
+  QR_PRESENCIAL. Nao aceita entregas vinculadas a lojas/pedidos. Conclui o
+  atendimento, cancela o QR, grava mensagem de auditoria e informa o cliente.
+  Nao debita/credita carteiras, nao cria pagamento, pool, cashback, rede ou
+  repasse. Conclusao externa usa campos existentes: proposta CONCLUIDA com
+  concluido_em, pago_em nulo, cobranca CANCELADA sem pagamento/paga_em.
+  Serializacoes incluem completedOutsideApp/serviceCompletedOutsideApp.
+- Cancelamento e conclusao externa reivindicam a cobranca com escrita
+  condicional dentro da mesma transacao, na ordem usada pelo pagamento.
+  Pagamento confirmado/em processamento/ja vinculado bloqueia ambas as
+  acoes; o QR cancelado nao pode ser pago. Repeticao concluida e idempotente.
+  Criacao/aceite de propostas e encerramento compartilham lock transacional
+  proprio para que cancelar nao deixe passar uma cobranca criada em paralelo.
+  Aceite de proposta verifica se a conversa continua ACORDADA para evitar
+  reabertura concorrente. Sem migration nova e sem alterar pagamentos reais.
+- Validacao: 96 testes mobile; suite API em PostgreSQL/Redis isolados passou
+  com 241 testes aprovados, 14 ignorados. Inclui 9 cenarios financeiros de
+  service-closure-db (SERVICE_CLOSURE_DB_TESTS=true, DB service_validation),
+  saldos/ganhos inalterados, permissoes, repeticao, QR invalido e concorrencia.
+  Exports Android/iOS/web passaram. App web compilado validou confirmacao sem
+  chamada antecipada, recebimento externo, cancelamento, erro/retry, retorno
+  ao chat e bloqueio com cobranca PROCESSANDO usando API simulada.
+  Publicar API e gerar APK novo; conferencia
+  fisica Android/iPhone e entrega push ainda dependem dos aparelhos.
+
+## Atualizacao 2026-10-05: imagens das categorias ao trocar filtros
+
+- Video mostra imagens de Buscar desaparecendo na selecao de categorias.
+  Arte agora vive em `MarketplaceCategoryCard`, memoizada e com estado por URL,
+  source estavel e imagem sempre em absoluteFill; seleciona sem mudar posicao,
+  esconder a imagem ou resetar carregamento. Falha preserva icone de apoio.
+- Container nao colapsavel e removeClippedSubviews=false na FlatList e nas
+  faixas horizontais evitam destacamento nativo das imagens; virtualizacao
+  e lotes de 12 produtos continuam ativos. Sem dependencia ou API nova.
+- 93 testes e exports Android/iOS/web passaram. App web compilado validou
+  12 selecoes, imagens atrasadas, cache, mudanca de modo, imagem ausente/404
+  e preservacao das outras artes; selecao nao refaz downloads. Recorte nativo
+  Android ainda precisa ser conferido no aparelho com APK novo.
+
+## Atualizacao 2026-10-05: camera QR verde no Android
+
+- `QrCamera` usava `StyleSheet.absoluteFillObject`, removido no React Native
+  0.86.3 instalado. Preview recebia estilo undefined e nao tinha dimensoes;
+  camera ligava, mas apareciam so fundo verde e moldura sem centralizacao.
+- Substituido por `StyleSheet.absoluteFill` no preview, moldura e loading/erro,
+  assim como nos overlays de CartFeedbackProvider, ProductDetails e StoreDetails.
+  Correcao vale para pagamentos, contatos e convites que usam o scanner comum.
+  Foco, permissao, timeout, retry e confirmacao de pagamento preservados.
+- Verificacao com StyleSheet nativo instalado reproduziu o erro anterior e
+  confirmou estilo corrigido, moldura, loading/retry e bloqueio de leitura
+  sem ready ou em erro. 93 testes mobile e exports Android/iOS aprovados.
+  Sem aparelho fisico conectado; imagem real deve ser conferida no APK novo.
+  Sem mudancas de API, dependencias ou schema. Detalhes em docs/front-mobile.md.
+
 ## Atualizacao 2026-10-05: produtos por pagina e lista virtualizada
 
 - A aba Produtos montava 50 cartoes/imagens de uma vez no ScrollView. Buscar

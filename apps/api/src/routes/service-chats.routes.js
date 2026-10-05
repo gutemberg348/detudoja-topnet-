@@ -3,6 +3,7 @@ import {
   acceptServiceConversationController,
   acceptServiceProposalController,
   cancelServiceConversationController,
+  completeServiceOutsideAppController,
   confirmServiceCompletionController,
   createServiceProposalController,
   createServiceConversationController,
@@ -25,6 +26,7 @@ import {
 } from "../modules/service-chats/service-chats.controller.js";
 import {
   acceptServiceProposalSchema,
+  completeServiceOutsideAppSchema,
   createServiceProposalSchema,
   createServiceConversationMessageSchema,
   createServiceConversationLocationSchema,
@@ -64,3 +66,4 @@ serviceChatsRoutes.post("/:conversationId/confirm-completion", confirmServiceCom
 serviceChatsRoutes.post("/:conversationId/dispute", disputeServiceCompletionController);
 serviceChatsRoutes.post("/:conversationId/reviews", validate(createServiceReviewSchema), createServiceReviewController);
 serviceChatsRoutes.post("/:conversationId/cancel", cancelServiceConversationController);
+serviceChatsRoutes.post("/:conversationId/complete-outside-app", validate(completeServiceOutsideAppSchema), completeServiceOutsideAppController);

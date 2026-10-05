@@ -6,6 +6,7 @@ import { CpfRequirementModal } from "../components/CpfRequirementModal";
 import { LocalRewardNotice } from "../components/LocalRewardNotice";
 import { PaymentFeedbackOverlay } from "../components/PaymentFeedbackOverlay";
 import { ScreenContainer } from "../components/ScreenContainer";
+import { ServiceCashbackNotice } from "../components/ServiceCashbackNotice";
 import { getCharge, getPermanentStoreQr, payCharge, payPermanentStoreQr } from "../services/charges.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { useWalletStore } from "../stores/useWalletStore";
@@ -259,7 +260,10 @@ export function ChargePaymentScreen({ navigation, route }) {
         </>
       ) : null}
 
-      {charge?.localRewardPolicy ? <LocalRewardNotice policy={charge.localRewardPolicy} /> : null}
+      {charge?.serviceConversationId
+        ? canPay ? <ServiceCashbackNotice policy={charge.localRewardPolicy} />
+          : paid && charge.localRewardPolicy ? <LocalRewardNotice policy={charge.localRewardPolicy} /> : null
+        : charge?.localRewardPolicy ? <LocalRewardNotice policy={charge.localRewardPolicy} /> : null}
       {error ? <Text style={styles.errorInline}>{error}</Text> : null}
       {paid ? (
         <AppButton

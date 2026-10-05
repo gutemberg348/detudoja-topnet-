@@ -3,6 +3,10 @@ import { chatAttachmentFields, validateMessageAttachment } from "../chat-media/c
 
 const positiveId = (message) => z.coerce.number().int().positive(message);
 
+export const completeServiceOutsideAppSchema = z.object({
+  proposalId: positiveId("Proposta invalida"),
+}).strict();
+
 export const createServiceConversationSchema = z.object({
   description: z.string().trim().max(1200).optional().or(z.literal("")),
   destination: z.string().trim().max(300).optional().or(z.literal("")),

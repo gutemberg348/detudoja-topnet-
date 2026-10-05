@@ -3,18 +3,25 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useCallback, useState } from "react";
 import { ActivityIndicator, Image, Modal, Pressable, Share, StyleSheet, Text, View } from "react-native";
 import { AppButton } from "../components/AppButton";
+import { useFeedback } from "../components/FeedbackProvider";
 import { LocalRewardNotice } from "../components/LocalRewardNotice";
 import { PaymentFeedbackOverlay } from "../components/PaymentFeedbackOverlay";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { useRealtimeCharge } from "../hooks/useRealtimeCharge";
 import { getStoreSignupQr } from "../services/seller.api";
+import { cancelServiceConversation, completeServiceOutsideApp } from "../services/service-chats.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { formatarHora } from "../utils/date";
 import { formatarDinheiro } from "../utils/money";
+import { serviceQrActions } from "../utils/service-closure";
 import { colors, fonts, radius, shadow, spacing, typography } from "../utils/theme";
 
 export function ChargeQrScreen({ navigation, route }) {
   const { session } = useAuthStore();
+  const { notify } = useFeedback();
+  const [closingAction, setClosingAction] = useState("");
+  const [closingLoading, setClosingLoading] = useState(false);
+  const [closingError, setClosingError] = useState("");
   const [copied, setCopied] = useState(false);
   const [charge, setCharge] = useState(route.params?.charge ?? null);
   const [paymentReceived, setPaymentReceived] = useState(false);
@@ -98,6 +105,35 @@ export function ChargeQrScreen({ navigation, route }) {
   }
 
   const isStoreCharge = charge.merchant?.type === "STORE";
+  const serviceActions = serviceQrActions(charge);
+  const qrAvailable = !["CANCELADA", "EXPIRADA"].includes(charge.status);
+
+  async function closeService() {
+    if (closingLoading || !session?.accessToken) return;
+    if ((closingAction === "external" && !serviceActions.canCompleteOutsideApp)
+      || (closingAction === "cancel" && !serviceActions.canCancel)) {
+      setClosingError("O atendimento mudou. Volte para a conversa e confira o status atualizado.");
+      setClosingAction("");
+      return;
+    }
+    setClosingLoading(true);
+    setClosingError("");
+    try {
+      if (closingAction === "external") {
+        const response = await completeServiceOutsideApp(session.accessToken, charge.serviceConversationId, charge.serviceProposalId);
+        setCharge(response.charge);
+        notify("Servico concluido", "Recebimento fora do app registrado, sem pool, cashback ou ganhos da rede.");
+      } else {
+        await cancelServiceConversation(session.accessToken, charge.serviceConversationId);
+        setCharge((current) => ({ ...current, status: "CANCELADA", serviceConversationStatus: "CANCELADA" }));
+        notify("Atendimento cancelado", "A cobranca foi cancelada e nao pode mais ser paga.");
+      }
+      setClosingAction("");
+      navigation.goBack();
+    } catch (error) {
+      setClosingError(error.message ?? "Nao foi possivel encerrar o atendimento. Tente novamente.");
+    } finally { setClosingLoading(false); }
+  }
 
   return (
     <ScreenContainer contentContainerStyle={styles.content} edges={["left", "right"]}>
@@ -106,20 +142,25 @@ export function ChargeQrScreen({ navigation, route }) {
           <Ionicons color={colors.primaryDark} name="qr-code-outline" size={25} />
         </View>
         <View style={styles.headingCopy}>
-          <Text style={styles.kicker}>Cobranca pronta</Text>
-          <Text style={styles.title}>Peça para o cliente ler o QR.</Text>
+          <Text style={styles.kicker}>{serviceActions.completedOutsideApp ? "Atendimento concluido" : qrAvailable ? "Cobranca pronta" : "Cobranca encerrada"}</Text>
+          <Text style={styles.title}>{serviceActions.completedOutsideApp ? "Recebido fora do app" : qrAvailable ? "Peça para o cliente ler o QR." : "Este QR nao esta mais disponivel"}</Text>
         </View>
       </View>
 
       <View style={[styles.amountCard, charge.status === "PAGA" && styles.amountCardPaid]}>
         <Text style={styles.amountLabel}>{charge.title}</Text>
         <Text style={styles.amount}>{formatarDinheiro(charge.amountCents)}</Text>
-        <Text style={styles.expiry}>{charge.status === "PAGA" ? "Pagamento confirmado em tempo real" : charge.expiresAt ? `Valida ate ${formatExpiry(charge.expiresAt)}` : "Sem prazo para expirar"}</Text>
+        <Text style={styles.expiry}>{serviceActions.completedOutsideApp ? "Conclusao registrada pelo prestador, sem pagamento pelo app" : charge.status === "PAGA" ? "Pagamento confirmado em tempo real" : !qrAvailable ? "A cobranca nao pode mais ser paga" : charge.expiresAt ? `Valida ate ${formatExpiry(charge.expiresAt)}` : "Sem prazo para expirar"}</Text>
       </View>
 
-      <LocalRewardNotice policy={charge.localRewardPolicy} />
+      {charge.status === "PAGA" ? <LocalRewardNotice policy={charge.localRewardPolicy} /> : charge.serviceConversationId ? (
+        <View style={styles.notice}>
+          <Ionicons color={colors.primaryDark} name="information-circle-outline" size={20} />
+          <Text style={styles.noticeText}>Pool, cashback e ganhos da rede so sao gerados pelo fluxo de pagamento confirmado no app. Recebimento fora do app nao gera esses ganhos.</Text>
+        </View>
+      ) : <LocalRewardNotice policy={charge.localRewardPolicy} />}
 
-      <View style={styles.qrCard}>
+      {qrAvailable ? <View style={styles.qrCard}>
         <View style={styles.qrFrame}>
           <Image accessibilityLabel="QR da cobranca" source={{ uri: qrImageDataUrl }} style={styles.qrImage} />
         </View>
@@ -134,12 +175,22 @@ export function ChargeQrScreen({ navigation, route }) {
           </View>
           <Ionicons color={colors.primaryDark} name={copied ? "checkmark" : "copy-outline"} size={20} />
         </Pressable>
-      </View>
+      </View> : null}
 
       <View style={styles.notice}>
         <Ionicons color={colors.primaryDark} name="shield-checkmark-outline" size={20} />
         <Text style={styles.noticeText}>O QR so identifica a cobranca. O valor e o recebedor sao sempre conferidos no servidor.</Text>
       </View>
+
+      {serviceActions.canCompleteOutsideApp || serviceActions.canCancel ? (
+        <View style={styles.serviceActions}>
+          <Text style={styles.qrTitle}>Encerrar atendimento</Text>
+          <Text style={styles.noticeText}>Se recebeu em dinheiro ou por outro meio fora do app, registre aqui para encerrar a conversa.</Text>
+          {serviceActions.canCompleteOutsideApp ? <AppButton icon="cash-outline" onPress={() => { setClosingError(""); setClosingAction("external"); }} title="Recebi fora do app" /> : null}
+          {serviceActions.canCancel ? <AppButton icon="close-circle-outline" onPress={() => { setClosingError(""); setClosingAction("cancel"); }} title="Cancelar atendimento" variant="outline" /> : null}
+        </View>
+      ) : null}
+      {closingError && !closingAction ? <Text accessibilityLiveRegion="polite" style={styles.signupError}>{closingError}</Text> : null}
 
       {isStoreCharge ? (
         <Pressable
@@ -166,7 +217,21 @@ export function ChargeQrScreen({ navigation, route }) {
 
       {signupError ? <Text style={styles.signupError}>{signupError}</Text> : null}
 
-      <AppButton icon="checkmark-circle-outline" onPress={() => navigation.goBack()} title="Concluir" />
+      <AppButton icon="arrow-back-outline" onPress={() => navigation.goBack()} title={charge.serviceConversationId ? "Voltar para conversa" : "Voltar"} variant="outline" />
+
+      <Modal animationType="fade" onRequestClose={() => { if (!closingLoading) setClosingAction(""); }} transparent visible={Boolean(closingAction)}>
+        <View style={styles.signupBackdrop}>
+          <View style={styles.signupModal}>
+            <Text style={styles.signupModalTitle}>{closingAction === "external" ? "Voce ja recebeu fora do app?" : "Cancelar este atendimento?"}</Text>
+            <Text style={styles.signupModalText}>{closingAction === "external"
+              ? "Confirme apenas se o servico foi realizado e voce ja recebeu. A conversa sera concluida e o QR sera cancelado. Nao havera movimentacao de carteiras, pool, cashback ou ganhos da rede."
+              : "A conversa e a cobranca ainda nao paga serao canceladas. Este QR nao podera mais ser usado."}</Text>
+            {closingError ? <Text accessibilityLiveRegion="polite" style={styles.signupError}>{closingError}</Text> : null}
+            <AppButton loading={closingLoading} onPress={closeService} title={closingAction === "external" ? "Confirmar recebimento e finalizar" : "Confirmar cancelamento"} variant={closingAction === "external" ? "primary" : "danger"} />
+            <AppButton disabled={closingLoading} onPress={() => setClosingAction("")} title="Continuar atendimento" variant="outline" />
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         animationType="fade"
@@ -234,6 +299,7 @@ function formatExpiry(value) {
 }
 
 const styles = StyleSheet.create({
+  serviceActions: { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1, borderRadius: radius.lg, gap: spacing.md, padding: spacing.lg },
   amount: { color: colors.card, fontFamily: fonts.bold, fontSize: 34, fontWeight: "800" },
   amountCard: { backgroundColor: colors.primaryDark, borderRadius: radius.lg, gap: spacing.xs, padding: spacing.xl, ...shadow },
   amountCardPaid: { backgroundColor: colors.success },

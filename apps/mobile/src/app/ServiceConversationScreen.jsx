@@ -27,6 +27,7 @@ import { ChatMessageMeta } from "../components/ChatMessageMeta";
 import { ChatScrollToLatestButton } from "../components/ChatScrollToLatestButton";
 import { ChatTypingIndicator } from "../components/ChatTypingIndicator";
 import { ScreenContainer } from "../components/ScreenContainer";
+import { ServiceCashbackNotice } from "../components/ServiceCashbackNotice";
 import { StatePanel } from "../components/StatePanel";
 import { ShareAddressModal } from "./service/ShareAddressModal";
 import { useConversationRealtime } from "../hooks/useConversationRealtime";
@@ -58,6 +59,7 @@ import { formatarHora } from "../utils/date";
 import { formatarDinheiro } from "../utils/money";
 import { formatCep } from "../utils/authValidation";
 import { addressDirectionsUrl } from "../utils/chat-address";
+import { canCancelServiceConversation, serviceProposalHasPlatformPayment } from "../utils/service-closure";
 import {
   colors,
   fonts,
@@ -149,16 +151,12 @@ export function ServiceConversationScreen({ navigation, route }) {
   const isAwaitingServiceAcceptance = Boolean(
     !isCourierRide && conversation?.status === "ABERTA",
   );
-  const hasLockedPayment = (conversation?.proposals ?? []).some((proposal) => (
-    ["PAGA", "CONCLUIDA"].includes(proposal.status)
-    || ["PAGA", "PROCESSANDO"].includes(proposal.charge?.status)
-    || ["PAGO", "LIQUIDADO", "EM_DISPUTA"].includes(proposal.charge?.paymentStatus)
-  ));
   const canCancelRide = Boolean(
     isCourierRide
-    && ["ABERTA", "ACORDADA"].includes(conversation?.status)
-    && !hasLockedPayment,
+    && canCancelServiceConversation(conversation),
   );
+  const canCancelService = !isCourierRide && conversation?.status === "ACORDADA"
+    && canCancelServiceConversation(conversation);
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!session?.accessToken || !initial?.id) return;
@@ -713,10 +711,19 @@ export function ServiceConversationScreen({ navigation, route }) {
         <View style={styles.contextStrip}>
           <Ionicons color={colors.primaryDark} name="shield-checkmark-outline" size={18} />
           <Text style={styles.contextText}>
-            Combine os detalhes e envie uma proposta quando o valor estiver definido.
+            {conversation.isSeller || !["ABERTA", "ACORDADA"].includes(conversation.status)
+              ? "Combine os detalhes e envie uma proposta quando o valor estiver definido."
+              : "Combine o serviço e pague pelo app para ganhar cashback nos serviços elegíveis."}
           </Text>
         </View>
       )}
+
+      {canCancelService ? (
+        <Pressable accessibilityRole="button" disabled={Boolean(actionLoading)} onPress={() => setCancelOpen(true)} style={({ pressed }) => [styles.cancelRideButton, pressed && styles.pressed]}>
+          <Ionicons color={colors.danger} name="close-circle-outline" size={16} />
+          <Text style={styles.cancelRideText}>Cancelar atendimento</Text>
+        </Pressable>
+      ) : null}
 
       {isCustomerMotoboyRide && !conversation.isSeller && conversation.canDispute && conversation.status === "ENCERRADA" ? (
         <Pressable accessibilityRole="button" disabled={Boolean(actionLoading)} onPress={disputeCompletion} style={styles.rideDispute}>
@@ -837,6 +844,7 @@ export function ServiceConversationScreen({ navigation, route }) {
         proposal={latestProposal}
       />
       <CancelRideModal
+        isCourierRide={isCourierRide}
         loading={actionLoading === "cancel-ride"}
         onCancel={cancelRide}
         onClose={() => setCancelOpen(false)}
@@ -961,33 +969,36 @@ function ProposalCard({
 }) {
   const isSeller = conversation.isSeller;
   const chargeStatus = proposal.charge?.status;
-  const paid = ["PAGA", "CONCLUIDA"].includes(proposal.status) || chargeStatus === "PAGA";
+  const paid = serviceProposalHasPlatformPayment(proposal)
+    && (proposal.status === "PAGA" || proposal.status === "CONCLUIDA" || chargeStatus === "PAGA");
+  const completedOutsideApp = Boolean(proposal.completedOutsideApp);
+  const completed = paid || completedOutsideApp;
   const pending = proposal.status === "PENDENTE";
   const activeCharge = proposal.status === "ACEITA" && chargeStatus === "ATIVA";
   const expired = chargeStatus === "EXPIRADA";
 
   return (
-    <View style={[styles.proposalCard, paid && styles.proposalCardPaid]}>
+    <View style={[styles.proposalCard, completed && styles.proposalCardPaid]}>
       <View style={styles.proposalTopline}>
-        <View style={[styles.proposalIcon, paid && styles.proposalIconPaid]}>
+        <View style={[styles.proposalIcon, completed && styles.proposalIconPaid]}>
           <Ionicons
-            color={paid ? colors.card : colors.primaryDark}
-            name={paid ? "checkmark" : "receipt-outline"}
+            color={completed ? colors.card : colors.primaryDark}
+            name={completed ? "checkmark" : "receipt-outline"}
             size={20}
           />
         </View>
         <View style={styles.proposalCopy}>
-          <Text style={styles.proposalLabel}>{proposalStatusLabel(proposal)}</Text>
+          <Text style={styles.proposalLabel}>{proposalStatusLabel(proposal, conversation.status)}</Text>
           <Text style={styles.proposalAmount}>{formatarDinheiro(proposal.amountCents)}</Text>
         </View>
         <View style={styles.paymentPill}>
           <Ionicons
             color={colors.primaryDark}
-            name={proposal.paymentMode === "ONLINE" ? "phone-portrait-outline" : "qr-code-outline"}
+            name={completedOutsideApp ? "cash-outline" : proposal.paymentMode === "ONLINE" ? "phone-portrait-outline" : "qr-code-outline"}
             size={14}
           />
           <Text style={styles.paymentPillText}>
-            {proposal.paymentMode === "ONLINE" ? "Online" : "QR presencial"}
+            {completedOutsideApp ? "Fora do app" : proposal.paymentMode === "ONLINE" ? "Online" : "QR presencial"}
           </Text>
         </View>
       </View>
@@ -997,6 +1008,8 @@ function ProposalCard({
           {proposal.description}
         </Text>
       ) : null}
+
+      {completedOutsideApp ? <Text style={styles.proposalHint}>O prestador informou que recebeu fora do app. Atendimento concluido, sem pool, cashback ou ganhos da rede.</Text> : null}
 
       {pending && !isSeller && conversation.status === "ACORDADA" ? (
         <View style={styles.proposalActions}>
@@ -1032,6 +1045,8 @@ function ProposalCard({
           title="Pagar pela plataforma"
         />
       ) : null}
+
+      {activeCharge && !isSeller ? <ServiceCashbackNotice /> : null}
 
       {activeCharge && isSeller && proposal.paymentMode === "QR_PRESENCIAL" ? (
         <AppButton
@@ -1253,7 +1268,7 @@ function ReviewModal({ form, loading, onChange, onClose, onSubmit, open }) {
   );
 }
 
-function CancelRideModal({ loading, onCancel, onClose, open }) {
+function CancelRideModal({ isCourierRide, loading, onCancel, onClose, open }) {
   return (
     <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
       <View style={styles.modalOverlay}>
@@ -1262,7 +1277,7 @@ function CancelRideModal({ loading, onCancel, onClose, open }) {
           <View style={styles.cancelModalIcon}>
             <Ionicons color={colors.danger} name="close-circle-outline" size={27} />
           </View>
-          <Text style={styles.cancelModalTitle}>Cancelar esta corrida?</Text>
+          <Text style={styles.cancelModalTitle}>{isCourierRide ? "Cancelar esta corrida?" : "Cancelar este atendimento?"}</Text>
           <Text style={styles.cancelModalText}>
             A conversa sera encerrada e qualquer cobranca ainda nao paga sera cancelada. Pagamentos confirmados nunca sao cancelados por esta acao.
           </Text>
@@ -1275,7 +1290,7 @@ function CancelRideModal({ loading, onCancel, onClose, open }) {
           <AppButton
             disabled={loading}
             onPress={onClose}
-            title="Continuar corrida"
+            title={isCourierRide ? "Continuar corrida" : "Continuar atendimento"}
             variant="outline"
           />
         </View>
@@ -1306,7 +1321,7 @@ function ProposalDecisionModal({
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={styles.modalOverlay}
       >
-        <View style={styles.decisionModalCard}>
+        <ScrollView contentContainerStyle={styles.decisionModalContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.decisionModalCard}>
           <View style={styles.decisionIcon}>
             <Ionicons color={colors.card} name="receipt-outline" size={25} />
           </View>
@@ -1331,16 +1346,18 @@ function ProposalDecisionModal({
               icon="wallet-outline"
               label="Pelo aplicativo"
               onPress={() => onPaymentModeChange("ONLINE")}
-              text="Pague agora com suas carteiras"
+              text="Pague com a carteira ou Pix"
             />
             <PaymentOption
               active={!isOnline}
               icon="qr-code-outline"
-              label="No local"
+              label="QR presencial"
               onPress={() => onPaymentModeChange("QR_PRESENCIAL")}
-              text="Use o QR exibido pelo entregador"
+              text="Leia o QR do prestador pelo app"
             />
           </View>
+
+          <ServiceCashbackNotice />
 
           {isCourierRide ? (
             <Text style={styles.decisionText}>
@@ -1362,7 +1379,7 @@ function ProposalDecisionModal({
             title={isFixedPrice ? "Cancelar este atendimento" : "Recusar e continuar negociando"}
             variant="outline"
           />
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -1390,11 +1407,12 @@ function PaymentOption({ active, icon, label, onPress, text }) {
   );
 }
 
-function proposalStatusLabel(proposal) {
+function proposalStatusLabel(proposal, conversationStatus) {
+  if (proposal.completedOutsideApp) return "Concluido · recebido fora do app";
   if (proposal.status === "CONCLUIDA") return "Servico concluido";
   if (proposal.status === "PAGA" || proposal.charge?.status === "PAGA") return "Pagamento confirmado";
   if (proposal.status === "RECUSADA") return "Proposta recusada";
-  if (proposal.status === "CANCELADA") return "Proposta substituida";
+  if (proposal.status === "CANCELADA") return conversationStatus === "CANCELADA" ? "Proposta cancelada" : "Proposta substituida";
   if (proposal.charge?.status === "EXPIRADA") return "Cobranca expirada";
   if (proposal.status === "ACEITA") return "Proposta aceita";
   return "Nova proposta";
@@ -1465,7 +1483,8 @@ const styles = StyleSheet.create({
   decisionError: { color: colors.danger, fontFamily: fonts.medium, fontSize: typography.caption, textAlign: "center" },
   decisionEyebrow: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: 10, textAlign: "center", textTransform: "uppercase" },
   decisionIcon: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: radius.round, height: 54, justifyContent: "center", width: 54 },
-  decisionModalCard: { alignItems: "stretch", backgroundColor: colors.card, borderRadius: 24, gap: spacing.md, maxWidth: 420, padding: spacing.xl, width: "92%", ...shadowSoft },
+  decisionModalCard: { backgroundColor: colors.card, borderRadius: 24, flexGrow: 0, maxHeight: "95%", maxWidth: 420, width: "92%", ...shadowSoft },
+  decisionModalContent: { gap: spacing.md, padding: spacing.xl },
   decisionPaymentCard: { alignItems: "center", backgroundColor: colors.cardMuted, borderColor: colors.border, borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.sm, padding: spacing.md },
   decisionPaymentCopy: { flex: 1, gap: 2 },
   decisionPaymentIcon: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round, height: 42, justifyContent: "center", width: 42 },

@@ -1,5 +1,99 @@
 # Front Mobile
 
+## Avisos de cashback ao contratar servicos (2026-10-05)
+
+Cliente ve `Cashback ao pagar pelo app` na escolha do prestador, no aceite
+da proposta e na proposta aceita, em cards curtos com icone de presente.
+Conversa sem proposta incorpora o beneficio ao texto de orientacao existente.
+O aviso explica que pagamento online ou leitura do QR dentro do app pode gerar
+cashback nos servicos elegiveis; pagamentos por fora nao geram cashback.
+Nao existe popup promocional, envio de mensagem no chat ou push repetitivo.
+Prestador nao recebe incentivo no chat; atendimentos pagos/encerrados tambem
+nao recebem novos convites para pagar.
+
+Antes de pagar, `ChargePaymentScreen` mostra a mensagem de servico em vez
+do aviso tecnico de distribuicao. Quando localRewardPolicy esta disponivel,
+o texto informa beneficio previsto, ausencia ou valor minimo de cashback.
+Sem previa, a mensagem condiciona o beneficio a servicos elegiveis, sem
+inventar percentual/valor ou afirmar credito ja liberado. Loja continua com
+seu aviso existente. Sem requisicao API nova nem mudanca financeira.
+O modal de aceite e rolavel e tem altura limitada para nao cortar botoes em
+celulares pequenos. Opcao presencial foi renomeada para `QR presencial`, com
+instrucao de ler o QR do prestador pelo app. 96 testes e exports Android,
+iOS e web passaram; conferencia nativa em aparelhos ainda pendente.
+App web compilado validou 12 cenarios com API simulada, incluindo botoes
+alcancaveis no aceite geral/corrida em 320x568, aviso unico em proposta
+online/QR e texto correto com cashback/ausencia/valor minimo. Avisos nao
+disparam pagamento/aceite e nao aparecem como incentivo depois de pagar ou
+com cobranca processando/cancelada/concluida fora do app.
+
+## Encerramento de servico e recebimento fora do app (2026-10-05)
+
+Na tela aberta por `Exibir QR presencial`, propostas aceitas e ainda nao pagas
+oferecem `Recebi fora do app` e `Cancelar atendimento`. O recebimento exige
+confirmar que o servico foi prestado e o valor ja foi recebido; encerra a
+conversa e cancela o QR, sem carteiras, pool, cashback, ganhos da rede ou
+repasse. Somente o prestador registra recebimento. Entregas de lojas/pedidos
+continuam no fluxo proprio; pagamento vinculado/em andamento/confirmado
+bloqueia o encerramento externo. Acoes possuem carregamento e erro para retry.
+
+O chat identifica `Concluido · recebido fora do app`, mostra a mensagem de
+auditoria e retira pagamento/cancelamento dessa proposta. Cancelar atendimento
+tambem esta acessivel no chat antes do pagamento, para cliente ou prestador.
+Voltar do QR apenas navega. Cashback liberado no QR de servico so aparece
+apos status PAGA; antes, o aviso explica a condicao de pagamento pelo app.
+Eventos atualizam os participantes e o retorno a conversa consulta o servidor.
+Nao e necessario novo polling para concluir manualmente. Codigo validado em
+96 testes mobile e exports Android/iOS/web. Interface web compilada validou
+confirmacao sem envio antecipado, cancelamento, recebimento externo, erro com
+nova tentativa, retorno ao chat atualizado e ocultacao de acoes PROCESSANDO
+com API simulada. Conferir nos aparelhos apos nova build.
+
+## Imagens de categorias ao trocar filtros (2026-10-05)
+
+O video recebido mostra imagens inicialmente presentes que somem ao selecionar
+categorias em Buscar. O antigo CategoryCard mudava a imagem de absolute/opacity 0
+para posicionamento normal ao receber onLoad, desmontava o icone de apoio e
+resetava estado por effect da URL. O recorte nativo da FlatList era o padrao
+Android, que pode ocultar conteudo conforme a
+[documentacao do React Native](https://reactnative.dev/docs/flatlist#removeclippedsubviews).
+Nao foi possivel reproduzir o recorte nativo em aparelho conectado.
+
+`MarketplaceCategoryCard` agora isola a arte em um componente memoizado com
+key por URL e source estavel. A imagem usa absoluteFill e fica sempre visivel;
+onLoad altera somente o icone de apoio. A selecao modifica borda, destaque e
+check sem reiniciar a arte. URL diferente ganha estado novo; erro deixa o icone
+disponivel. Container do icone nao e colapsado pelo Android. FlatList e as duas
+faixas horizontais usam removeClippedSubviews=false, preservando a janela de
+virtualizacao e a paginacao de produtos.
+
+Verificacao: video inspecionado; simulacao do app web compilado com imagens
+atrasadas, 12 trocas de categoria, troca Lojas/Produtos/Servicos, retorno com
+cache e imagem ausente/404 passou sem imagens ocultas ou novos downloads na
+selecao. 93 testes mobile e exports Android/iOS/web aprovados. Ainda conferir
+no Android fisico apos instalar o APK novo. Sem mudancas de API ou dependencias.
+
+## Camera QR sem imagem no Android (2026-10-05)
+
+O scanner compartilhado usava `StyleSheet.absoluteFillObject`, ausente no
+React Native 0.86.3 instalado. O CameraView recebia estilo undefined e ficava
+sem dimensoes, apesar de abrir a camera e disparar onCameraReady. O fundo
+verde e a moldura no topo eram visiveis, mas o preview nao aparecia.
+
+Camera, moldura e estado de carregamento/erro agora usam `StyleSheet.absoluteFill`.
+As mesmas referencias removidas foram corrigidas nas sobreposicoes de carrinho,
+produto e loja. Nenhum uso da propriedade antiga permanece em src. A referencia
+suportada consta na [documentacao do React Native](https://reactnative.dev/docs/stylesheet).
+Permissoes, desmontagem ao perder foco, timeout, retry e codigo manual foram
+preservados. Pagamentos ainda exigem a confirmacao na tela seguinte.
+
+Validacao: reproduzido o estilo undefined usando o StyleSheet nativo realmente
+instalado; renderizacao corrigida tem position absolute e quatro bordas zero,
+moldura centralizada, loading e retry. Sem foco/permissao nao monta CameraView;
+antes de ready ou em erro nao habilita leitura. Passaram 93 testes mobile e
+exports Android/iOS. Nao houve teste de imagem no aparelho fisico. Compilar e
+instalar um APK novo para receber a correcao; nao ha mudanca de API.
+
 ## Produtos carregados ao rolar (2026-10-05)
 
 - Buscar > Produtos pedia ate 50 itens e montava todos os cartoes/imagens em um

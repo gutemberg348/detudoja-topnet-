@@ -135,6 +135,12 @@ export function cancelServiceConversation(token, conversationId) {
   });
 }
 
+export function completeServiceOutsideApp(token, conversationId, proposalId) {
+  return apiRequest(`/api/app/service-chats/${conversationId}/complete-outside-app`, {
+    body: { proposalId }, method: "POST", token,
+  });
+}
+
 export function setServiceConversationTyping(token, conversationId, isTyping) {
   return apiRequest(`/api/app/service-chats/${conversationId}/typing`, {
     body: { isTyping }, method: "POST", token,

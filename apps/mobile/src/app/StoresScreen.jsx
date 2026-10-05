@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,6 +13,7 @@ import {
 import { BrandLogo } from "../components/BrandLogo";
 import { MarketplaceLocationModal } from "../components/MarketplaceLocationModal";
 import { MarketplaceProductCard } from "../components/MarketplaceProductCard";
+import { MarketplaceCategoryCard } from "../components/MarketplaceCategoryCard";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { SearchBar } from "../components/SearchBar";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
@@ -32,7 +32,6 @@ import { getServiceTypes } from "../services/service-chats.api";
 import { updateCurrentUser } from "../services/users.api";
 import { readCache } from "../services/read-cache";
 import { useAuthStore } from "../stores/useAuthStore";
-import { resolveMediaUrl } from "../utils/media";
 import { matchesSearchText, normalizeSearchText, serviceSearchScore } from "../utils/search";
 import { serviceIconName } from "../utils/service-icons";
 import {
@@ -421,10 +420,11 @@ export function StoresScreen({ navigation, route }) {
             <ScrollView
               contentContainerStyle={styles.categoryList}
               horizontal
+              removeClippedSubviews={false}
               showsHorizontalScrollIndicator={false}
             >
               {matchingCategories.map((item) => (
-                <CategoryCard
+                <MarketplaceCategoryCard
                   category={item}
                   key={item.id}
                   label={item.name}
@@ -446,16 +446,17 @@ export function StoresScreen({ navigation, route }) {
           <ScrollView
             contentContainerStyle={styles.categoryList}
             horizontal
+            removeClippedSubviews={false}
             showsHorizontalScrollIndicator={false}
           >
-            <CategoryCard
+            <MarketplaceCategoryCard
               active={category === "todas"}
               icon="apps-outline"
               label="Todas"
               onPress={() => selectCategory("todas")}
             />
             {regularCategories.map((item) => (
-              <CategoryCard
+              <MarketplaceCategoryCard
                 active={category === item.id}
                 category={item}
                 key={item.id}
@@ -631,6 +632,9 @@ export function StoresScreen({ navigation, route }) {
         maxToRenderPerBatch={2}
         windowSize={3}
         updateCellsBatchingPeriod={50}
+        // Native clipping can detach images in the horizontal category header.
+        // FlatList still limits mounted product rows through its render window.
+        removeClippedSubviews={false}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.listContent, showProductResults && styles.listProductContent]}
@@ -710,56 +714,6 @@ function ResultModeOption({ active, icon, label, onPress }) {
         <Ionicons color={active ? colors.card : colors.textSecondary} name={icon} size={17} />
       </View>
       <Text style={[styles.modeText, active && styles.modeTextActive]}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function CategoryCard({ active, category, icon, label, onPress }) {
-  const iconUrl = resolveMediaUrl(category?.iconUrl);
-  const [imageLoaded, setImageLoaded] = useState(false);
-  const [imageFailed, setImageFailed] = useState(false);
-
-  useEffect(() => {
-    setImageLoaded(false);
-    setImageFailed(false);
-  }, [iconUrl]);
-
-  return (
-    <Pressable
-      accessibilityLabel={`Filtrar por ${label}`}
-      accessibilityRole="button"
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.categoryCard,
-        active && styles.categoryCardActive,
-        pressed && styles.pressed,
-      ]}
-    >
-      <View style={[styles.categoryIcon, active && styles.categoryIconActive]}>
-        {!imageLoaded || imageFailed ? (
-          <Ionicons
-            color={colors.primaryDark}
-            name={icon ?? "storefront-outline"}
-            size={24}
-          />
-        ) : null}
-        {iconUrl && !imageFailed ? (
-          <Image
-            onError={() => { setImageFailed(true); setImageLoaded(false); }}
-            onLoad={() => setImageLoaded(true)}
-            source={{ uri: iconUrl }}
-            style={[styles.categoryImage, !imageLoaded && styles.categoryImageLoading]}
-          />
-        ) : null}
-      </View>
-      <Text numberOfLines={2} style={[styles.categoryText, active && styles.categoryTextActive]}>
-        {label}
-      </Text>
-      {active ? (
-        <View style={styles.categoryCheck}>
-          <Ionicons color={colors.primaryDark} name="checkmark" size={12} />
-        </View>
-      ) : null}
     </Pressable>
   );
 }
@@ -904,65 +858,7 @@ const styles = StyleSheet.create({
     width: "100%",
     zIndex: 1,
   },
-  categoryCard: {
-    alignItems: "center",
-    backgroundColor: colors.card,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    gap: spacing.sm,
-    height: 96,
-    justifyContent: "center",
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-    position: "relative",
-    width: 88,
-  },
-  categoryCardActive: {
-    backgroundColor: colors.primarySoft,
-    borderColor: colors.primary,
-  },
-  categoryCheck: {
-    alignItems: "center",
-    backgroundColor: colors.card,
-    borderColor: colors.primarySoft,
-    borderRadius: radius.round,
-    borderWidth: 2,
-    height: 22,
-    justifyContent: "center",
-    position: "absolute",
-    right: 5,
-    top: 5,
-    width: 22,
-  },
-  categoryIcon: {
-    alignItems: "center",
-    backgroundColor: colors.primarySoft,
-    borderRadius: radius.round,
-    height: 38,
-    justifyContent: "center",
-    overflow: "hidden",
-    width: 38,
-  },
-  categoryIconActive: {
-    backgroundColor: colors.card,
-    borderColor: colors.primary,
-    borderWidth: 1,
-  },
-  categoryImage: { height: "100%", width: "100%" },
-  categoryImageLoading: { position: "absolute", opacity: 0 },
   categoryList: { gap: spacing.sm, paddingBottom: spacing.xs, paddingRight: spacing.sm },
-  categoryText: {
-    color: colors.textPrimary,
-    fontFamily: fonts.bold,
-    fontSize: typography.caption,
-    fontWeight: "700",
-    lineHeight: 15,
-    maxWidth: "100%",
-    minHeight: 30,
-    textAlign: "center",
-  },
-  categoryTextActive: { color: colors.primaryDark },
   content: { paddingBottom: 0 },
   bodyProducts: { paddingBottom: spacing.md },
   list: { flex: 1, width: "100%" },

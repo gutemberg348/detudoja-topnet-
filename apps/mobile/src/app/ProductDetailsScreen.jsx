@@ -374,7 +374,7 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   heroOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   infoGrid: {
     flexDirection: "row",

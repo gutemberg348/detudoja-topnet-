@@ -13,6 +13,7 @@ import {
 import { AccountAddressRequirementModal } from "../components/AccountAddressRequirementModal";
 import { PageHeader } from "../components/PageHeader";
 import { ScreenContainer } from "../components/ScreenContainer";
+import { ServiceCashbackNotice } from "../components/ServiceCashbackNotice";
 import { StatePanel } from "../components/StatePanel";
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { ApiError } from "../services/api";
@@ -313,6 +314,8 @@ export function ServiceProvidersScreen({ navigation, route }) {
           title={`${serviceName} online`}
         />
       )}
+
+      <ServiceCashbackNotice />
 
       {isCourier ? (
         <View style={styles.courierSafety}>

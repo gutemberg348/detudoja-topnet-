@@ -2,6 +2,7 @@ import {
   acceptServiceConversation,
   acceptServiceProposal,
   cancelServiceConversation,
+  completeServiceOutsideApp,
   confirmServiceCompletion,
   createServiceProposal,
   createServiceConversation,
@@ -197,4 +198,10 @@ export async function cancelServiceConversationController(req, res, next) {
   } catch (error) {
     next(error);
   }
+}
+
+export async function completeServiceOutsideAppController(req, res, next) {
+  try {
+    res.json(await completeServiceOutsideApp(req.auth.user.id, req.params.conversationId, req.body));
+  } catch (error) { next(error); }
 }

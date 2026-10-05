@@ -5,6 +5,7 @@ import {
   emitServiceChatUpdated,
   emitWalletUpdated,
   emitServiceChatTyping,
+  emitChargeUpdated,
 } from "../../realtime/socket.server.js";
 import { AppError } from "../../utils/errors.js";
 import { commercialTier2UserWhere } from "../../utils/commercial-access.js";
@@ -13,6 +14,7 @@ import { cityAddressWhere, sameCity } from "../../utils/location.js";
 import { formatMoney } from "../../utils/money.js";
 import {
   createServiceConversationCharge,
+  getGeneratedChargeQr,
   serializeChargeWithQr,
 } from "../charges/charge.service.js";
 import { deletePrivateChatAttachment, savePrivateChatAttachment, serializeChatAttachment } from "../chat-media/chat-media.service.js";
@@ -22,6 +24,7 @@ import {
 } from "../courier/courier-availability.js";
 import { settlePaidAutonomousChargeEarnings } from "../earnings/order-earnings.service.js";
 import { completePaidCourierRide, isCourierConversation, lockCourierConversation } from "./courier-completion.js";
+import { cancelUnpaidServiceInTransaction, completeServiceOutsideAppInTransaction, isServiceCompletedOutsideApp, lockServiceProposalChanges } from "./service-closure.js";
 import { sendExpoPushToUsers } from "../notifications/notifications.service.js";
 import {
   availableServiceWhere,
@@ -282,6 +285,7 @@ function serializeProposal(proposal) {
         }
       : null,
     completedAt: proposal.concluido_em?.toISOString() ?? null,
+    completedOutsideApp: isServiceCompletedOutsideApp(proposal),
     createdAt: proposal.criado_em.toISOString(),
     description: proposal.descricao,
     id: proposal.id,
@@ -1234,6 +1238,7 @@ export async function acceptServiceConversation(userId, conversationId) {
 
 export async function createServiceProposal(userId, conversationId, data) {
   const conversation = await findAccessibleConversation(userId, conversationId);
+  const isCourierRide = isCourierConversation(conversation);
   const isSeller = conversation.vendedor.usuario_id === userId;
   const latestProposal = conversation.propostas?.at(-1) ?? null;
 
@@ -1260,6 +1265,11 @@ export async function createServiceProposal(userId, conversationId, data) {
   }
 
   const result = await serviceChatsRepository.transaction(async (database) => {
+    await lockServiceProposalChanges(database, conversation.id);
+    const current = await database.conversaServico.findUnique({ select: { status: true }, where: { id: conversation.id } });
+    if (current?.status !== "ACORDADA" && !(isCourierRide && current?.status === "AGUARDANDO_CONFIRMACAO")) {
+      throw new AppError("Esta conversa nao aceita novas propostas", 409);
+    }
     const repository = createServiceChatsRepository(database);
     await assertSellerCanOperateConversation(repository, conversation, userId);
     await repository.updateProposals({
@@ -1315,6 +1325,7 @@ export async function acceptServiceProposal(userId, conversationId, proposalId, 
   }
 
   const result = await serviceChatsRepository.transaction(async (database) => {
+    await lockServiceProposalChanges(database, conversation.id);
     const repository = createServiceChatsRepository(database);
     await repository.requireCommercialTier2(conversation.vendedor.usuario_id);
     const claim = await repository.updateProposals({
@@ -1346,10 +1357,11 @@ export async function acceptServiceProposal(userId, conversationId, proposalId, 
       serviceName: conversation.servico_vendedor?.tipo_servico?.nome ?? conversation.segmento_venda.nome,
       valueCents: Number(proposal.valor_centavos),
     });
-    await repository.updateConversation({
+    const stillOpen = await repository.updateConversations({
       data: { status: "ACORDADA" },
-      where: { id: conversation.id },
+      where: { id: conversation.id, status: "ACORDADA" },
     });
+    if (stillOpen.count !== 1) throw new AppError("Este atendimento foi encerrado antes do aceite", 409);
     await repository.createMessage({
       data: {
         autor_usuario_id: userId,
@@ -1427,71 +1439,56 @@ export async function cancelServiceConversation(userId, conversationId) {
     conversation.loja_solicitante_id
     || conversation.servico_vendedor?.tipo_servico?.tipo_operacao === "ENTREGA_LOCAL",
   );
-  if (!["ABERTA", "ACORDADA"].includes(conversation.status)) {
-    throw new AppError("Este atendimento nao pode mais ser cancelado", 409);
-  }
-
-  const paymentLocked = (conversation.propostas ?? []).some((proposal) => (
-    ["PAGA", "CONCLUIDA"].includes(proposal.status)
-    || ["PAGA", "PROCESSANDO"].includes(proposal.cobranca?.status)
-    || ["PAGO", "LIQUIDADO", "EM_DISPUTA"].includes(proposal.cobranca?.pagamento?.status)
-  ));
-  if (paymentLocked) {
-    throw new AppError("A corrida possui pagamento confirmado e nao pode ser cancelada", 409);
-  }
-
-  const now = new Date();
   const isSeller = conversation.vendedor.usuario_id === userId;
-  await serviceChatsRepository.transaction([
-    serviceChatsRepository.updateConversation({
-      data: { encerrado_em: now, status: "CANCELADA" },
-      where: { id: conversation.id },
-    }),
-    serviceChatsRepository.updateProposals({
-      data: { status: "CANCELADA" },
-      where: {
-        conversa_servico_id: conversation.id,
-        status: { in: ["PENDENTE", "ACEITA"] },
-      },
-    }),
-    serviceChatsRepository.updateCharges({
-      data: { cancelada_em: now, status: "CANCELADA" },
-      where: {
-        proposta_servico: { conversa_servico_id: conversation.id },
-        status: { in: ["ATIVA", "EXPIRADA"] },
-      },
-    }),
-    serviceChatsRepository.updateCourierRequests({
-      data: { cancelado_em: now, status: "CANCELADA" },
-      where: { conversa_servico_id: conversation.id, status: "ACEITA" },
-    }),
-    serviceChatsRepository.createMessage({
-      data: {
-        autor_usuario_id: userId,
-        conversa_servico_id: conversation.id,
-        ...(isSeller ? { lido_vendedor_em: now } : { lido_cliente_em: now }),
-        mensagem: isCourierRide
-          ? `Corrida cancelada ${isSeller ? "pelo motoboy" : "pelo solicitante"}.`
-          : `Chamado cancelado ${isSeller ? "pelo prestador" : "pelo cliente"}.`,
-        origem: "SISTEMA",
-      },
-    }),
-  ]);
+  const result = await serviceChatsRepository.transaction((database) => (
+    cancelUnpaidServiceInTransaction(database, userId, conversation.id)
+  ));
 
   const updatedConversation = await findAccessibleConversation(userId, conversation.id);
-  notifyConversation(updatedConversation, "service-cancelled");
-  pushServiceNotification(
-    updatedConversation,
-    isSeller ? updatedConversation.cliente_usuario_id : updatedConversation.vendedor.usuario_id,
-    isCourierRide ? "A corrida foi cancelada." : "O atendimento foi cancelado.",
-    "service-cancelled",
-  );
+  if (result.changed) {
+    for (const chargeId of result.chargeIds ?? []) {
+      const { charge } = await getGeneratedChargeQr(updatedConversation.vendedor.usuario_id, chargeId);
+      emitChargeUpdated(charge, { sellerUserId: updatedConversation.vendedor.usuario_id });
+    }
+    notifyConversation(updatedConversation, "service-cancelled");
+    pushServiceNotification(
+      updatedConversation,
+      isSeller ? updatedConversation.cliente_usuario_id : updatedConversation.vendedor.usuario_id,
+      isCourierRide ? "A corrida foi cancelada." : "O atendimento foi cancelado.",
+      "service-cancelled",
+    );
+  }
   notifyCourierAvailability(
     updatedConversation,
     isOperationalServiceAvailable(updatedConversation.servico_vendedor)
       && !(await isCourierSellerBusy(serviceChatsRepository, updatedConversation.vendedor_id)),
   );
   return { conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
+}
+
+export async function completeServiceOutsideApp(userId, conversationId, data) {
+  const conversation = await findAccessibleConversation(userId, conversationId);
+  const proposalId = parsePositiveId(data.proposalId, "Proposta invalida");
+  if (conversation.vendedor.usuario_id !== userId) {
+    throw new AppError("Somente o prestador pode registrar o recebimento fora do app", 403);
+  }
+  const result = await serviceChatsRepository.transaction(async (database) => {
+    await assertSellerCanOperateConversation(createServiceChatsRepository(database), conversation, userId);
+    return completeServiceOutsideAppInTransaction(database, userId, conversation.id, proposalId);
+  });
+  const updatedConversation = await findAccessibleConversation(userId, conversation.id);
+  const { charge } = await getGeneratedChargeQr(userId, result.chargeId);
+  if (result.changed) {
+    emitChargeUpdated(charge, { sellerUserId: userId });
+    notifyConversation(updatedConversation, "service-completed-outside-app");
+    pushServiceNotification(updatedConversation, updatedConversation.cliente_usuario_id,
+      "O prestador concluiu o atendimento e informou que recebeu fora do app. Este pagamento nao gera cashback ou ganhos da rede.",
+      "service-completed-outside-app");
+    notifyCourierAvailability(updatedConversation,
+      isOperationalServiceAvailable(updatedConversation.servico_vendedor)
+        && !(await isCourierSellerBusy(serviceChatsRepository, updatedConversation.vendedor_id)));
+  }
+  return { charge, conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
 }
 
 export async function markServiceDelivered(userId, conversationId) {

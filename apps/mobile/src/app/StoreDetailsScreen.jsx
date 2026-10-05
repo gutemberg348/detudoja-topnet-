@@ -540,10 +540,10 @@ const styles = StyleSheet.create({
   benefitValue: { alignItems: "center", backgroundColor: colors.card, borderRadius: radius.round, justifyContent: "center", minHeight: 40, minWidth: 56, paddingHorizontal: spacing.sm },
   benefitValueText: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: typography.label, fontWeight: "800" },
   bannerFallback: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   bannerImage: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     height: "100%",
     width: "100%",
   },
@@ -650,7 +650,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   heroOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   logo: {
     alignItems: "center",

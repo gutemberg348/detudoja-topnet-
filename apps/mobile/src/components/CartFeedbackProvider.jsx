@@ -104,7 +104,7 @@ export function useCartFeedback() {
 }
 
 const styles = StyleSheet.create({
-  overlay: { ...StyleSheet.absoluteFillObject, zIndex: 99, elevation: 8 },
+  overlay: { ...StyleSheet.absoluteFill, zIndex: 99, elevation: 8 },
   dot: {
     position: "absolute",
     width: 16,

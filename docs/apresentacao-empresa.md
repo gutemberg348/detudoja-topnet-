@@ -1,6 +1,18 @@
 # DeTudoJa - auditoria geral e apresentacao
 
-Ultima atualizacao: 2026-10-04
+Ultima atualizacao: 2026-10-05
+
+## Conclusao de servicos recebidos fora do app (2026-10-05)
+
+O prestador pode registrar que concluiu e recebeu em dinheiro ou por outro
+meio fora da plataforma na tela do QR presencial, ou cancelar atendimento sem
+pagamento. Existe confirmacao, registro na conversa e aviso ao cliente. O QR
+anterior e cancelado. Recebimento externo nao movimenta carteiras nem gera
+pool, cashback, rede ou repasse; esses ganhos continuam exclusivos do fluxo
+financeiro da plataforma. Pagamento iniciado/confirmado no app impede a
+conversao para recebimento externo. Entregas ligadas a pedidos seguem a
+confirmacao propria. Codigo e testes locais prontos; publicar API e novo app
+e conferir em aparelhos reais.
 
 ## Disponibilidade e avisos (2026-10-04)
 

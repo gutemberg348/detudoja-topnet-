@@ -99,7 +99,7 @@ export function QrCamera({ onBarcodeScanned, height = 305 }) {
         onBarcodeScanned={ready && !error ? onBarcodeScanned : undefined}
         onCameraReady={() => { setReady(true); setError(""); }}
         onMountError={() => setError("Nao foi possivel abrir a camera. Confira a permissao e tente novamente.")}
-        style={StyleSheet.absoluteFillObject} /> : null}
+        style={StyleSheet.absoluteFill} /> : null}
       {active && ready && !error ? <View pointerEvents="none" style={styles.frame}><View style={styles.corner} /></View> : null}
       {!ready || error ? <View accessibilityLiveRegion="polite" style={styles.status}>
         {error ? <Ionicons color={colors.card} name="camera-outline" size={28} /> : <ActivityIndicator color={colors.card} />}
@@ -115,9 +115,9 @@ export function QrCamera({ onBarcodeScanned, height = 305 }) {
 
 const styles = StyleSheet.create({
   shell: { backgroundColor: "#102019", borderRadius: radius.lg, overflow: "hidden", position: "relative" },
-  frame: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
+  frame: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center" },
   corner: { borderColor: "#A7F3D0", borderRadius: radius.lg, borderWidth: 2, height: 192, width: 192 },
-  status: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", padding: spacing.lg, gap: spacing.md, backgroundColor: "rgba(16,32,25,0.85)" },
+  status: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", padding: spacing.lg, gap: spacing.md, backgroundColor: "rgba(16,32,25,0.85)" },
   statusText: { color: colors.card, fontFamily: fonts.medium, textAlign: "center", lineHeight: 20 },
   permission: { alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.lg, padding: spacing.xl, gap: spacing.md },
   title: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: 18 },
