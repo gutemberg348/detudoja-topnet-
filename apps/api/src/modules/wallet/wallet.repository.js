@@ -86,6 +86,18 @@ export function createWalletRepository(database = prisma) {
       });
     },
 
+    findEarningsTransactions(ids) {
+      return database.transacaoComercial.findMany({
+        where: { id: { in: ids } },
+        select: {
+          id: true, validada_em: true,
+          pagamento: { select: { cobranca: { select: { proposta_servico: { select: {
+            conversa_servico: { select: { status: true } },
+          } } } } } },
+        },
+      });
+    },
+
     findPayments(userId, paymentIds) {
       return database.pagamento.findMany({
         include: paymentInclude,

@@ -1,5 +1,37 @@
 # Front Mobile
 
+## Servico pago: saldo e liberacao visiveis (2026-10-06)
+
+A proposta exibe pagamento protegido, valor pendente, liberado, em analise ou
+estornado. O profissional ve liquido, taxa, prazo e atalho para a carteira.
+Servico direto pago passa a concluido ao prestador marcar realizado: o valor
+entra pendente por 24 horas e libera sem outro clique do cliente. O cliente
+pode contestar pelo chat durante esse prazo; a contestacao bloqueia o saldo.
+Entregas vinculadas a loja mantem suas etapas de confirmacao.
+Extrato e comprovante usam o prazo financeiro persistido; em disputa mostram
+Em analise, sem prometer uma data. Pix enviado exige repasse confirmado PAGO.
+Validacao: 104 testes mobile, exports web/Android, cinco cenarios web com API
+simulada e testes de banco isolado. Entrega de push em aparelho fisico ainda
+requer conferencia.
+Requer nova API e novo APK; nenhuma migration nesta alteracao.
+
+## Cobrar agora e proposta responsiva (2026-10-06)
+
+Cobrar agora abre a venda autonoma quando nao ha lojas autorizadas. Com uma
+ou mais lojas, permite escolher venda autonoma ou uma loja, exibindo sua categoria.
+Funcionarios com createCharges acessam a cobranca da loja sem cadastro de
+vendedor ou chave Pix pessoal; o recebedor continua sendo a loja. Cadastro,
+CPF e chave Pix pessoais sao solicitados ao escolher venda autonoma.
+StoreChargeModal agora e renderizado tambem no dashboard, corrigindo o botao
+que so funcionava depois de entrar na loja.
+
+Proposta de servico tem altura limitada, rolagem com teclado aberto e opcoes
+de pagamento com texto de altura natural e espaco reservado para a selecao.
+Validacao web com API simulada: autonomo, loja unica, funcionario autorizado,
+funcionario sem permissao e dono escolhendo autonomo; proposta em 320/390/412 px.
+Exports web e Android passaram; 102 testes mobile e 20 testes focados de API.
+Teste no Moto G54 ainda depende da instalacao do novo APK.
+
 ## FCM Android preparado (2026-10-06)
 
 google-services.json local validado para com.detudoja.mobile/projeto detudoja;

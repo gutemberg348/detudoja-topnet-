@@ -7,6 +7,45 @@ sem precisar reconstruir todo o contexto pela conversa. Sempre que uma regra,
 rota, tela, schema, comando ou fluxo importante mudar, atualize este arquivo.
 O indice e a regra completa de documentacao ficam em `docs/README.md`.
 
+## Atualizacao 2026-10-06: cobrar sem entrar na loja e proposta sem corte
+
+### Complemento: conclusao e saldo de servicos pagos
+
+- Servicos diretos pagos concluem em markServiceDelivered com CAS e distribuicao
+  atomica. ENCERRADA/CONCLUIDA cria creditos pendentes; libera apos 24 horas,
+  sem depender do cliente. Entregas vinculadas a loja/pedido preservam seu fluxo.
+- servicePaymentStatus expoe estado, prazo, liquido/taxa apenas ao prestador.
+  Cliente contesta durante a janela; lock financeiro e revalidacao do prazo
+  impedem corrida com a liberacao. Confirmacao de app antigo e idempotente.
+- service-timeout converte antigos AGUARDANDO_CONFIRMACAO diretos pagos, em
+  lotes de 25, para conclusao com nova janela de 24h e aviso aos dois. Nao
+  encerra QR nao pago nem altera disputas existentes. Timeout de confirmacao
+  de 48h fica restrito aos atendimentos vinculados a loja/pedido.
+- Carteira exibe prazo de validada_em e retira previsao durante disputa.
+  Chat mostra liquido, taxa, carteira, prazo e estado do repasse Pix.
+  Fila push recebe conclusao, contestacao e liberacao; entrega fisica pendente.
+- Validacao: 17 testes unitarios API focados, 104 mobile, seis testes de banco
+  em service_completion_validation local, exports web/Android e cinco cenarios web simulados.
+  Banco de validacao isolado mantido para inspecao; nenhum pagamento real.
+- Sem schema/migration. Publicar API e gerar novo APK. Nao houve deploy,
+  commit ou push automatico nesta entrega.
+
+- SellScreen renderiza StoreChargeModal no dashboard e no painel da loja.
+  Cobrar agora mostra escolha mesmo para loja unica; filtra createCharges
+  para funcionarios e pede cadastro/CPF/Pix pessoal somente no fluxo autonomo.
+  Funcionarios autorizados usam o recebimento da loja, sem perfil proprio.
+- POST /seller/sales grava o segmento ativo venda-autonoma na venda, em vez
+  de herdar o segmento do vendedor. Loja mantem sua categoria/politica.
+  Categoria ausente/inativa retorna 409; nao ha fallback para outra taxa.
+  Sem schema/migration. Rebuild da API e novo APK necessarios.
+- ProposalModal tem ScrollView limitado ao espaco com teclado; PaymentOption
+  nao comprime a descricao e reserva espaco para o check. Opcoes acessiveis.
+- Testes focados de API (20), suite mobile (102), export web/Android e oito
+  cenarios de navegador com mocks passaram.
+  Fixture de Google Auth agora inclui android.package, pois google-services.json
+  local existe. Nenhuma credencial alterada por esta entrega.
+  Teste fisico no Moto G54 e publicacao ainda pendentes.
+
 ## Atualizacao 2026-10-06: credencial FCM Android cadastrada no Expo
 
 - Usuario forneceu conta Firebase Admin SDK em Downloads. Validada sem expor

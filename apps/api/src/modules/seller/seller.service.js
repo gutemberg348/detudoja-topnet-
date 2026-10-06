@@ -735,8 +735,13 @@ export async function createAutonomousSale(userId, data) {
 
   assertAutonomousSellerEligibility(user, seller);
 
-  if (!seller.segmento_venda_id || !seller.segmento_venda) {
-    throw new AppError("Defina o segmento no cadastro de vendedor antes de gerar uma venda", 409);
+  // Standalone sales have their own policy, even when the seller also operates
+  // a shop or provides services with another segment.
+  const autonomousSegment = await sellerRepository.findFirstSegment({
+    where: { excluido_em: null, slug: "venda-autonoma", status: "ATIVO" },
+  });
+  if (!autonomousSegment) {
+    throw new AppError("Venda autonoma indisponivel no momento. Fale com o suporte.", 409);
   }
 
   const linkSlug = `${slugify(data.title) || "venda"}-${randomUUID().slice(0, 8)}`;
@@ -745,7 +750,7 @@ export async function createAutonomousSale(userId, data) {
       data: {
         descricao: data.description || null,
         link_slug: linkSlug,
-        segmento_venda_id: seller.segmento_venda_id,
+        segmento_venda_id: autonomousSegment.id,
         status: "AGUARDANDO_PAGAMENTO",
         titulo: data.title,
         valor_centavos: BigInt(data.amountCents),

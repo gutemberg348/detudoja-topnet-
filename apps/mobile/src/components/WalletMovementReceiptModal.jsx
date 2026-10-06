@@ -112,7 +112,7 @@ export function WalletMovementReceiptModal({ movement, onClose }) {
               </Text>
               <View style={styles.processedBadge}>
                 <Ionicons color={colors.primaryDark} name={isPending ? "time" : "checkmark-circle"} size={15} />
-                <Text style={styles.processedText}>{isPending ? "Libera em ate 24h" : movement.status}</Text>
+                <Text style={styles.processedText}>{movement.pendingReason ? "Em análise" : isPending ? "Pendente" : movement.status}</Text>
               </View>
             </View>
 
@@ -137,7 +137,10 @@ export function WalletMovementReceiptModal({ movement, onClose }) {
 
             <View style={styles.detailsCard}>
               <DetailRow label="Data e hora" value={formatDateTime(payment?.paidAt ?? movement.data)} />
-              <DetailRow label="Liberacao prevista" value={formatDateTime(movement.availableAt)} />
+              <DetailRow label="Situação" value={movement.pendingReason} />
+              {movement.availableAt ? (
+                <DetailRow label="Liberacao prevista" value={formatDateTime(movement.availableAt)} />
+              ) : null}
               <DetailRow label="Identificador" value={reference} />
               <DetailRow label="Forma de pagamento" value={methodLabels[payment?.method] ?? payment?.method} />
               <DetailRow label="Carteira utilizada" value={movement.walletName} />
@@ -155,7 +158,9 @@ export function WalletMovementReceiptModal({ movement, onClose }) {
             </View>
 
             <Text style={styles.securityText}>
-              {isPending
+              {movement.pendingReason
+                ? "Este valor permanece bloqueado enquanto o suporte analisa a contestação."
+                : isPending
                 ? "Este valor esta protegido durante a janela de estorno e ainda nao pode ser usado ou sacado."
                 : "Este registro foi processado pelo Brasil Cashback e permanece salvo no seu extrato."}
             </Text>

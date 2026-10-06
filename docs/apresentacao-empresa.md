@@ -1,6 +1,6 @@
 # DeTudoJa - auditoria geral e apresentacao
 
-Ultima atualizacao: 2026-10-05
+Ultima atualizacao: 2026-10-06
 
 ## Conclusao de servicos recebidos fora do app (2026-10-05)
 
@@ -84,7 +84,10 @@ de teste.
 - Um lojista pode ter varias lojas, cada uma com logo, banner, endereco,
   horarios, visibilidade, catalogo, imagens e estoque.
 - Central de Vendas com CRM, pedidos, chats, cobrancas, historico e QR.
-- Venda autonoma sem loja ou venda gerada dentro de uma loja. O QR autonomo
+- Venda autonoma sem loja ou cobranca vinculada a loja, ambas acessiveis pelo
+  botao Cobrar agora sem entrar na loja. Funcionarios com permissao tambem
+  cobram pela loja. A venda autonoma segue sua propria categoria financeira.
+  O QR autonomo
   permanece em piloto presencial controlado: o link remoto nao deve ser
   divulgado ate existir fluxo proprio de oferta, arrependimento, fiscal e
   reserva de repasse. Ver `docs/vendas-autonomas-compliance.md`.
@@ -118,9 +121,10 @@ de teste.
 - A empresa possui atalho `Chamar entregador` dentro da administracao da loja.
 - Ao aceitar a proposta, a empresa escolhe pagar pelo aplicativo ou no local
   por QR presencial da plataforma.
-- Pagamento confirmado fica sob custodia da plataforma. O prestador marca o
-  servico como realizado e o cliente confirma; somente entao o ganho entra na
-  retencao de 24 horas e pode seguir para saque ou repasse.
+- Pagamento confirmado fica protegido ate a execucao. Em servicos diretos,
+  o prestador marca realizado e o liquido entra na carteira como pendente por
+  24 horas. A liberacao e automatica sem confirmacao do cliente; contestar
+  nesse prazo bloqueia o valor. Entregas vinculadas a loja mantem confirmacao.
 - Ainda nao existe rastreamento GPS, mapa ou prova de entrega.
 
 ### Pagamentos e ganhos
@@ -133,7 +137,7 @@ de teste.
   requisicoes para evitar abuso.
 - QR presencial de loja e venda autonoma pode iniciar o repasse ao recebedor
   configurado. QR presencial de servico e entrega e uma excecao: permanece em
-  custodia ate a confirmacao do cliente e a retencao de seguranca.
+  custodia ate a conclusao e a retencao de seguranca de 24 horas.
 - Na compra presencial, a comissao negociada cobre primeiro a taxa configurada
   de processamento (padrao R$ 0,99). O aplicativo avisa quando a compra ainda
   nao atingiu esse ponto. Depois, o excedente vira cashback prioritario ate
@@ -168,8 +172,9 @@ de teste.
   qualificacao por dois indicados diretos ativos/verificados.
 - Compras online possuem retencao; compras presenciais comuns seguem
   liquidacao imediata conforme a regra financeira configurada. Todo servico,
-  inclusive corrida por QR presencial, so inicia a retencao de 24 horas apos a
-  confirmacao de conclusao pelo cliente.
+  inclusive corrida por QR presencial, tem retencao de 24 horas. No servico
+  direto ela comeca quando o profissional marca realizado; nas entregas
+  vinculadas a loja, depois da confirmacao prevista no fluxo da entrega.
 - Estorno deve reverter comprador, recebivel, cashback, rede, indicacoes e
   plataforma; valores ja sacados exigem revisao financeira.
 
@@ -368,8 +373,11 @@ em vez de ser apenas um campo decorativo.
 
 Servico pago tambem possui prazo: se o prestador nao iniciar em ate 24 horas
 por padrao, o worker cancela o atendimento e estorna a origem do pagamento. Se
-o prestador marcar realizado, o cliente tem 48 horas por padrao para confirmar
-ou contestar. Sem resposta, o valor entra em disputa e permanece em custodia
-para o suporte, sem liberar ganho automaticamente. Prestador que perder KYC ou
-for desativado deixa de aceitar, propor, marcar entrega ou enviar mensagens em
-conversas abertas. Os dois prazos podem ser calibrados por ambiente.
+o prestador marcar realizado em servico direto, o cliente tem 24 horas para
+contestar e o ganho libera automaticamente apos esse prazo, sem outro clique.
+Uma contestacao bloqueia o valor para analise do suporte. Servicos antigos ja
+marcados como realizados recebem uma nova janela de 24 horas, com aviso aos
+dois; disputas existentes permanecem bloqueadas. Entregas vinculadas a loja
+mantem confirmacao e timeout operacional de 48 horas configuravel. Prestador
+que perder KYC ou for desativado deixa de aceitar, propor, marcar entrega ou
+enviar mensagens em conversas abertas.

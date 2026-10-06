@@ -1,4 +1,5 @@
-import { emitWalletUpdated } from "../../realtime/socket.server.js";
+import { emitServiceChatUpdated, emitWalletUpdated } from "../../realtime/socket.server.js";
+import { sendExpoPushToUsers } from "../notifications/notifications.service.js";
 import {
   recordComponentFailure,
   recordComponentStarting,
@@ -30,6 +31,20 @@ async function runReleaseCycle() {
           recordComponentFailure("earnings-release-payout", error, {
             transactionId: result.transactionId,
           });
+        }
+        if (result.service) {
+          emitServiceChatUpdated({ ...result.service, reason: "service-funds-released" });
+          try {
+            await sendExpoPushToUsers({
+              title: "Valor do servico liberado",
+              body: "O prazo de protecao terminou. Consulte na carteira os valores liberados e, quando houver, o status do repasse Pix.",
+              channelId: "messages",
+              data: { screen: "ServiceConversation", conversationId: result.service.conversationId, reason: "service-funds-released" },
+              userIds: [result.service.customerUserId, result.service.sellerUserId].filter(Boolean),
+            });
+          } catch (error) {
+            recordComponentFailure("earnings-release-notification", error, { transactionId: result.transactionId });
+          }
         }
       }
 

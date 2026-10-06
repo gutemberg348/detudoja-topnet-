@@ -22,7 +22,7 @@ export const serviceActionFeedback = {
   proposal: ["Proposta enviada", "Agora aguarde a resposta do cliente."],
   accept: ["Proposta aceita", "Confira a forma de pagamento e os próximos passos na conversa."],
   decline: ["Proposta recusada", "Você pode combinar outros detalhes pelo chat."],
-  delivered: ["Conclusão registrada", "Confira na conversa se ainda há confirmação do cliente ou pagamento pendente."],
+  delivered: ["Conclusão registrada", "Confira no atendimento o status do pagamento e o prazo de liberação do seu valor."],
   "accept-call": ["Atendimento aceito", "O chat está liberado para combinar os detalhes."],
   "close-pending-call": ["Chamada encerrada", "Esse atendimento foi cancelado."],
   completion: ["Conclusão confirmada", "Sua confirmação foi registrada no atendimento."],

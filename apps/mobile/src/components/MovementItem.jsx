@@ -5,7 +5,7 @@ import { colors, fonts, radius, spacing, typography } from "../utils/theme";
 
 export function MovementItem({ item, onPress }) {
   const isDebit = item.tipo === "DEBITO";
-  const statusLabel = item.status === "PENDENTE" ? "Libera em ate 24h" : item.status;
+  const statusLabel = item.pendingReason ? "Em análise" : item.status === "PENDENTE" ? "Pendente" : item.status;
 
   return (
     <Pressable

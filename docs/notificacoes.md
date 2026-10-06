@@ -5,6 +5,17 @@ aparelhos fisicos ainda pendentes.
 
 ## FCM configurado no Expo em 06/10/2026
 
+### Avisos de saldo dos servicos (06/10/2026)
+
+Conclusao pelo profissional avisa o cliente sobre o prazo de contestacao e o
+prestador sobre saldo pendente. Contestacao avisa o profissional. O worker de
+liberacao atualiza chat/carteira e enfileira aviso aos dois quando o prazo
+financeiro termina. A regularizacao de servicos antigos avisa a nova janela
+de 24 horas. Os avisos abrem ServiceConversation com conversationId.
+Testes financeiros locais usam EXPO_PUSH_ENABLED=false; envio em aparelho
+real nao foi validado nesta entrega. Permissao do aparelho, token registrado,
+fila e credencial FCM/APNs continuam necessarios.
+
 Usuario criou Firebase no projeto detudoja e forneceu a conta de servico em
 Downloads. apps/mobile/google-services.json ja estava presente, validado para
 com.detudoja.mobile e mesmo project_id da conta de servico. Chave privada

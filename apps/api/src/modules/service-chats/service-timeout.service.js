@@ -1,5 +1,7 @@
 import { env } from "../../config/env.js";
-import { emitServiceChatUpdated } from "../../realtime/socket.server.js";
+import { emitServiceChatUpdated, emitWalletUpdated } from "../../realtime/socket.server.js";
+import { sendExpoPushToUsers } from "../notifications/notifications.service.js";
+import { completeLegacyDeliveredService } from "./legacy-service-completion.js";
 import { refundUnattendedServicePayment } from "../admin/admin-payments.service.js";
 import {
   createServiceTimeoutRepository,
@@ -92,15 +94,17 @@ export async function expireUnattendedServices({ now = new Date() } = {}) {
   const confirmationCutoff = new Date(
     now.getTime() - (env.services.confirmationTimeoutMinutes * 60 * 1_000),
   );
-  const [idleConversations, payments, confirmations] = await Promise.all([
+  const [idleConversations, payments, confirmations, legacyDelivered] = await Promise.all([
     serviceTimeoutRepository.findIdleServiceConversations(idleCutoff),
     serviceTimeoutRepository.findUnattendedServicePayments(unattendedCutoff),
     serviceTimeoutRepository.findConversationsAwaitingConfirmation(confirmationCutoff),
+    serviceTimeoutRepository.findLegacyDeliveredServices(),
   ]);
   const failed = [];
   let refunded = 0;
   let disputed = 0;
   let cancelledIdle = 0;
+  let completedLegacy = 0;
   const expiredCourierRequests = await serviceTimeoutRepository.updateCourierRequests({
     data: { status: "EXPIRADA" },
     where: {
@@ -111,6 +115,27 @@ export async function expireUnattendedServices({ now = new Date() } = {}) {
       status: "PENDENTE",
     },
   });
+
+  for (const candidate of legacyDelivered) {
+    try {
+      const result = await serviceTimeoutRepository.transaction((database) =>
+        completeLegacyDeliveredService(database, candidate.id, now),
+      );
+      if (!result) continue;
+      completedLegacy += 1;
+      emitServiceTimeoutConversation(result.conversation, "service-completed");
+      emitWalletUpdated({ transactionId: result.earnings.transactionId, userIds: result.earnings.walletUserIds });
+      await sendExpoPushToUsers({
+        title: "Servico concluido",
+        body: "O servico ja foi marcado como prestado. O valor sera liberado automaticamente em 24 horas, se nao houver contestacao pelo chat.",
+        channelId: "messages",
+        data: { screen: "ServiceConversation", conversationId: candidate.id, reason: "service-completed" },
+        userIds: [result.conversation.cliente_usuario_id, result.conversation.vendedor.usuario_id],
+      });
+    } catch (error) {
+      failed.push({ conversationId: candidate.id, error, type: "legacy-completion" });
+    }
+  }
 
   for (const conversation of idleConversations) {
     try {
@@ -145,6 +170,7 @@ export async function expireUnattendedServices({ now = new Date() } = {}) {
 
   return {
     cancelledIdle,
+    completedLegacy,
     disputed,
     expiredCourierRequests: expiredCourierRequests.count,
     failed,

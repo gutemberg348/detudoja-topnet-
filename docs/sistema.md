@@ -1,5 +1,21 @@
 # Sistema DeTudoJa
 
+## Servicos diretos: conclusao e liberacao automatica (2026-10-06)
+
+completePaidService encerra conversa e proposta pagas com CAS e distribuicao
+financeira na mesma transacao. Prestador marca realizado; saldo liquido entra
+pendente e libera apos EARNINGS_HOLD_MS (24 horas). Cliente pode contestar ate
+o prazo persistido em validada_em, sob lock financeiro compartilhado com o
+worker de liberacao. Confirmacao repetida/antiga nao reinicia o prazo.
+servicePaymentStatus fornece estado financeiro e prazo; liquido, taxa e dados
+de repasse sao exclusivos do prestador. Carteira usa o mesmo prazo e mostra
+analise sem data de liberacao durante disputa. QR so mostra Pix enviado com
+repasse PAGO. Eventos atualizam carteira/chat e enfileiram avisos.
+service-timeout regulariza antigos AGUARDANDO_CONFIRMACAO diretos pagos em
+lotes de 25, com nova janela de 24h; nao altera disputas nem QR sem pagamento.
+Sem mudanca de schema. Testes em banco local isolado cobrem concorrencia,
+limite de prazo, bloqueio por disputa, regularizacao e ausencia de duplicacao.
+
 ## Atualizacao 2026-10-05: conclusao de servico fora do app
 
 `POST /api/app/service-chats/:conversationId/complete-outside-app` recebe
@@ -127,12 +143,12 @@ condicionais para que duas execucoes nao processem o mesmo atendimento.
   `SERVICE_UNATTENDED_TIMEOUT_MINUTES` (padrao: 1.440 minutos / 24 horas) e
   cancelado. Pagamento por carteira volta para as carteiras de origem; Pix
   Asaas recebe pedido de estorno e continua acompanhado pelo fluxo do gateway.
-- Quando o prestador marca como realizado, a conversa vai para
-  `AGUARDANDO_CONFIRMACAO`. O cliente pode contestar por
-  `POST /api/app/service-chats/:conversationId/dispute`. Sem confirmacao ate
-  `SERVICE_CONFIRMATION_TIMEOUT_MINUTES` (padrao: 2.880 minutos / 48 horas),
-  o worker move o atendimento para `EM_DISPUTA`: o dinheiro fica em custodia e
-  o suporte decide, sem credito automatico ao prestador.
+- Quando o prestador marca realizado em servico direto pago, a conversa fica
+  `ENCERRADA`, proposta `CONCLUIDA` e ganhos pendentes por 24 horas. Cliente
+  pode contestar por `POST /api/app/service-chats/:conversationId/dispute`
+  nesse prazo; sem contestacao, libera automaticamente. Apenas entregas
+  vinculadas a loja/pedido mantem `AGUARDANDO_CONFIRMACAO` e timeout
+  `SERVICE_CONFIRMATION_TIMEOUT_MINUTES` (padrao 48 horas) para `EM_DISPUTA`.
 - O prestador e revalidado como vendedor `ATIVO`, nao excluido e com KYC
   `APROVADO` ao aceitar chamado, enviar proposta, marcar execucao, enviar
   mensagem ou compartilhar localizacao. Perder KYC ou ser desativado bloqueia
@@ -2195,15 +2211,19 @@ usuarios e lojas sem endereco; registros ja localizados permanecem intactos.
 
 ### Escolha de origem da venda QR
 
-Na Central de vendas, `Venda QR` pergunta pela origem somente quando o
-vendedor ja possui lojas. Ele pode escolher `Venda autonoma` ou uma de suas
-lojas. A primeira cria venda sem loja; a segunda abre a cobranca presencial
-vinculada a loja. Sem lojas cadastradas, a tela abre diretamente a venda
-autonoma. Dentro de cada loja, `Nova cobranca` continua disponivel para criar
-o QR daquela operacao sem passar pelo seletor.
+Na Central de vendas, `Cobrar agora` oferece `Venda autonoma` e as lojas em
+que o usuario e dono ou tem permissao `createCharges`, mesmo havendo uma unica
+loja. Sem lojas autorizadas, abre diretamente a venda autonoma. O formulario
+de cobranca da loja funciona no dashboard, sem entrar na gestao da loja.
+Funcionarios autorizados nao precisam de perfil de vendedor ou Pix pessoal
+para cobrar pela loja; a API confere as permissoes e o recebimento do dono.
 
-Isso apenas organiza o frontend sobre as rotas existentes e nao exige
-migration.
+`POST /api/app/seller/sales` grava o segmento ativo `venda-autonoma` na venda,
+independentemente do segmento do perfil. A liquidacao ja prioriza o segmento
+gravado na venda. A rota de cobranca da loja conserva a politica da loja.
+Categoria autonoma ausente/inativa bloqueia criacao com 409, sem herdar taxas
+de outro segmento. CPF, KYC e chave Pix pessoal continuam obrigatorios no
+fluxo autonomo. Nao exige migration; atualizar API e aplicativo.
 
 ### Servico de entrega local
 
@@ -2308,9 +2328,10 @@ valor nulo, mantendo a verificacao atomica de `status = ATIVA`.
 
 Cancelar uma conversa de corrida exige ausencia de pagamento processando,
 pago, liquidado ou em disputa. A transacao cancela conversa, propostas,
-cobrancas nao pagas e solicitacao de motoboy. Na conclusao, o motoboy marca a
-corrida realizada e o cliente confirma a entrega; somente essa confirmacao
-grava `ENCERRADA`, proposta `CONCLUIDA` e solicitacao `CONCLUIDA`.
+cobrancas nao pagas e solicitacao de motoboy. Na corrida direta paga, marcar
+realizada grava `ENCERRADA`, proposta `CONCLUIDA` e solicitacao `CONCLUIDA`,
+iniciando a retencao de 24 horas. Entregas vinculadas a loja/pedido mantem as
+etapas de confirmacao da entrega.
 
 Migration atual:
 
@@ -2544,10 +2565,11 @@ Prestador e motoboy sao elegiveis somente quando o vendedor comercial esta
 motoboy, ativar/listar servico, disponibilizar-se, entrar em equipe e aceitar
 uma corrida.
 
-O pagamento de uma proposta de servico nao distribui ganho. Depois de o
-prestador marcar a execucao, a confirmacao do cliente conclui a proposta e
-cria os creditos pendentes; a retencao de 24 horas conta desse instante. O
-worker revalida a conclusao antes de qualquer liberacao. QR presencial comum
+O pagamento de uma proposta de servico nao distribui ganho. Em servico direto,
+o prestador marcar a execucao conclui a proposta e cria creditos pendentes; a
+retencao de 24 horas conta desse instante, sem confirmacao adicional do cliente.
+Entregas vinculadas a loja/pedido mantem sua confirmacao. O worker revalida
+conclusao e ausencia de disputa antes da liberacao. QR presencial comum
 de loja e venda autonoma continua imediato; QR presencial de servico espera a
 conclusao e a retencao antes do repasse idempotente.
 

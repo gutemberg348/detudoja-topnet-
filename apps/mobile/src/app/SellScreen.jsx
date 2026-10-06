@@ -152,6 +152,9 @@ export function SellScreen() {
   const [editingProduct, setEditingProduct] = useState(null);
   const [selectedStore, setSelectedStore] = useState(null);
   const hasActivePayoutAccount = payoutAccount?.status === "ATIVA";
+  const chargeableStores = stores.filter((store) =>
+    store.access?.isOwner !== false || store.access?.permissions?.createCharges === true,
+  );
   const guideCheckedUserRef = useRef(null);
   const storeChatRefreshTimerRef = useRef(null);
   const serviceRefreshVersionRef = useRef(0);
@@ -419,6 +422,8 @@ export function SellScreen() {
   function runSellerAction(action, { cpfConfirmed = false } = {}) {
     if (action === "sale") {
       openSale({ cpfConfirmed });
+    } else if (action === "autonomous-sale") {
+      openAutonomousSale({ cpfConfirmed });
     } else if (action === "store") {
       openStoreForm();
     } else if (action === "service") {
@@ -429,6 +434,11 @@ export function SellScreen() {
   }
 
   function requestSellerAction(action) {
+    // A workplace charge belongs to the shop, not to the employee's seller profile.
+    if (action === "sale") {
+      openSale();
+      return;
+    }
     if (session?.user?.cpfRequired) {
       setPendingCpfAction(action);
       return;
@@ -459,11 +469,7 @@ export function SellScreen() {
       return;
     }
     if (action?.type === "sale") {
-      if (stores.length) {
-        setSaleDestinationOpen(true);
-      } else {
-        showAutonomousSale();
-      }
+      showAutonomousSale();
     }
   }
 
@@ -496,22 +502,7 @@ export function SellScreen() {
   }
 
   function openSale({ cpfConfirmed = false } = {}) {
-    if (!profile) {
-      openOnboarding("sale");
-      return;
-    }
-
-    if (!hasActivePayoutAccount) {
-      openPayoutForm({ type: "sale" }, { cpfConfirmed });
-      return;
-    }
-
-    if (stores.length === 1) {
-      openStoreCharge(stores[0], { cpfConfirmed });
-      return;
-    }
-
-    if (stores.length > 1) {
+    if (chargeableStores.length) {
       setError("");
       setSaleDestinationOpen(true);
       return;
@@ -521,6 +512,14 @@ export function SellScreen() {
   }
 
   function openAutonomousSale({ cpfConfirmed = false } = {}) {
+    if (!cpfConfirmed && session?.user?.cpfRequired) {
+      setPendingCpfAction("autonomous-sale");
+      return;
+    }
+    if (!profile) {
+      openOnboarding("sale");
+      return;
+    }
     if (!hasActivePayoutAccount) {
       openPayoutForm({ type: "sale" }, { cpfConfirmed });
       return;
@@ -670,6 +669,10 @@ export function SellScreen() {
   }
 
   function openStoreCharge(store, { cpfConfirmed = false } = {}) {
+    if (store?.access?.isOwner === false && store?.access?.permissions?.createCharges !== true) {
+      notify("Sem permissão para cobrar", "Peça ao responsável pela loja para liberar a criação de cobranças.");
+      return;
+    }
     const isWorkplaceCharge = store?.access?.isOwner === false
       && store?.access?.permissions?.createCharges === true;
     if (!isWorkplaceCharge && !hasActivePayoutAccount) {
@@ -1154,6 +1157,20 @@ export function SellScreen() {
     );
   }
 
+  const storeChargeModal = (
+    <StoreChargeModal
+      error={error}
+      form={chargeForm}
+      isSaving={isSaving}
+      onChange={setChargeForm}
+      onClose={() => setStoreChargeOpen(false)}
+      onSubmit={submitStoreCharge}
+      open={storeChargeOpen}
+      quickOptions={buildStoreChargeOptions(chargeStore, generatedCharges)}
+      store={chargeStore}
+    />
+  );
+
   const storeManagerModals = (
     <>
       <StoreEditModal
@@ -1197,17 +1214,7 @@ export function SellScreen() {
         store={selectedStore}
       />
 
-      <StoreChargeModal
-        error={error}
-        form={chargeForm}
-        isSaving={isSaving}
-        onChange={setChargeForm}
-        onClose={() => setStoreChargeOpen(false)}
-        onSubmit={submitStoreCharge}
-        open={storeChargeOpen}
-        quickOptions={buildStoreChargeOptions(chargeStore, generatedCharges)}
-        store={chargeStore}
-      />
+      {storeChargeModal}
 
       <PayoutAccountModal
         error={error}
@@ -1376,8 +1383,10 @@ export function SellScreen() {
           openStoreCharge(store);
         }}
         open={saleDestinationOpen}
-        stores={stores}
+        stores={chargeableStores}
       />
+
+      {storeChargeModal}
 
       <StoreModal
         categories={storeCategories}

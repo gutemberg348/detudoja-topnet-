@@ -223,7 +223,7 @@ export function SellerDashboard({
       <View style={styles.commandGrid}>
         <CommandCard
           accent
-          hint={stores.length ? "Cobranca rapida da sua loja" : "Venda presencial sem loja"}
+          hint={stores.length ? "Venda autônoma ou pela loja" : "Venda presencial sem loja"}
           icon="qr-code-outline"
           label="Cobrar agora"
           onPress={onCreateSale}

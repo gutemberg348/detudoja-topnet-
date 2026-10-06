@@ -763,7 +763,7 @@ test("prestador reprovado apos abrir o atendimento nao consegue operar a convers
   assert.equal(disputed.conversation.status, "EM_DISPUTA");
 });
 
-test("worker estorna servico pago sem inicio e envia confirmacao vencida para disputa", async () => {
+test("worker estorna servico sem inicio e nao cria disputa por silencio do cliente", async () => {
   await Promise.all([state.customer.id, state.outsider.id].map(async (userId, index) => {
     await ensureUserWallets(userId);
     await creditUserWallet({
@@ -816,13 +816,13 @@ test("worker estorna servico pago sem inicio e envia confirmacao vencida para di
   ]);
 
   assert.equal(result.refunded, 1);
-  assert.equal(result.disputed, 1);
+  assert.equal(result.disputed, 0);
   assert.equal(expiredConversation.status, "CANCELADA");
   assert.equal(expiredPayment.status, "ESTORNADO");
-  assert.equal(disputedConversation.status, "EM_DISPUTA");
+  assert.equal(disputedConversation.status, "ENCERRADA");
 });
 
-test("pagamento de servico fica em custodia ate a confirmacao do cliente", async () => {
+test("pagamento de servico entra em retencao na conclusao pelo prestador", async () => {
   await ensureUserWallets(state.customer.id);
   await creditUserWallet({
     database: prisma,
@@ -857,7 +857,6 @@ test("pagamento de servico fica em custodia ate a confirmacao do cliente", async
   assert.equal(transaction, null);
 
   await markServiceDelivered(state.providerUser.id, created.conversation.id);
-  await confirmServiceCompletion(state.customer.id, created.conversation.id);
 
   transaction = await prisma.transacaoComercial.findFirst({
     include: { recebiveis: true, recompensas: true },

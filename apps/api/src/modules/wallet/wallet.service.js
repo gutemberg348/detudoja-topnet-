@@ -73,20 +73,32 @@ function serializePaymentReceipt(payment) {
   };
 }
 
-function serializeMovement(movement, payment = null) {
-  const earningsOrigins = new Set([
+const earningsOrigins = new Set([
     "VENDA",
     "CASHBACK",
     "BONUS_INDICACAO",
     "BONUS_VENDEDOR",
     "BONUS_REDE",
-  ]);
+]);
+
+async function withEarningsDeadlines(movements) {
+  const ids = [...new Set(movements.filter((item) => item.status === "PENDENTE"
+    && earningsOrigins.has(item.origem) && item.origem_id).map((item) => item.origem_id))];
+  if (!ids.length) return movements;
+  const transactions = new Map((await walletRepository.findEarningsTransactions(ids)).map((item) => [item.id, item]));
+  return movements.map((item) => ({ ...item, earnings: earningsOrigins.has(item.origem) ? transactions.get(item.origem_id) : null }));
+}
+
+function serializeMovement(movement, payment = null) {
+  const disputed = movement.earnings?.pagamento?.cobranca?.proposta_servico?.conversa_servico?.status === "EM_DISPUTA";
   const availableAt = movement.status === "PENDENTE" && earningsOrigins.has(movement.origem)
-    ? new Date(movement.criado_em.getTime() + (24 * 60 * 60 * 1000)).toISOString()
+    && !disputed
+    ? new Date((movement.earnings?.validada_em ?? movement.criado_em).getTime() + (24 * 60 * 60 * 1000)).toISOString()
     : null;
 
   return {
     availableAt,
+    pendingReason: disputed ? "Em analise pelo suporte" : null,
     balanceAfterCents: cents(movement.saldo_posterior_centavos),
     balanceBeforeCents: cents(movement.saldo_anterior_centavos),
     data: movement.criado_em.toISOString(),
@@ -382,10 +394,11 @@ export async function getWalletOverview(userId) {
     ? await walletRepository.findPayments(userId, paymentIds)
     : [];
   const paymentsById = new Map(payments.map((payment) => [payment.id, payment]));
+  const movementsWithDeadlines = await withEarningsDeadlines(movements);
   const serializedWallets = wallets.map(serializeWallet);
 
   return {
-    movements: movements.map((movement) =>
+    movements: movementsWithDeadlines.map((movement) =>
       serializeMovement(movement, paymentsById.get(movement.origem_id)),
     ),
     summary: serializedWallets.reduce(
@@ -410,8 +423,9 @@ export async function getWalletByCode(userId, code) {
     throw new AppError("Carteira nao encontrada", 404);
   }
 
+  const movementsWithDeadlines = await withEarningsDeadlines(wallet.lancamentos);
   return {
-    movements: wallet.lancamentos.map((movement) =>
+    movements: movementsWithDeadlines.map((movement) =>
       serializeMovement({ ...movement, carteira: wallet }),
     ),
     wallet: serializeWallet(wallet),

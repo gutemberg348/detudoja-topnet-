@@ -1,12 +1,13 @@
 # Vendas autonomas: limites de lancamento e conformidade
 
-Ultima atualizacao: 2026-09-04
+Ultima atualizacao: 2026-10-06
 
 ## Decisao atual
 
 Uma pessoa pode criar uma venda autonoma tecnicamente, sem abrir uma loja,
 somente depois de concluir o KYC `TIER_2`, usar o mesmo CPF da conta no perfil
-de vendedor, possuir segmento ativo e ter uma chave Pix de recebimento ativa.
+de vendedor e ter uma chave Pix de recebimento ativa. A venda usa o segmento
+ativo `venda-autonoma`, mesmo que o perfil atue tambem em outro segmento.
 O limite operacional atual de pessoa fisica e R$ 5.000,00 por mes, somando
 lojas e vendas autonomas do mesmo CPF.
 

@@ -4,6 +4,22 @@ const refundablePaymentStatuses = ["PAGO", "LIQUIDADO"];
 
 export function createServiceTimeoutRepository(database = prisma) {
   return {
+    findLegacyDeliveredServices() {
+      return database.conversaServico.findMany({
+        select: { id: true },
+        take: 25,
+        orderBy: { id: "asc" },
+        where: {
+          status: "AGUARDANDO_CONFIRMACAO", loja_solicitante_id: null, pedido_loja_id: null,
+          propostas: { some: { status: "PAGA", cobranca: { is: {
+            status: "PAGA", pagamento: { is: {
+              status: { in: refundablePaymentStatuses },
+              OR: [{ transacao_comercial: { is: null } }, { transacao_comercial: { is: { status: { in: ["PENDENTE", "VALIDADA"] } } } }],
+            } },
+          } } } },
+        },
+      });
+    },
     createMessage(args) { return database.conversaServicoMensagem.create(args); },
     findIdleServiceConversations(cutoff) {
       return database.conversaServico.findMany({
@@ -35,6 +51,7 @@ export function createServiceTimeoutRepository(database = prisma) {
         },
         take: 25,
         where: {
+          OR: [{ loja_solicitante_id: { not: null } }, { pedido_loja_id: { not: null } }],
           atualizado_em: { lte: cutoff },
           propostas: {
             some: {

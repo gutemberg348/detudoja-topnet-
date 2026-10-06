@@ -1,3 +1,4 @@
+import { completePaidService } from "./paid-service-completion.js";
 import {
   emitServiceAvailabilityUpdated,
   emitServiceChatCreated,
@@ -23,7 +24,8 @@ import {
   isCourierSellerBusy,
 } from "../courier/courier-availability.js";
 import { settlePaidAutonomousChargeEarnings } from "../earnings/order-earnings.service.js";
-import { completePaidCourierRide, isCourierConversation, lockCourierConversation } from "./courier-completion.js";
+import { isCourierConversation, lockCourierConversation } from "./courier-completion.js";
+import { servicePaymentStatus } from "./service-payment-status.js";
 import { cancelUnpaidServiceInTransaction, completeServiceOutsideAppInTransaction, isServiceCompletedOutsideApp, lockServiceProposalChanges } from "./service-closure.js";
 import { sendExpoPushToUsers } from "../notifications/notifications.service.js";
 import {
@@ -174,7 +176,11 @@ const conversationInclude = {
               metodo_principal: true,
               pago_em: true,
               status: true,
-              transacao_comercial: { select: { id: true, status: true, validada_em: true } },
+              transacao_comercial: { select: {
+                id: true, status: true, validada_em: true,
+                valor_liquido_lojista_centavos: true, taxa_plataforma_centavos: true,
+                repasse_pix: { select: { status: true } },
+              } },
             },
           },
         },
@@ -260,7 +266,7 @@ function serializeMessage(message, viewerId) {
   };
 }
 
-function serializeProposal(proposal) {
+function serializeProposal(proposal, conversationStatus, isSeller, requiresDeliveryConfirmation = false) {
   const charge = proposal.cobranca;
   // Propostas de servico nao vencem. Mantem conversas antigas utilizaveis
   // enquanto a leitura da conversa normaliza o registro persistido.
@@ -291,6 +297,7 @@ function serializeProposal(proposal) {
     id: proposal.id,
     paidAt: proposal.pago_em?.toISOString() ?? null,
     paymentMode: proposal.forma_pagamento,
+    funds: servicePaymentStatus(proposal, conversationStatus, { isSeller, requiresDeliveryConfirmation }),
     respondedAt: proposal.respondido_em?.toISOString() ?? null,
     status: proposal.status,
   };
@@ -339,7 +346,8 @@ function serializeConversation(conversation, viewerId, { includeMessages = false
     seller: serializeSeller(conversation.vendedor, {
       isOnline: isOperationalServiceAvailable(conversation.servico_vendedor),
     }),
-    proposals: (conversation.propostas ?? []).map(serializeProposal),
+    proposals: (conversation.propostas ?? []).map((proposal) => serializeProposal(proposal, conversation.status, isSeller,
+      Boolean(conversation.loja_solicitante_id || conversation.pedido_loja_id))),
     request: {
       description: conversation.descricao_inicial,
       destination: routeIsSharedInChat ? "A combinar no chat" : conversation.destino,
@@ -374,12 +382,9 @@ function serializeConversation(conversation, viewerId, { includeMessages = false
         !isCourierConversation(conversation)
         || (conversation.propostas ?? []).some((proposal) => proposal.status === "PAGA")
       ))
-      || (isCourierConversation(conversation) && conversation.status === "ENCERRADA"
-        && (conversation.propostas ?? []).some((proposal) => (
-          proposal.concluido_em
-          && proposal.cobranca?.pagamento?.transacao_comercial?.status === "VALIDADA"
-          && Date.now() - proposal.concluido_em.getTime() < 24 * 60 * 60 * 1000
-        )))
+      || (conversation.status === "ENCERRADA" && (conversation.propostas ?? []).some((proposal) =>
+        servicePaymentStatus(proposal, conversation.status)?.canDispute,
+      ))
     ),
     canReview: !isSeller && conversation.status === "ENCERRADA" && !conversation.avaliacao,
     review: serializeReview(conversation.avaliacao),
@@ -1520,13 +1525,14 @@ export async function markServiceDelivered(userId, conversationId) {
       throw new AppError("A corrida mudou antes da conclusao", 409);
     }
     if (!paidProposal && !awaitingQrPayment) throw new AppError("O pagamento precisa estar confirmado primeiro", 409);
-    if (isCourierRide && paidProposal) {
-      const earnings = await completePaidCourierRide(database, {
+    if (paidProposal && !current.loja_solicitante_id && !current.pedido_loja_id) {
+      const earnings = await completePaidService(database, {
         actorUserId: userId,
         chargeId: paidProposal.cobranca.id,
         conversationId: conversation.id,
         expectedStatus: current.status,
         proposalId: paidProposal.id,
+        service: !isCourierRide,
       });
       return { awaitingQrPayment: false, earnings };
     }
@@ -1564,17 +1570,29 @@ export async function markServiceDelivered(userId, conversationId) {
     updatedConversation,
     updatedConversation.cliente_usuario_id,
     result.earnings
-      ? "Corrida finalizada. O valor fica protegido por 24 horas."
+      ? "Atendimento concluido pelo prestador. Liberacao automatica em 24 horas. Se houver algum problema, conteste pelo chat nesse prazo."
       : result.awaitingQrPayment
         ? "O motoboy finalizou a corrida. Pague pelo QR para concluir."
         : "O prestador marcou o servico como realizado. Confirme o recebimento.",
     "service-delivered",
   );
+  if (result.earnings) {
+    pushServiceNotification(updatedConversation, userId,
+      "Seu valor liquido esta pendente na carteira de vendas. Liberacao automatica em 24 horas, se nao houver contestacao.",
+      "service-earnings-pending");
+  }
   return { conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
 }
 
 export async function confirmServiceCompletion(userId, conversationId) {
   const conversation = await findAccessibleConversation(userId, conversationId);
+
+  // Older apps may still display the customer confirmation button. Completion
+  // has already started the hold; acknowledging it must not restart that clock.
+  if (conversation.cliente_usuario_id === userId && conversation.status === "ENCERRADA"
+    && conversation.propostas.some((proposal) => proposal.status === "CONCLUIDA" && proposal.cobranca?.status === "PAGA")) {
+    return { conversation: serializeConversation(conversation, userId, { includeMessages: true }) };
+  }
 
   if (isCourierConversation(conversation)) {
     throw new AppError("A corrida de motoboy e finalizada pelo proprio motoboy; nao exige confirmacao do cliente", 409);
@@ -1665,36 +1683,36 @@ export async function disputeServiceCompletion(userId, conversationId) {
   if (conversation.vendedor.usuario_id === userId) {
     throw new AppError("Somente o cliente pode contestar a conclusao do servico", 403);
   }
-  const completedCourier = isCourierConversation(conversation) && conversation.status === "ENCERRADA";
+  const completedService = conversation.status === "ENCERRADA";
   const paidProposal = [...(conversation.propostas ?? [])].reverse().find((proposal) => (
-    proposal.status === (completedCourier ? "CONCLUIDA" : "PAGA") && proposal.cobranca?.pagamento
+    proposal.status === (completedService ? "CONCLUIDA" : "PAGA") && proposal.cobranca?.pagamento
   ));
-  if (!paidProposal || (conversation.status !== "AGUARDANDO_CONFIRMACAO" && !completedCourier)) {
+  if (!paidProposal || (conversation.status !== "AGUARDANDO_CONFIRMACAO" && !completedService)) {
     throw new AppError("Este atendimento nao esta aguardando confirmacao do cliente", 409);
   }
-  if (completedCourier && (!paidProposal.concluido_em
-    || Date.now() - paidProposal.concluido_em.getTime() >= 24 * 60 * 60 * 1000)) {
-    throw new AppError("O prazo de 24 horas para contestar a corrida terminou", 409);
+  if (completedService && !servicePaymentStatus(paidProposal, conversation.status)?.canDispute) {
+    throw new AppError("O prazo de 24 horas para contestar o atendimento terminou", 409);
   }
 
   const now = new Date();
   await serviceChatsRepository.transaction(async (database) => {
     const repository = createServiceChatsRepository(database);
-    if (completedCourier) {
+    if (completedService) {
       const transactionId = paidProposal.cobranca.pagamento.transacao_comercial?.id;
-      if (!transactionId) throw new AppError("Distribuicao da corrida nao encontrada", 409);
+      if (!transactionId) throw new AppError("Distribuicao do atendimento nao encontrada", 409);
       await repository.lockCommercialTransaction(transactionId);
       const transaction = await repository.findCommercialTransaction({
-        select: { status: true },
+        select: { status: true, validada_em: true },
         where: { id: transactionId },
       });
-      if (transaction?.status !== "VALIDADA") {
+      if (transaction?.status !== "VALIDADA" || !transaction.validada_em
+        || Date.now() >= transaction.validada_em.getTime() + 24 * 60 * 60 * 1000) {
         throw new AppError("O prazo para contestacao financeira terminou", 409);
       }
     }
     const disputed = await repository.updateConversations({
       data: { status: "EM_DISPUTA" },
-      where: { id: conversation.id, status: completedCourier ? "ENCERRADA" : "AGUARDANDO_CONFIRMACAO" },
+      where: { id: conversation.id, status: completedService ? "ENCERRADA" : "AGUARDANDO_CONFIRMACAO" },
     });
     if (disputed.count !== 1) {
       throw new AppError("O atendimento mudou antes da contestacao", 409);
@@ -1712,6 +1730,8 @@ export async function disputeServiceCompletion(userId, conversationId) {
 
   const updatedConversation = await findAccessibleConversation(userId, conversation.id);
   notifyConversation(updatedConversation, "service-disputed");
+  pushServiceNotification(updatedConversation, updatedConversation.vendedor.usuario_id,
+    "O cliente informou um problema no atendimento. A liberacao do valor esta bloqueada enquanto o suporte analisa.", "service-disputed");
   return { conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }) };
 }
 

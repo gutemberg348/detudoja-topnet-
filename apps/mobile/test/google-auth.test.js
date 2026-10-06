@@ -85,7 +85,7 @@ test("plugin iOS registra esquema reverso somente para ID iOS separado", () => {
   try {
     process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID = "web.apps.googleusercontent.com";
     process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID = "ios.apps.googleusercontent.com";
-    const config = { plugins: ["expo-font"], scheme: "detudoja" };
+    const config = { android: { package: "com.detudoja.mobile" }, plugins: ["expo-font"], scheme: "detudoja" };
     assert.deepEqual(appConfig({ config }).plugins[1], ["@react-native-google-signin/google-signin", { iosUrlScheme: "com.googleusercontent.apps.ios" }]);
     assert.equal(appConfig({ config }).scheme, "detudoja");
     process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;

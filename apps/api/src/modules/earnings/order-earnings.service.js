@@ -1171,7 +1171,7 @@ export async function settlePaidAutonomousChargeEarnings(database, chargeId) {
   await creditUserWallet({
     availableAt,
     database,
-    description: `Venda autonoma da ${reference}.`,
+    description: charge.proposta_servico ? `Servico: ${charge.titulo} (${reference}).` : `Venda autonoma da ${reference}.`,
     origin: "VENDA",
     originId: transaction.id,
     userId: charge.vendedor.usuario_id,

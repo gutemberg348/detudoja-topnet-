@@ -18,8 +18,11 @@ import { sellerStyles as styles } from "./seller.styles";
 
 export function SaleModal({ error, form, isSaving, onChange, onClose, onSubmit, open }) {
   return (
-    <Modal animationType="fade" transparent visible={open}>
-      <View style={styles.modalBackdrop}>
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={styles.modalBackdrop}
+      >
         <View style={styles.modal}>
           <View style={styles.modalHeader}>
             <View>
@@ -82,7 +85,7 @@ export function SaleModal({ error, form, isSaving, onChange, onClose, onSubmit, 
             </View>
           </ScrollView>
         </View>
-      </View>
+      </KeyboardAvoidingView>
       <FeedbackLayer />
     </Modal>
   );
@@ -90,13 +93,13 @@ export function SaleModal({ error, form, isSaving, onChange, onClose, onSubmit, 
 
 export function SaleDestinationModal({ onClose, onSelectAutonomous, onSelectStore, open, stores }) {
   return (
-    <Modal animationType="fade" transparent visible={open}>
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
       <View style={styles.modalBackdrop}>
         <View style={styles.modal}>
           <View style={styles.modalHeader}>
             <View>
               <Text style={styles.modalKicker}>Nova venda</Text>
-              <Text style={styles.modalTitle}>Onde voce vendeu?</Text>
+              <Text style={styles.modalTitle}>Como deseja cobrar?</Text>
             </View>
             <Pressable onPress={onClose} style={styles.modalClose}>
               <Ionicons color={colors.textPrimary} name="close" size={20} />
@@ -109,12 +112,14 @@ export function SaleDestinationModal({ onClose, onSelectAutonomous, onSelectStor
             showsVerticalScrollIndicator={false}
           >
             <Text style={styles.choiceMeta}>
-              Registre a venda no comercio correto para manter historico, taxas e repasse organizados.
+              Escolha uma venda autônoma ou uma loja. A cobrança segue as regras da opção escolhida.
             </Text>
-            <Text style={styles.destinationSectionLabel}>SUAS LOJAS</Text>
+            <Text style={styles.destinationSectionLabel}>COBRAR PELA LOJA</Text>
             {stores.map((store) => (
               <Pressable
                 key={store.id}
+                accessibilityRole="button"
+                accessibilityLabel={`Cobrar pela loja ${store.name}`}
                 onPress={() => onSelectStore(store)}
                 style={({ pressed }) => [styles.choiceCard, pressed && styles.pressed]}
               >
@@ -123,7 +128,10 @@ export function SaleDestinationModal({ onClose, onSelectAutonomous, onSelectStor
                 </View>
                 <View style={styles.choiceCopy}>
                   <Text numberOfLines={1} style={styles.choiceLabel}>{store.name}</Text>
-                  <Text numberOfLines={1} style={styles.choiceMeta}>Gerar QR vinculado a esta loja.</Text>
+                  <Text style={styles.choiceMeta}>
+                    {store.category?.name ?? store.segment?.name ?? "Venda da loja"}
+                    {store.access?.isOwner === false ? " · Você faz parte da equipe" : ""}
+                  </Text>
                 </View>
                 <View style={styles.choiceArrow}>
                   <Ionicons color={colors.primaryDark} name="arrow-forward" size={18} />
@@ -133,6 +141,8 @@ export function SaleDestinationModal({ onClose, onSelectAutonomous, onSelectStor
             <View style={styles.destinationDivider} />
             <Text style={styles.destinationSectionLabel}>VENDA SEM LOJA</Text>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Cobrar como autonomo"
               onPress={onSelectAutonomous}
               style={({ pressed }) => [styles.choiceCard, styles.choiceCardSecondary, pressed && styles.pressed]}
             >
@@ -141,7 +151,7 @@ export function SaleDestinationModal({ onClose, onSelectAutonomous, onSelectStor
               </View>
               <View style={styles.choiceCopy}>
                 <Text style={styles.choiceLabel}>Cobrar como autonomo</Text>
-                <Text style={styles.choiceMeta}>Use somente quando a venda nao pertence a nenhuma loja.</Text>
+                <Text style={styles.choiceMeta}>Receba em seu nome pelas regras de venda autônoma.</Text>
               </View>
               <View style={styles.choiceArrow}>
                 <Ionicons color={colors.primaryDark} name="arrow-forward" size={18} />
@@ -181,7 +191,7 @@ export function StoreChargeModal({
   }
 
   return (
-    <Modal animationType="fade" transparent visible={open}>
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={styles.modalBackdrop}

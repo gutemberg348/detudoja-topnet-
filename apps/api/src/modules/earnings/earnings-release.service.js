@@ -41,7 +41,7 @@ export async function releaseCommercialSettlement(
                 select: {
                   concluido_em: true,
                   status: true,
-                  conversa_servico: { select: { status: true } },
+                  conversa_servico: { select: { id: true, status: true, cliente_usuario_id: true } },
                 },
               },
             },
@@ -74,7 +74,7 @@ export async function releaseCommercialSettlement(
   }
 
   // Defesa para transacoes antigas ou criadas por alguma integracao: nunca
-  // libera valor de servico enquanto a entrega ainda nao foi confirmada.
+  // libera valor de servico sem conclusao registrada ou durante disputa.
   const serviceProposal = transaction.pagamento.cobranca?.proposta_servico;
   if (
     serviceProposal
@@ -207,6 +207,11 @@ export async function releaseCommercialSettlement(
     released: true,
     transactionId: transaction.id,
     walletUserIds: [...new Set(walletCredits.map((credit) => credit.usuario_id))],
+    service: serviceProposal ? {
+      conversationId: serviceProposal.conversa_servico.id,
+      customerUserId: serviceProposal.conversa_servico.cliente_usuario_id,
+      sellerUserId,
+    } : null,
   };
 }
 

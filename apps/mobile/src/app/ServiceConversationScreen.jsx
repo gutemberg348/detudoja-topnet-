@@ -1,6 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useFeedback } from "../components/FeedbackProvider";
 import { serviceActionFeedback } from "../utils/action-feedback";
+import { serviceFundsCopy } from "../utils/service-funds";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -706,6 +707,7 @@ export function ServiceConversationScreen({ navigation, route }) {
           onDeliver={deliverService}
           onOpenPayment={openChargePayment}
           onOpenQr={openChargeQr}
+          onOpenWallet={() => navigation.navigate("Carteira")}
           proposal={latestProposal}
         />
       ) : (
@@ -725,10 +727,10 @@ export function ServiceConversationScreen({ navigation, route }) {
         </View>
       ) : null}
 
-      {isCustomerMotoboyRide && !conversation.isSeller && conversation.canDispute && conversation.status === "ENCERRADA" ? (
+      {!conversation.isSeller && conversation.canDispute ? (
         <Pressable accessibilityRole="button" disabled={Boolean(actionLoading)} onPress={disputeCompletion} style={styles.rideDispute}>
           <Ionicons color={colors.danger} name="alert-circle-outline" size={18} />
-          <Text style={styles.rideDisputeText}>Problema com a corrida? Contestar antes da liberacao.</Text>
+          <Text style={styles.rideDisputeText}>Problema com o atendimento? Contestar antes da liberação.</Text>
         </Pressable>
       ) : null}
 
@@ -981,6 +983,7 @@ function ProposalCard({
   onDeliver,
   onOpenPayment,
   onOpenQr,
+  onOpenWallet,
   proposal,
 }) {
   const isSeller = conversation.isSeller;
@@ -1026,6 +1029,8 @@ function ProposalCard({
       ) : null}
 
       {completedOutsideApp ? <Text style={styles.proposalHint}>O prestador informou que recebeu fora do app. Atendimento concluido, sem pool, cashback ou ganhos da rede.</Text> : null}
+
+      <ServiceFundsNotice funds={proposal.funds} isSeller={isSeller} onOpenWallet={onOpenWallet} />
 
       {pending && !isSeller && conversation.status === "ACORDADA" ? (
         <View style={styles.proposalActions}>
@@ -1125,6 +1130,27 @@ function ProposalCard({
   );
 }
 
+function ServiceFundsNotice({ funds, isSeller, onOpenWallet }) {
+  const copy = serviceFundsCopy(funds, isSeller);
+  if (!copy) return null;
+  const deadline = funds.availableAt && funds.state === "PENDING_RELEASE"
+    ? new Date(funds.availableAt).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : null;
+  return (
+    <View style={styles.fundsNotice}>
+      <Text style={styles.fundsTitle}>{copy.title}</Text>
+      {isSeller && funds.netCents != null ? (
+        <Text style={styles.proposalHint}>Seu líquido: {formatarDinheiro(funds.netCents)} · Taxas: {formatarDinheiro(funds.feeCents)}</Text>
+      ) : null}
+      <Text style={styles.proposalHint}>{copy.text}</Text>
+      {deadline ? <Text style={styles.fundsTitle}>Liberação prevista: {deadline}</Text> : null}
+      {isSeller ? <Pressable accessibilityRole="button" onPress={onOpenWallet} style={styles.fundsWallet}>
+        <Text style={styles.fundsTitle}>Ver minha carteira</Text>
+        <Ionicons color={colors.primaryDark} name="arrow-forward" size={16} />
+      </Pressable> : null}
+    </View>
+  );
+}
+
 function ProposalModal({ form, isCourierRide, loading, onChange, onClose, onSubmit, open }) {
   return (
     <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
@@ -1133,88 +1159,94 @@ function ProposalModal({ form, isCourierRide, loading, onChange, onClose, onSubm
         style={styles.modalOverlay}
       >
         <Pressable onPress={onClose} style={StyleSheet.absoluteFill} />
-        <View style={styles.modalCard}>
-          <View style={styles.modalHeader}>
-            <View style={styles.modalHeaderIcon}>
-              <Ionicons color={colors.primaryDark} name="cash-outline" size={22} />
+        <View style={styles.proposalModalCard}>
+          <ScrollView
+            contentContainerStyle={styles.proposalModalContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator
+          >
+            <View style={styles.modalHeader}>
+              <View style={styles.modalHeaderIcon}>
+                <Ionicons color={colors.primaryDark} name="cash-outline" size={22} />
+              </View>
+              <View style={styles.modalHeaderCopy}>
+                <Text style={styles.modalEyebrow}>Proposta do servico</Text>
+                <Text style={styles.modalTitle}>Combine o valor com seguranca.</Text>
+              </View>
+              <Pressable onPress={onClose} style={styles.modalClose}>
+                <Ionicons color={colors.textPrimary} name="close" size={21} />
+              </Pressable>
             </View>
-            <View style={styles.modalHeaderCopy}>
-              <Text style={styles.modalEyebrow}>Proposta do servico</Text>
-              <Text style={styles.modalTitle}>Combine o valor com seguranca.</Text>
-            </View>
-            <Pressable onPress={onClose} style={styles.modalClose}>
-              <Ionicons color={colors.textPrimary} name="close" size={21} />
-            </Pressable>
-          </View>
 
-          <View style={styles.field}>
-            <Text style={styles.fieldLabel}>Valor combinado</Text>
-            <View style={styles.amountInputShell}>
-              <Text style={styles.amountPrefix}>R$</Text>
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Valor combinado</Text>
+              <View style={styles.amountInputShell}>
+                <Text style={styles.amountPrefix}>R$</Text>
+                <TextInput
+                  keyboardType="decimal-pad"
+                  onChangeText={(amount) => onChange((current) => ({ ...current, amount }))}
+                  placeholder="0,00"
+                  placeholderTextColor={colors.textMuted}
+                  style={styles.amountInput}
+                  value={form.amount}
+                />
+              </View>
+              {isCourierRide ? (
+                <Text style={styles.proposalHint}>
+                  O valor recebido pelo entregador fica pendente por 24 horas antes do saque.
+                </Text>
+              ) : null}
+            </View>
+
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Como sera pago</Text>
+              <View style={styles.paymentOptions}>
+                <PaymentOption
+                  active={form.paymentMode === "ONLINE"}
+                  icon="phone-portrait-outline"
+                  label="Pela plataforma"
+                  onPress={() => onChange((current) => ({ ...current, paymentMode: "ONLINE" }))}
+                  text="Cliente paga pelo saldo no app"
+                />
+                <PaymentOption
+                  active={form.paymentMode === "QR_PRESENCIAL"}
+                  icon="qr-code-outline"
+                  label="QR presencial"
+                  onPress={() => onChange((current) => ({ ...current, paymentMode: "QR_PRESENCIAL" }))}
+                  text="Exiba o QR quando se encontrarem"
+                />
+              </View>
+            </View>
+
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Resumo do combinado</Text>
               <TextInput
-                keyboardType="decimal-pad"
-                onChangeText={(amount) => onChange((current) => ({ ...current, amount }))}
-                placeholder="0,00"
+                multiline
+                onChangeText={(description) => onChange((current) => ({ ...current, description }))}
+                placeholder="Ex.: frete do Centro ao Bairro, incluindo carga e descarga"
                 placeholderTextColor={colors.textMuted}
-                style={styles.amountInput}
-                value={form.amount}
+                style={styles.descriptionInput}
+                value={form.description}
               />
             </View>
-            {isCourierRide ? (
-              <Text style={styles.proposalHint}>
-                O valor recebido pelo entregador fica pendente por 24 horas antes do saque.
-              </Text>
-            ) : null}
-          </View>
 
-          <View style={styles.field}>
-            <Text style={styles.fieldLabel}>Como sera pago</Text>
-            <View style={styles.paymentOptions}>
-              <PaymentOption
-                active={form.paymentMode === "ONLINE"}
-                icon="phone-portrait-outline"
-                label="Pela plataforma"
-                onPress={() => onChange((current) => ({ ...current, paymentMode: "ONLINE" }))}
-                text="Cliente paga pelo saldo no app"
+            <View style={styles.modalActions}>
+              <AppButton
+                disabled={loading}
+                onPress={onClose}
+                style={styles.modalAction}
+                title="Cancelar"
+                variant="neutral"
               />
-              <PaymentOption
-                active={form.paymentMode === "QR_PRESENCIAL"}
-                icon="qr-code-outline"
-                label="QR presencial"
-                onPress={() => onChange((current) => ({ ...current, paymentMode: "QR_PRESENCIAL" }))}
-                text="Exiba o QR quando se encontrarem"
+              <AppButton
+                icon="send-outline"
+                loading={loading}
+                onPress={onSubmit}
+                style={styles.modalAction}
+                title="Enviar proposta"
               />
             </View>
-          </View>
-
-          <View style={styles.field}>
-            <Text style={styles.fieldLabel}>Resumo do combinado</Text>
-            <TextInput
-              multiline
-              onChangeText={(description) => onChange((current) => ({ ...current, description }))}
-              placeholder="Ex.: frete do Centro ao Bairro, incluindo carga e descarga"
-              placeholderTextColor={colors.textMuted}
-              style={styles.descriptionInput}
-              value={form.description}
-            />
-          </View>
-
-          <View style={styles.modalActions}>
-            <AppButton
-              disabled={loading}
-              onPress={onClose}
-              style={styles.modalAction}
-              title="Cancelar"
-              variant="neutral"
-            />
-            <AppButton
-              icon="send-outline"
-              loading={loading}
-              onPress={onSubmit}
-              style={styles.modalAction}
-              title="Enviar proposta"
-            />
-          </View>
+          </ScrollView>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -1405,6 +1437,9 @@ function ProposalDecisionModal({
 function PaymentOption({ active, icon, label, onPress, text }) {
   return (
     <Pressable
+      accessibilityRole="radio"
+      accessibilityLabel={label}
+      aria-checked={active}
       onPress={onPress}
       style={({ pressed }) => [
         styles.paymentOption,
@@ -1417,9 +1452,9 @@ function PaymentOption({ active, icon, label, onPress, text }) {
       </View>
       <Text style={styles.paymentOptionLabel}>{label}</Text>
       <Text style={styles.paymentOptionText}>{text}</Text>
-      {active ? (
-        <Ionicons color={colors.primaryDark} name="checkmark-circle" size={18} />
-      ) : null}
+      <View style={styles.paymentOptionCheck}>
+        {active ? <Ionicons color={colors.primaryDark} name="checkmark-circle" size={18} /> : null}
+      </View>
     </Pressable>
   );
 }
@@ -1558,6 +1593,11 @@ const styles = StyleSheet.create({
   modalAction: { flex: 1 },
   modalActions: { flexDirection: "row", gap: spacing.sm },
   modalCard: { backgroundColor: colors.card, borderRadius: radius.lg, gap: spacing.lg, maxWidth: 520, padding: spacing.lg, width: "92%", ...shadowSoft },
+  fundsNotice: { backgroundColor: colors.card, borderRadius: radius.md, gap: 5, padding: spacing.sm },
+  fundsTitle: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 12 },
+  fundsWallet: { alignItems: "center", flexDirection: "row", gap: 6, minHeight: 44 },
+  proposalModalCard: { backgroundColor: colors.card, borderRadius: radius.lg, flexShrink: 1, maxHeight: "100%", maxWidth: 520, overflow: "hidden", width: "100%", ...shadowSoft },
+  proposalModalContent: { gap: spacing.lg, padding: spacing.lg },
   modalClose: { alignItems: "center", backgroundColor: colors.cardMuted, borderRadius: radius.round, height: 40, justifyContent: "center", width: 40 },
   modalEyebrow: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: 10, textTransform: "uppercase" },
   modalHeader: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
@@ -1570,7 +1610,8 @@ const styles = StyleSheet.create({
   paymentOptionIcon: { alignItems: "center", backgroundColor: colors.cardMuted, borderRadius: radius.round, height: 40, justifyContent: "center", width: 40 },
   paymentOptionIconActive: { backgroundColor: colors.card },
   paymentOptionLabel: { color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.caption, textAlign: "center" },
-  paymentOptionText: { color: colors.textSecondary, flex: 1, fontFamily: fonts.regular, fontSize: 10, lineHeight: 14, textAlign: "center" },
+  paymentOptionText: { color: colors.textSecondary, flexShrink: 0, fontFamily: fonts.regular, fontSize: 12, lineHeight: 17, textAlign: "center" },
+  paymentOptionCheck: { height: 18, marginTop: "auto" },
   paymentOptions: { flexDirection: "row", gap: spacing.sm },
   paymentPill: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.primaryLight, borderRadius: radius.round, borderWidth: 1, flexDirection: "row", gap: 4, paddingHorizontal: spacing.sm, paddingVertical: 5 },
   paymentPillText: { color: colors.primaryDark, fontFamily: fonts.bold, fontSize: 9 },
