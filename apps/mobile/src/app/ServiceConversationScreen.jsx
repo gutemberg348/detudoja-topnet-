@@ -700,6 +700,7 @@ export function ServiceConversationScreen({ navigation, route }) {
           isCourierRide={isCourierRide}
           isCustomerMotoboyRide={isCustomerMotoboyRide}
           onAccept={acceptProposal}
+          onCancel={canCancelService ? () => setCancelOpen(true) : null}
           onConfirmCompletion={confirmCompletion}
           onDecline={declineProposal}
           onDeliver={deliverService}
@@ -718,11 +719,10 @@ export function ServiceConversationScreen({ navigation, route }) {
         </View>
       )}
 
-      {canCancelService ? (
-        <Pressable accessibilityRole="button" disabled={Boolean(actionLoading)} onPress={() => setCancelOpen(true)} style={({ pressed }) => [styles.cancelRideButton, pressed && styles.pressed]}>
-          <Ionicons color={colors.danger} name="close-circle-outline" size={16} />
-          <Text style={styles.cancelRideText}>Cancelar atendimento</Text>
-        </Pressable>
+      {canCancelService && !latestProposal ? (
+        <View style={styles.cancelServiceSection}>
+          <CancelServiceButton disabled={Boolean(actionLoading)} onPress={() => setCancelOpen(true)} />
+        </View>
       ) : null}
 
       {isCustomerMotoboyRide && !conversation.isSeller && conversation.canDispute && conversation.status === "ENCERRADA" ? (
@@ -954,12 +954,28 @@ function LocationMessageCard({ message }) {
   );
 }
 
+function CancelServiceButton({ disabled, onPress }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [styles.cancelServiceButton, pressed && styles.cancelServicePressed, disabled && styles.cancelServiceDisabled]}
+    >
+      <Ionicons color="#BE123C" name="close-circle-outline" size={17} />
+      <Text style={styles.cancelServiceText}>Cancelar atendimento</Text>
+    </Pressable>
+  );
+}
+
 function ProposalCard({
   actionLoading,
   conversation,
   isCourierRide,
   isCustomerMotoboyRide,
   onAccept,
+  onCancel,
   onConfirmCompletion,
   onDecline,
   onDeliver,
@@ -1053,7 +1069,7 @@ function ProposalCard({
           icon="qr-code-outline"
           loading={actionLoading === "qr"}
           onPress={() => onOpenQr(proposal)}
-          style={styles.compactProposalButton}
+          style={[styles.compactProposalButton, styles.qrProposalButton]}
           title={isCustomerMotoboyRide && conversation.status === "ACORDADA" ? "Cobrar na chegada" : "Exibir QR presencial"}
         />
       ) : null}
@@ -1104,6 +1120,7 @@ function ProposalCard({
             : "Aguardando a confirmacao do cliente."}
         </Text>
       ) : null}
+      {onCancel ? <CancelServiceButton disabled={Boolean(actionLoading)} onPress={onCancel} /> : null}
     </View>
   );
 }
@@ -1459,6 +1476,11 @@ const styles = StyleSheet.create({
   cancelModalTitle: { color: colors.textPrimary, fontFamily: fonts.extraBold, fontSize: typography.h2, textAlign: "center" },
   cancelRideButton: { alignItems: "center", alignSelf: "flex-start", backgroundColor: "#FFF1F2", borderColor: "#FECDD3", borderRadius: radius.round, borderWidth: 1, flexDirection: "row", gap: 5, minHeight: 34, paddingHorizontal: spacing.sm },
   cancelRideText: { color: colors.danger, fontFamily: fonts.bold, fontSize: 10 },
+  cancelServiceSection: { backgroundColor: "#F2FBF7", paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  cancelServiceButton: { alignItems: "center", alignSelf: "stretch", backgroundColor: colors.card, borderColor: "#FECDD3", borderRadius: radius.lg, borderWidth: 1, flexDirection: "row", gap: spacing.sm, justifyContent: "center", minHeight: 44, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  cancelServiceText: { color: "#BE123C", fontFamily: fonts.semiBold, fontSize: typography.small, textAlign: "center", flexShrink: 1 },
+  cancelServicePressed: { backgroundColor: colors.dangerSoft },
+  cancelServiceDisabled: { opacity: 0.5 },
   composer: { backgroundColor: colors.card, borderTopColor: colors.border, borderTopWidth: 1, gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   composerActions: { alignItems: "center", flexDirection: "row" },
   content: { backgroundColor: colors.background, flex: 1 },
@@ -1558,6 +1580,7 @@ const styles = StyleSheet.create({
   proposalAction: { flex: 1 },
   proposalActions: { flexDirection: "row", gap: spacing.sm },
   compactProposalButton: { minHeight: 40 },
+  qrProposalButton: { minHeight: 44 },
   proposalAmount: { color: colors.primaryDark, fontFamily: fonts.extraBold, fontSize: typography.label },
   proposalCard: { backgroundColor: "#F2FBF7", borderBottomColor: colors.primaryLight, borderBottomWidth: 1, gap: 7, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
   proposalCardPaid: { backgroundColor: "#ECFDF5" },

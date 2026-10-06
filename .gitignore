@@ -22,3 +22,8 @@ apps/mobile/.expo-check/
 apps/mobile/.expo-build-check/
 apps/mobile/.expo-validation/
 apps/mobile/dist-*/
+apps/mobile/android/
+credentials.json
+*.jks
+*.keystore
+google-services.json

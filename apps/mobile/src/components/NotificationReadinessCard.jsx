@@ -20,7 +20,12 @@ const messages = {
 export function NotificationReadinessCard() {
   const push = usePushNotifications();
   if (!push) return null;
-  const [title, message] = messages[push.status] ?? messages.error;
+  const [title, message] = push.status === "device-configuration"
+    ? [push.permissionGranted ? "Permissão de notificações concedida" : "Avisos precisam de configuração",
+      "Esta versão do app ainda precisa de um ajuste para receber avisos fora da tela. Não é preciso permitir novamente. Acompanhe seus chamados pelo app enquanto isso."]
+    : push.status === "error" && push.permissionGranted
+      ? ["Permissão concedida", "Falta concluir a conexão dos avisos deste aparelho. Vamos tentar novamente; você não precisa permitir outra vez."]
+      : messages[push.status] ?? messages.error;
   const canTest = Boolean(push.token) && ["ready", "quiet", "configuration"].includes(push.status);
   const canActivate = ["denied", "quiet", "error"].includes(push.status);
   return (

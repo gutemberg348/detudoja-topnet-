@@ -1,0 +1,33 @@
+// Applied only by build-android-local.js. Credentials stay in the process environment.
+gradle.beforeProject { project ->
+    ['com.android.application', 'com.android.library'].each { pluginId ->
+        project.pluginManager.withPlugin(pluginId) {
+            project.extensions.getByName('androidComponents').finalizeDsl { android ->
+                // 128 is shorter than the target directory itself in this monorepo:
+                // CMake cannot hash enough and leaves the original long object path.
+                // Use a short, per-checkout/module staging directory plus a usable limit.
+                if (System.getProperty('os.name').toLowerCase().contains('windows')) {
+                    def checkoutId = java.security.MessageDigest.getInstance('SHA-256')
+                        .digest(project.rootDir.canonicalPath.getBytes('UTF-8')).encodeHex().toString().take(8)
+                    def moduleId = java.security.MessageDigest.getInstance('SHA-256')
+                        .digest(project.path.getBytes('UTF-8')).encodeHex().toString().take(8)
+                    def stagingRoot = System.getenv('DTJ_APK_CXX_ROOT') ?: new File(System.getProperty('user.home'), '.dtj-cxx').path
+                    android.externalNativeBuild.cmake.buildStagingDirectory = new File(stagingRoot, "${checkoutId}/${moduleId}")
+                    android.defaultConfig.externalNativeBuild.cmake.arguments.add('-DCMAKE_OBJECT_PATH_MAX=240')
+                }
+                if (pluginId == 'com.android.application') {
+                    def signing = android.signingConfigs.maybeCreate('detudojaLocal')
+                    signing.storeFile = new File(System.getenv('DTJ_APK_KEYSTORE'))
+                    signing.storePassword = System.getenv('DTJ_APK_STORE_PASSWORD')
+                    signing.keyAlias = System.getenv('DTJ_APK_KEY_ALIAS')
+                    signing.keyPassword = System.getenv('DTJ_APK_KEY_PASSWORD')
+                    android.buildTypes.getByName('release').signingConfig = signing
+                }
+            }
+            // An env change must be bundled even when Gradle considers JS sources unchanged.
+            project.tasks.matching { it.name == 'createBundleReleaseJsAndAssets' }.configureEach {
+                outputs.upToDateWhen { false }
+            }
+        }
+    }
+}

@@ -23,3 +23,16 @@ export async function withPushTimeout(operation, milliseconds = 15_000) {
     })]);
   } finally { clearTimeout(timer); }
 }
+
+// Only known setup failures are permanent. Do not expose SDK messages/tokens in UI.
+export function pushRegistrationFailure(error) {
+  const details = `${error?.code ?? ""} ${error?.message ?? ""}`;
+  const permissionGranted = error?.pushPermissionGranted === true;
+  if (/Default FirebaseApp|FirebaseApp.*initializ|google-services\.json|FirebaseInstallations.*BAD_CONFIG|INVALID_SENDER|SENDER_ID_MISMATCH|Missing.*projectId|No.*Firebase.*App/i.test(details)) {
+    return { status: "device-configuration", permissionGranted };
+  }
+  if (/InvalidCredentials|MismatchSenderId|APNS.*entitlement|aps-environment/i.test(details)) {
+    return { status: "configuration", permissionGranted };
+  }
+  return { status: "error", permissionGranted };
+}

@@ -1,5 +1,106 @@
 # Front Mobile
 
+## FCM Android preparado (2026-10-06)
+
+google-services.json local validado para com.detudoja.mobile/projeto detudoja;
+prebuild incorporou configuracao e plugin Google Services. Conta de servico
+foi vinculada a Push Notifications FCM V1 no Expo, com leitura posterior.
+Check local passou, assinatura EAS preservada. Ainda gerar/instalar APK novo
+e testar entrega real; ver docs/notificacoes.md para detalhes e build remoto.
+
+## Avisos, ordem dos chamados e badge na Home (2026-10-05)
+
+Central de servicos exibe chamadas tocando e chamados abaixo dos controles
+de disponibilidade, antes do aviso de push, novos cadastros e area do motoboy.
+Home identifica conversas de servico com badge Cliente quando isSeller=true,
+Prestador quando false, e nome da atividade, preservando mensagens nao lidas.
+
+Permissao concedida nao significa token de push cadastrado. Provider distingue
+falha transitoria de falta de configuracao Firebase/APNs; configuracao ausente
+nao oferece tentativa repetida nem afirma notificacoes ativas. Arquivo local
+google-services.json ausente e GOOGLE_SERVICES_JSON nao configurado neste PC;
+usuario confirmou que ainda nao usa Firebase. API propria permanece igual:
+FCM e apenas o transporte de push Android. Entrega fisica ainda pendente.
+
+App config detecta apps/mobile/google-services.json ou GOOGLE_SERVICES_JSON,
+confere pacote e estrutura, preserva extra.eas e publica somente flag de
+prontidao nativa. Build local avisa quando arquivo falta; detalhes em notificacoes.md.
+Testes cobrem permissao, SDK sem Firebase, falha de rede e cadastro completo.
+Export web e navegador 320/390/412 com API simulada validaram badges e ordem.
+
+## Build local Windows: caminho longo do Ninja (2026-10-05)
+
+O build local usa staging CMake curto em USERPROFILE/.dtj-cxx, separado por
+checkout/modulo, e limite de objetos 240. Corrige o erro de caminho maior que
+260 no safe-area-context; configuracao e compilacao do objeto que falhava
+foram verificadas. Mesmo comando de build; detalhes em build-android-local.md.
+
+## Cancelar atendimento alinhado ao QR (2026-10-05)
+
+ServiceConversationScreen integra Cancelar atendimento ao card da proposta,
+abaixo das acoes, com largura total, icone/texto centralizados, fundo branco
+e contorno vermelho discreto. Botao e QR presencial tem altura minima de 44,
+mesmas margens laterais e espacamento de 7. Sem proposta, a acao preserva
+as margens em uma faixa propria. Regras de permissao e confirmacao mantidas.
+
+Export web aprovado; navegador com API simulada validou alinhamento nas
+larguras 320/390/412 e abrir/desistir da confirmacao sem enviar cancelamento.
+Evidencias em TEMP/detudoja-service-cancel-design-20261005. Sem teste fisico.
+
+## Categorias compactas e imagem no Moto G54 (2026-10-05)
+
+Usuario reportou que a primeira correcao ainda deixava os circulos vazios apos
+tocar em categorias no Moto G54. Sem aparelho conectado, a causa especifica
+do compositor Android nao foi reproduzida. O card ainda usava Image do React
+Native em absoluteFill, recorte circular, opacity no toque e removia o apoio
+no onLoad, antes da confirmacao de exibicao da imagem.
+
+MarketplaceCategoryCard agora usa [expo-image](https://docs.expo.dev/versions/latest/sdk/image/)
+57.0.5 (Glide no Android), com
+cache memory-disk, transition=0, recyclingKey por URL e dimensoes explicitas
+de 32 x 32 em fluxo normal. A moldura mantem borda de largura constante e
+nao recorta a imagem. Toque muda apenas a cor de fundo; nao aplica opacity
+ao conjunto. O apoio permanece ate onDisplay, e erros preservam o icone.
+Selecao nao altera URL/chave, nao desmonta a arte nem refaz download.
+
+Cards passaram de 88 x 96 para largura 72 e altura minima 80, icone externo
+34 e texto em duas linhas. Altura minima permite crescer com fonte ampliada.
+expo-image e plugin foram adicionados ao package/lock/app.json; exige APK
+novo para incluir o modulo nativo. API e paginacao de produtos inalteradas.
+Teste fisico no Moto G54 ainda precisa ser feito apos instalar esse APK.
+
+Validacao: 96 testes mobile, exports Android/iOS/web e deteccao expo-image no
+autolinking Android aprovados. App web compilado com API simulada passou 12
+trocas de categoria, troca de modo/cache, imagens atrasadas, erro 404 e URL
+ausente, sem novo download na selecao. Cards mediram 72 x 80 em larguras
+320/360/390/412; pressionar preservou opacidade 1 e imagem 32 x 32. Nenhum
+erro JS. Artefatos locais em TEMP/detudoja-category-moto-20261005. Esse teste
+de navegador nao comprova comportamento do compositor no aparelho Android.
+
+## APK de testes compilado no PC (2026-10-05)
+
+`npm run build:android:local` na raiz gera APK release com JS incluido por
+Expo Prebuild/Gradle Wrapper, sem Metro nem EAS remoto. Usa .env mobile,
+arm64-v8a por padrao e opcao para outras arquiteturas. `--check` confere o
+ambiente; `--prepare` gera Android sem compilar. Saida em
+apps/mobile/.build-local/brasil-cashback-local.apk depois do build.
+credentials.json baixado do EAS permite manter assinatura/login Google;
+fallback de testes tem SHA-1 diferente. Caches nativos preservados e bundle
+sempre refeito ao mudar env. Check/prebuild aprovados; compilacao completa
+e teste no aparelho ficam para o usuario. Detalhes em build-android-local.md.
+
+## ID Google corrigido no APK (2026-10-05)
+
+Inspecao do APK de preview `ab6b8edd` encontrou um ID Web com prefixo
+`3666699963339-`, que nao existe no Google. ID correto da imagem do Console
+comeca com `666699963339-`; consulta publica confirmou que ele e reconhecido.
+Corrigidos env local mobile/API e EAS preview/production, com leitura posterior
+conferida. Campos Android/iOS que repetiam o Web incorreto foram esvaziados.
+Android usa o Web no SDK; iOS ainda exige seu proprio cliente. Os 10 testes
+Google e check:google passaram. Exige novo APK, atualizar audience na VPS e
+conferir cliente Android/pacote/SHA-1 no mesmo projeto Google Cloud.
+Detalhes e limites da verificacao em `login-google.md`.
+
 ## Avisos de cashback ao contratar servicos (2026-10-05)
 
 Cliente ve `Cashback ao pagar pelo app` na escolha do prestador, no aceite

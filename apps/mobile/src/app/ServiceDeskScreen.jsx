@@ -467,6 +467,42 @@ export function ServiceDeskScreen({ navigation }) {
           ) : null}
           {availabilityError ? <Text style={styles.mainAvailabilityError}>{availabilityError}</Text> : null}
           <Text style={styles.availabilityExplanation}>Você continua disponível ao sair do app ou bloquear o celular. Pause as atividades quando não puder atender.</Text>
+          {courierRequests.length ? (
+            <>
+              <SectionTitle
+                icon="notifications-outline"
+                subtitle="Aceite para entrar no chat e combinar valor e entrega"
+                title="Chamadas tocando"
+                value={courierRequests.length}
+              />
+              <View style={styles.requestList}>
+                {courierRequests.map((request) => (
+                  <CourierRequestCard
+                    key={request.id}
+                    loading={acceptingRequestId === request.id}
+                    onAccept={() => acceptRequest(request)}
+                    request={request}
+                  />
+                ))}
+              </View>
+            </>
+          ) : null}
+
+          <SectionTitle icon="chatbubbles-outline" subtitle="Conversas reais enviadas por clientes" title="Chamados" value={openCalls.length} />
+          {openCalls.length ? (
+            <View style={styles.callsList}>
+              {openCalls.map((conversation) => (
+                <ServiceCallCard
+                  conversation={conversation}
+                  key={conversation.id}
+                  onPress={() => navigation.navigate("ServiceConversation", { conversation })}
+                />
+              ))}
+            </View>
+          ) : (
+            <StatePanel icon="chatbubble-ellipses-outline" text="Quando um cliente escolher voce na busca, o chamado chega aqui em tempo real." title="Nenhum chamado em aberto" />
+          )}
+
           <NotificationReadinessCard />
 
           {hasRegisteredServices ? (
@@ -569,41 +605,6 @@ export function ServiceDeskScreen({ navigation }) {
             </>
           ) : null}
 
-          {courierRequests.length ? (
-            <>
-              <SectionTitle
-                icon="notifications-outline"
-                subtitle="Aceite para entrar no chat e combinar valor e entrega"
-                title="Chamadas tocando"
-                value={courierRequests.length}
-              />
-              <View style={styles.requestList}>
-                {courierRequests.map((request) => (
-                  <CourierRequestCard
-                    key={request.id}
-                    loading={acceptingRequestId === request.id}
-                    onAccept={() => acceptRequest(request)}
-                    request={request}
-                  />
-                ))}
-              </View>
-            </>
-          ) : null}
-
-          <SectionTitle icon="chatbubbles-outline" subtitle="Conversas reais enviadas por clientes" title="Chamados" value={openCalls.length} />
-          {openCalls.length ? (
-            <View style={styles.callsList}>
-              {openCalls.map((conversation) => (
-                <ServiceCallCard
-                  conversation={conversation}
-                  key={conversation.id}
-                  onPress={() => navigation.navigate("ServiceConversation", { conversation })}
-                />
-              ))}
-            </View>
-          ) : (
-            <StatePanel icon="chatbubble-ellipses-outline" text="Quando um cliente escolher voce na busca, o chamado chega aqui em tempo real." title="Nenhum chamado em aberto" />
-          )}
 
         </>
       ) : null}

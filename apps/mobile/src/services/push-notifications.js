@@ -57,25 +57,36 @@ export async function registerDeviceForPushNotifications(accessToken, { requestP
     return { status: "denied", canAskAgain: permission.canAskAgain };
   }
   const projectId = Constants.easConfig?.projectId ?? Constants.expoConfig?.extra?.eas?.projectId ?? process.env.EXPO_PUBLIC_EAS_PROJECT_ID;
-  if (!projectId) return { status: "configuration" };
-  const { data: token } = await withPushTimeout(() => Notifications.getExpoPushTokenAsync({ projectId }));
-  const saved = await persistPushRegistration({ accessToken, token, platform: Platform.OS, isCurrent,
-    channels: Platform.OS === "android" ? ["general", "messages", "orders", "courier-calls", "service-calls"] : [],
-    storage: { get: () => SecureStore.getItemAsync(storageKey), set: value => SecureStore.setItemAsync(storageKey, value) },
-    register: registerExpoPushToken, unregister: unregisterExpoPushToken,
-  });
-  if (!saved) return { status: "idle" };
-  const server = await getPushStatus(accessToken);
-  if (!server.enabled) return { status: "server-disabled", token };
-  if (["InvalidCredentials", "MismatchSenderId"].includes(server.lastDelivery?.errorCode)) return { status: "configuration", token };
-  let quiet = permission.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL
-    || permission.ios?.allowsSound === false || permission.ios?.allowsAlert === false;
-  if (Platform.OS === "android") {
-    const channels = await Notifications.getNotificationChannelsAsync();
-    quiet = channels.some(channel => ["messages", "service-calls", "courier-calls"].includes(channel.id)
-      && (channel.importance < Notifications.AndroidImportance.DEFAULT || channel.sound === null));
+  if (!projectId) return { status: "configuration", permissionGranted: true };
+  if (Platform.OS === "android" && Constants.expoConfig?.extra?.androidPushConfigured === false) {
+    return { status: "device-configuration", permissionGranted: true };
   }
-  return { status: quiet ? "quiet" : "ready", token };
+  try {
+    const { data: token } = await withPushTimeout(() => Notifications.getExpoPushTokenAsync({ projectId }));
+    const saved = await persistPushRegistration({ accessToken, token, platform: Platform.OS, isCurrent,
+      channels: Platform.OS === "android" ? ["general", "messages", "orders", "courier-calls", "service-calls"] : [],
+      storage: { get: () => SecureStore.getItemAsync(storageKey), set: value => SecureStore.setItemAsync(storageKey, value) },
+      register: registerExpoPushToken, unregister: unregisterExpoPushToken,
+    });
+    if (!saved) return { status: "idle" };
+    const server = await getPushStatus(accessToken);
+    if (!server.enabled) return { status: "server-disabled", token, permissionGranted: true };
+    if (["InvalidCredentials", "MismatchSenderId"].includes(server.lastDelivery?.errorCode)) return { status: "configuration", token };
+    let quiet = permission.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL
+      || permission.ios?.allowsSound === false || permission.ios?.allowsAlert === false;
+    if (Platform.OS === "android") {
+      const channels = await Notifications.getNotificationChannelsAsync();
+      quiet = channels.some(channel => ["messages", "service-calls", "courier-calls"].includes(channel.id)
+        && (channel.importance < Notifications.AndroidImportance.DEFAULT || channel.sound === null));
+    }
+    return { status: quiet ? "quiet" : "ready", token, permissionGranted: true };
+  } catch (error) {
+    // Permission was already granted; a token/network failure must not ask for it again.
+    const failure = new Error(error?.message ?? "Falha ao conectar notificações.");
+    failure.code = error?.code;
+    failure.pushPermissionGranted = true;
+    throw failure;
+  }
 }
 
 export function subscribePushNotificationResponses(onResponse) {

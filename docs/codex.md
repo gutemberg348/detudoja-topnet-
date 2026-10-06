@@ -1,11 +1,146 @@
 # Codex Handoff - DeTudoJa
 
-Ultima atualizacao: 2026-10-05
+Ultima atualizacao: 2026-10-06
 
 Este arquivo e o resumo principal para qualquer novo Codex continuar o projeto
 sem precisar reconstruir todo o contexto pela conversa. Sempre que uma regra,
 rota, tela, schema, comando ou fluxo importante mudar, atualize este arquivo.
 O indice e a regra completa de documentacao ficam em `docs/README.md`.
+
+## Atualizacao 2026-10-06: credencial FCM Android cadastrada no Expo
+
+- Usuario forneceu conta Firebase Admin SDK em Downloads. Validada sem expor
+  segredo; project_id detudoja coincide com apps/mobile/google-services.json,
+  que ja existe e atende com.detudoja.mobile.
+- EAS CLI credentials preview > Google Service Account > Push Notifications
+  (FCM V1): upload e vinculo confirmados, seguidos de leitura do cadastro.
+  Projeto brasil-cashback/com.detudoja.mobile; assinatura EAS preservada.
+- Check/prepare local aprovados; prebuild integrou Google Services. API local
+  tem EXPO_PUSH_ENABLED=true, VPS nao verificada. Novo APK e teste fisico pendentes.
+  :app:processReleaseGoogleServices passou; nenhum APK completo foi gerado.
+  Sem build completo/remoto e sem envio de notificacoes nesta configuracao.
+- Arquivo google-services.json local ignorado; para futuro EAS remoto configurar
+  file variable GOOGLE_SERVICES_JSON. Chave privada fica fora do repositorio/APK.
+
+## Atualizacao 2026-10-05: nova auditoria Google no APK local
+
+- Usuario relata novamente autorizacao Google/SHA e mostra cliente Web.
+- APK .build-local/brasil-cashback-local.apk de 22:04 UTC verificado com
+  apksigner/aapt: pacote com.detudoja.mobile, assinatura EAS AE:91:85:9C:7F:46:
+  77:21:ED:F9:0A:A7:67:61:24:FB:AD:5D:31:69. Hermes contem somente Web ID
+  666699963339-db81is3mmnnjq3b75ik96dn0oqj851nj.apps.googleusercontent.com,
+  igual a imagem e audience aceito pela API local.
+- Nao assumir SHA errado: mensagem do SDK/app e generica. Cliente Android
+  no Google Cloud ainda precisa ser conferido no mesmo projeto do Web.
+  Sem acesso ao painel ou aparelho adb, nao houve login real nem correcao remota.
+
+## Atualizacao 2026-10-05: avisos apos permissao, chamados e badge
+
+- Chamados/chamadas tocando movidos para abaixo dos switches na ServiceDesk,
+  antes de notificacoes, cadastro de atividades e area do motoboy.
+- RecentConversations mostra Cliente/Prestador conforme isSeller e atividade.
+- Push separa permissao concedida de registro/token: falha nativa conhecida
+  vira device-configuration sem retry inutil; rede ainda tenta recuperar.
+- Local sem GOOGLE_SERVICES_JSON/arquivo Android; usuario confirmou Firebase
+  nao configurado. API real segue igual, mas transporte FCM Android esta pendente.
+  Nao afirmar push funcionando. App config aceita arquivo padrao local e valida
+  pacote/estrutura; check/build local explicam ausencia antes de compilar.
+- Tests de SDK simulado/configuracao e export web aprovados; navegador em
+  320/390/412 validou ordem/badges sem chamadas a API real. Sem teste fisico.
+
+## Atualizacao 2026-10-05: limite de caminho no build Android local
+
+- Log real falhou no Ninja por caminho maior que 260, em ComponentDescriptors.cpp
+  do safe-area-context. CMAKE_OBJECT_PATH_MAX=128 era menor que a pasta do target.
+- local-apk.init.gradle no Windows usa limite 240 e staging curto em
+  USERPROFILE/.dtj-cxx/<hash-checkout>/<hash-modulo>, opcional DTJ_APK_CXX_ROOT.
+  Sem apagar caches antigos, mover projeto ou mudar credenciais/EAS.
+- Configure CMake app/expo-modules-core aprovado, objetos ate 238 caracteres e
+  compilacao real do objeto que falhou aprovada. Nao foi gerado APK completo.
+  Usuario repete o mesmo build:android:local -- --require-eas-key.
+
+## Atualizacao 2026-10-05: design do cancelamento no chat de servico
+
+- Cancelar atendimento agora integra o card da proposta, com largura igual
+  ao QR presencial, altura minima 44, conteudo centralizado e contorno vermelho.
+  Antes reutilizava o pill da corrida, alinhado no canto fora do card.
+- Permissoes e modal de confirmacao preservados; sem proposta mantem faixa
+  com margens. Cancelamento de corrida nao foi alterado.
+- Export web aprovado; layout 320/390/412 e abrir/desistir do modal sem POST
+  passaram no navegador com API simulada. Sem validacao em aparelho fisico.
+
+## Atualizacao 2026-10-05: categorias somem no Moto G54 e cards grandes
+
+- Relato novo confirma que a primeira correcao de clipping nao resolveu no
+  aparelho. Sem dispositivo adb conectado; nao afirmar causa nativa provada.
+- Categoria usa agora expo-image ~57.0.5/plugin, cache memoria/disco, arte
+  32 x 32 em fluxo normal, sem fade/transicao/overflow circular no toque.
+  Moldura tem borda constante e apoio so sai em onDisplay (nao onLoad), com
+  fallback em erro. Estado/URL de imagem preservado ao selecionar.
+- Card 72 x 80 minimo, antes 88 x 96, com texto em duas linhas e crescimento
+  para fontes ampliadas. Sem mudanca na API, filtros ou paginacao. Exige novo
+  APK com dependencia nativa; teste no Moto G54 continua pendente.
+- 96 testes e exports Android/iOS/web passaram; autolinking Android reconhece
+  expo-image. App web compilado passou 12 selecoes, cache/troca de modo,
+  imagens atrasadas/404/ausentes, sem recarregar ao selecionar. Dimensoes
+  72 x 80 confirmadas em 320/360/390/412, toque sem opacity e sem erro JS.
+  Evidencias em TEMP/detudoja-category-moto-20261005; nao valida Moto fisico.
+
+## Atualizacao 2026-10-05: APK local no Windows sem build remoto
+
+- Scripts raiz/mobile `build:android:local` e `check:android:local` usam Java,
+  SDK e Gradle Wrapper do PC. Check valida componentes/configuracao; prepare
+  sincroniza Android sem compilar; comando padrao gera APK release com JS
+  incluido, arm64-v8a (opcao architectures), em .build-local. Sem Metro/EAS.
+- Prebuild Expo 57 recebe --no-clean explicitamente para manter caches/chave;
+  comandos npm atuais sao preservados. Android gerado, credenciais, keystores
+  e APKs ignorados pelo Git para manter prebuild remoto independente.
+- credentials.json local no formato EAS e usado automaticamente; recomenda-se
+  baixar a chave existente uma vez. --require-eas-key impede fallback. Sem
+  credenciais usa chave de testes com SHA-1 5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:
+  76:BA:A6:F3:8C:AB:F6:25, diferente do EAS e exigindo cadastro OAuth Android.
+  Nao troca chaves remotas e nao desinstala APKs de assinatura diferente.
+- Init script via finalizeDsl aplica assinatura por variaveis do processo,
+  sem senhas em args/propriedades/log de resultado. Sempre refaz bundle para
+  incorporar env, preserva caches nativos e limita objetos CMake para Windows.
+  apksigner confere assinatura antes de copiar APK. EAS production AAB mantido.
+- Check/prebuild repetido, preservacao de package.json/chave, Java 17 e
+  Gradle Wrapper 9.3.1 --version aprovados. Sintaxe Groovy aprovada. Compilacao
+  completa/instalacao ficam para o usuario, conforme pedido. Tutorial em
+  docs/build-android-local.md; assinatura EAS atual so sera usada depois de
+  baixar as credenciais. Sem publicacao/build remoto novo nesta entrega.
+- Launcher PowerShell/apksigner validado com APK real existente; splatting
+  garante argumentos distintos no Windows. Parsing de credenciais testado
+  em memoria (BOM, espacos, JSON/campos invalidos, require-eas-key/fallback),
+  sem gravar chaves ou credenciais. Integracao AGP/assemble completa pendente.
+- Usuario baixou a chave existente do EAS em apps/mobile/credentials.json e
+  credentials/android/keystore.jks. Check local com --require-eas-key passou
+  com a chave real e SHA-1 igual ao EAS (AE:91:85:9C:7F:46:77:21:ED:F9:0A:A7:
+  67:61:24:FB:AD:5D:31:69); os dois arquivos sao ignorados pelo Git. APK ainda
+  nao compilado nessa conferencia; usuario executa o build local.
+
+## Atualizacao 2026-10-05: corrigir ID Google inexistente no APK
+
+- APK de preview `ab6b8edd-b6e1-4122-a070-8936209343d9` foi inspecionado:
+  pacote com.detudoja.mobile, SHA-1
+  AE:91:85:9C:7F:46:77:21:ED:F9:0A:A7:67:61:24:FB:AD:5D:31:69.
+  Bundle usava Web Client ID com prefixo incorreto `3666699963339-`.
+  A imagem do Google Cloud mostra `666699963339-`; consulta publica ao
+  Google confirmou invalid_client para o primeiro e cliente reconhecido
+  para o segundo. Nao foi login de usuario nem validacao nativa no aparelho.
+- Corrigidos mobile/.env, audience em api/.env e EAS preview/production,
+  com leitura posterior confirmada. ID correto completo e instrucoes em
+  docs/login-google.md. API preserva tambem o audience anterior 363481650368.
+  Campos locais Android/iOS que apenas repetiam o Web incorreto ficaram
+  vazios; cliente iOS proprio continua pendente. Nenhum secret alterado.
+- 10 testes Google e check:google passaram. Exige novo APK e atualizar o
+  .env ignorado na VPS/recriar API. Cliente Android no mesmo projeto com
+  pacote/SHA-1 correto ainda precisa ser conferido pelo usuario no Google
+  Cloud. Sem alteracao de assinatura, credenciais nativas ou validacao OAuth.
+- Export Android com --clear passou; bundle Hermes contem somente o ID Web
+  correto. Cache do Metro local mantinha audience antigo em export sem clear.
+  Build nativo usa reset-cache via Gradle. Build EAS preview solicitado:
+  b19d6dc5-d275-4a64-8de8-80a0466addec (18:47 UTC), ainda em fila.
 
 ## Atualizacao 2026-10-05: incentivo discreto ao cashback em servicos
 

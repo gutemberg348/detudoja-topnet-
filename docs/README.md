@@ -15,6 +15,8 @@ quando ela altera regra de negocio, banco, rota, tela, infraestrutura ou risco.
 - `sistema.md`: arquitetura e fluxos tecnicos gerais.
 - `banco.md`: tabelas, IDs, indices, relacoes e regras do PostgreSQL.
 - `front-mobile.md` e `front-admin.md`: fluxos e estrutura das interfaces.
+- `build-android-local.md`: APK de testes no Windows com Gradle e assinatura
+  existente do EAS, sem compilar na nuvem.
 - `docker-redis.md`: Docker Compose, API, painel, Redis e comandos locais.
 - `sicredi-multipag.md`: teste seguro de certificado, chave e credenciais
   Multipag na VPS.

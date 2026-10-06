@@ -1,7 +1,52 @@
 # Disponibilidade e notificacoes
 
-Atualizado em 2026-10-04. Codigo implementado; publicacao e conferencia em
+Atualizado em 2026-10-06. Codigo implementado; publicacao e conferencia em
 aparelhos fisicos ainda pendentes.
+
+## FCM configurado no Expo em 06/10/2026
+
+Usuario criou Firebase no projeto detudoja e forneceu a conta de servico em
+Downloads. apps/mobile/google-services.json ja estava presente, validado para
+com.detudoja.mobile e mesmo project_id da conta de servico. Chave privada
+permanece fora do repositorio e nao foi incorporada ao APK.
+
+EAS CLI autenticado vinculou a chave em Push Notifications (FCM V1) no projeto
+brasil-cashback, application identifier com.detudoja.mobile; leitura posterior
+confirmou project_id detudoja. Credencial de Play Store e keystore mantidas.
+Check local e prebuild --prepare passaram; Gradle recebeu plugin google-services.
+Tarefa :app:processReleaseGoogleServices passou (31s), validando recursos Firebase.
+API .env local tem EXPO_PUSH_ENABLED=true; configuracao da VPS nao conferida.
+
+Proximo passo: novo APK local com --require-eas-key, instalacao e Perfil > Enviar
+teste, conferindo entrega em segundo plano. Credencial cadastrada no Expo nao
+prova entrega. Para futuros builds remotos, disponibilizar google-services.json
+no ambiente EAS via GOOGLE_SERVICES_JSON, pois o arquivo local e ignorado no Git.
+
+## Android local: permissao concedida, mas push ainda sem configuracao
+
+Em 05/10 o APK local nao tinha google-services.json nem GOOGLE_SERVICES_JSON.
+Usuario confirmou que Firebase nao foi configurado. Aceitar a permissao do
+Android apenas autoriza os avisos; nao configura o transporte FCM. A API
+propria continua gerenciando usuarios, chamados e fila de notificacoes.
+
+Para habilitar o transporte usado por expo-notifications:
+
+1. No Firebase, adicionar o app Android `com.detudoja.mobile` ao projeto Google
+   correspondente e baixar a configuracao `google-services.json`.
+2. Salvar em `apps/mobile/google-services.json` (ignorado no Git) ou apontar
+   GOOGLE_SERVICES_JSON para esse arquivo. App config valida pacote/estrutura.
+3. Configurar a credencial de envio FCM v1 no projeto EAS usado pelo app.
+   A chave da conta de servico e para o servidor de push/EAS; nunca colocar
+   essa chave privada no APK como se fosse google-services.json.
+4. Gerar novo APK local, instalar, permitir e usar Enviar teste. Verificar
+   recebimento no aparelho com app em segundo plano e tela bloqueada.
+
+O card agora distingue permissao negada, autorizacao concedida com problema
+de conexao e configuracao nativa ausente. Apenas falhas transitorias recebem
+retry automatico; configurar Firebase ausente nao depende de repetir a permissao.
+Nao informar push pronto ate obter token e registrar o dispositivo no servidor.
+
+Referencia: [FCM v1 e google-services.json no Expo](https://docs.expo.dev/push-notifications/fcm-credentials/).
 
 ## Regra de disponibilidade
 

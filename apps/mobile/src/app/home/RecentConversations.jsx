@@ -96,6 +96,15 @@ export function RecentConversations({
                 </Text>
                 <Text style={styles.date}>{formatConversationDate(conversation.date)}</Text>
               </View>
+              {conversation.kind === "service" ? (
+                <View style={styles.serviceIdentity}>
+                  <View style={styles.serviceBadge}>
+                    <Ionicons color={colors.primaryDark} name="briefcase-outline" size={11} />
+                    <Text style={styles.serviceBadgeText}>{conversation.conversation?.isSeller ? "Cliente" : "Prestador"}</Text>
+                  </View>
+                  <Text numberOfLines={1} style={styles.serviceName}>{conversation.conversation?.serviceType?.name ?? "Serviço"}</Text>
+                </View>
+              ) : null}
               <Text numberOfLines={1} style={styles.preview}>{conversation.subtitle}</Text>
             </View>
             {conversation.unreadCount > 0 ? (
@@ -115,6 +124,10 @@ export function RecentConversations({
 }
 
 const styles = StyleSheet.create({
+  serviceIdentity: { flexDirection: "row", alignItems: "center", gap: 6 },
+  serviceBadge: { flexDirection: "row", alignItems: "center", gap: 4, borderRadius: radius.round, backgroundColor: colors.primaryLight, paddingHorizontal: 7, paddingVertical: 3 },
+  serviceBadgeText: { color: colors.primaryDark, fontFamily: fonts.semiBold, fontSize: 10 },
+  serviceName: { flex: 1, color: colors.textSecondary, fontFamily: fonts.medium, fontSize: 11 },
   conversationTitle: {
     color: colors.textPrimary,
     flex: 1,

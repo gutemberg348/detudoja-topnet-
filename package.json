@@ -26,6 +26,8 @@
     "dev:api": "npm run dev -w apps/api",
     "dev:mobile": "npm run start -w apps/mobile",
     "build:android:preview": "npm run build:android:preview -w apps/mobile",
+    "build:android:local": "npm run build:android:local -w apps/mobile --",
+    "check:android:local": "npm run check:android:local -w apps/mobile",
     "dev:web": "npm run dev -w apps/web-admin",
     "build:web": "npm run build -w apps/web-admin",
     "start:api": "npm run start -w apps/api",

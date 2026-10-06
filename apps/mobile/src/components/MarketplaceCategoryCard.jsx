@@ -1,8 +1,9 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { Image } from "expo-image";
 import { memo, useMemo, useState } from "react";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { resolveMediaUrl } from "../utils/media";
-import { colors, fonts, radius, spacing, typography } from "../utils/theme";
+import { colors, fonts, radius, spacing } from "../utils/theme";
 
 export function MarketplaceCategoryCard({ active, category, icon, label, onPress }) {
   const iconUrl = resolveMediaUrl(category?.iconUrl);
@@ -31,22 +32,27 @@ export function MarketplaceCategoryCard({ active, category, icon, label, onPress
 
 const CategoryArtwork = memo(function CategoryArtwork({ uri, icon }) {
   const source = useMemo(() => uri ? { uri } : null, [uri]);
-  const [loaded, setLoaded] = useState(false);
+  const [displayed, setDisplayed] = useState(false);
   const [failed, setFailed] = useState(false);
 
   return (
     <>
-      <View pointerEvents="none" style={[styles.fallback, loaded && !failed && styles.fallbackHidden]}>
-        <Ionicons color={colors.primaryDark} name={icon} size={24} />
-      </View>
+      {!displayed || failed ? (
+        <View pointerEvents="none" style={styles.fallback}>
+          <Ionicons color={colors.primaryDark} name={icon} size={21} />
+        </View>
+      ) : null}
       {source && !failed ? (
         <Image
           accessible={false}
+          cachePolicy="memory-disk"
+          contentFit="contain"
+          onDisplay={() => setDisplayed(true)}
           onError={() => setFailed(true)}
-          onLoad={() => setLoaded(true)}
-          resizeMode="contain"
+          recyclingKey={uri}
           source={source}
-          // Always visible and in the same bounds, including native cache hits.
+          transition={0}
+          // Keep native bounds explicit; selection never fades/clips the bitmap.
           style={styles.image}
         />
       ) : null}
@@ -57,28 +63,28 @@ const CategoryArtwork = memo(function CategoryArtwork({ uri, icon }) {
 const styles = StyleSheet.create({
   card: {
     alignItems: "center", backgroundColor: colors.card, borderColor: colors.border,
-    borderRadius: radius.lg, borderWidth: 1, gap: spacing.sm, height: 96,
-    justifyContent: "center", paddingHorizontal: spacing.sm, paddingVertical: spacing.sm,
-    position: "relative", width: 88,
+    borderRadius: radius.lg, borderWidth: 1, gap: spacing.xs, minHeight: 80,
+    justifyContent: "center", paddingHorizontal: 5, paddingVertical: 6,
+    position: "relative", width: 72,
   },
   cardActive: { backgroundColor: colors.primarySoft, borderColor: colors.primary },
   icon: {
     alignItems: "center", backgroundColor: colors.primarySoft, borderRadius: radius.round,
-    height: 38, justifyContent: "center", overflow: "hidden", width: 38,
+    borderColor: "transparent", borderWidth: 1,
+    height: 34, justifyContent: "center", width: 34,
   },
-  iconActive: { backgroundColor: colors.card, borderColor: colors.primary, borderWidth: 1 },
-  image: { ...StyleSheet.absoluteFill },
+  iconActive: { backgroundColor: colors.card, borderColor: colors.primary },
+  image: { height: 32, width: 32 },
   fallback: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center" },
-  fallbackHidden: { opacity: 0 },
   label: {
-    color: colors.textPrimary, fontFamily: fonts.bold, fontSize: typography.caption,
-    fontWeight: "700", lineHeight: 15, maxWidth: "100%", minHeight: 30, textAlign: "center",
+    color: colors.textPrimary, fontFamily: fonts.bold, fontSize: 11,
+    fontWeight: "700", lineHeight: 14, maxWidth: "100%", minHeight: 28, textAlign: "center",
   },
   labelActive: { color: colors.primaryDark },
   check: {
     alignItems: "center", backgroundColor: colors.card, borderColor: colors.primarySoft,
-    borderRadius: radius.round, borderWidth: 2, height: 22, justifyContent: "center",
-    position: "absolute", right: 5, top: 5, width: 22,
+    borderRadius: radius.round, borderWidth: 1, height: 18, justifyContent: "center",
+    position: "absolute", right: 2, top: 2, width: 18,
   },
-  pressed: { opacity: 0.78 },
+  pressed: { backgroundColor: colors.primaryLight },
 });

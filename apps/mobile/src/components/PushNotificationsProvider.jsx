@@ -4,6 +4,7 @@ import { registerDeviceForPushNotifications, resumePushRegistration, subscribePu
 import { sendPushTest } from "../services/notifications.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { useFeedback } from "./FeedbackProvider";
+import { pushRegistrationFailure } from "../utils/push-registration";
 
 const PushContext = createContext(null);
 
@@ -31,10 +32,11 @@ export function PushNotificationsProvider({ children }) {
       try {
         const result = await registerDeviceForPushNotifications(current.current.accessToken, { requestPermission, isCurrent });
         if (isCurrent()) { attempts = 0; setReadiness(result); }
-      } catch {
+      } catch (error) {
         if (isCurrent()) {
-          setReadiness({ status: "error" });
-          if (attempts < 3) timer = setTimeout(() => sync(false), [2_000, 8_000, 30_000][attempts++]);
+          const failure = pushRegistrationFailure(error);
+          setReadiness(failure);
+          if (failure.status === "error" && attempts < 3) timer = setTimeout(() => sync(false), [2_000, 8_000, 30_000][attempts++]);
         }
       } finally { running = false; }
     };
