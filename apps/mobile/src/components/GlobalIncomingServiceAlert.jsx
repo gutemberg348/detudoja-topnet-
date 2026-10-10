@@ -22,7 +22,9 @@ function courierAlert(request) {
     expiresAt: request.expiresAt,
     id: request.id,
     kind: "courier",
-    subtitle: request.type === "EQUIPE"
+    subtitle: request.isDirect && !request.store
+      ? `Um cliente anterior chamou somente você para ${serviceName}.`
+      : request.type === "EQUIPE"
       ? `Chamada direta de ${serviceName} enviada por uma loja da sua equipe.`
       : `Uma chamada de ${serviceName} da sua cidade aguarda o primeiro aceite.`,
     title: request.store?.name ?? `Cliente solicitando ${serviceName}`,

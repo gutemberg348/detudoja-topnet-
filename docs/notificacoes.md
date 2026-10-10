@@ -1,7 +1,17 @@
 # Disponibilidade e notificacoes
 
-Atualizado em 2026-10-06. Codigo implementado; publicacao e conferencia em
+Atualizado em 2026-10-09. Codigo implementado; publicacao e conferencia em
 aparelhos fisicos ainda pendentes.
+
+## Chamar novamente do historico (09/10/2026)
+
+Chamada de cliente anterior guarda motoboy_direcionado_id e enfileira push
+courier-calls apenas para esse profissional. Popup de chamada identifica
+cliente recorrente, e a Central mostra So para voce. Offline/ocupado bloqueia
+criacao; outros motoboys nao veem nem aceitam o pedido. Recusa cancela e
+atualiza o cliente; aceite avisa e abre uma nova conversa.
+Teste em PostgreSQL isolado confirmou um unico item na fila para o destino,
+com tokens ficticios. Nao houve envio externo nem teste de som/aparelho.
 
 ## FCM configurado no Expo em 06/10/2026
 
@@ -28,8 +38,8 @@ Check local e prebuild --prepare passaram; Gradle recebeu plugin google-services
 Tarefa :app:processReleaseGoogleServices passou (31s), validando recursos Firebase.
 API .env local tem EXPO_PUSH_ENABLED=true; configuracao da VPS nao conferida.
 
-Proximo passo: novo APK local com --require-eas-key, instalacao e Perfil > Enviar
-teste, conferindo entrega em segundo plano. Credencial cadastrada no Expo nao
+Proximo passo: novo APK local com --require-eas-key, instalacao e Central de
+Servicos > Enviar teste, conferindo entrega em segundo plano. Credencial cadastrada no Expo nao
 prova entrega. Para futuros builds remotos, disponibilizar google-services.json
 no ambiente EAS via GOOGLE_SERVICES_JSON, pois o arquivo local e ignorado no Git.
 
@@ -113,11 +123,16 @@ evitando perda de avisos enquanto os builds sao atualizados.
 
 ## Controles no aplicativo
 
-Perfil e Central de Servicos mostram `NotificationReadinessCard`. O provider
-verifica permissoes/cadastro ao entrar, retornar ao app e mudar o token nativo.
+O Perfil nao exibe mais o bloco de notificacoes (06/10/2026). A Central de
+Servicos conserva `NotificationReadinessCard` para ajustes e teste do aparelho.
+O provider verifica permissoes/cadastro ao entrar com sessao autenticada,
+retornar ao app e mudar o token nativo.
 Falhas temporarias tentam novamente em 2, 8 e 30 segundos, e no proximo retorno.
-Permissao so e solicitada quando o usuario toca em Ativar avisos. Permissao
-negada definitivamente ou avisos silenciosos oferecem Abrir ajustes.
+Ao abrir ou retornar ao app, permissao ausente e solicitada automaticamente
+quando canAskAgain permite. Permissao concedida nao repete o pedido; falhas
+de rede tentam concluir o cadastro sem solicitar permissao outra vez.
+Permissao negada definitivamente exige ajustes do sistema; o controle Abrir
+ajustes continua disponivel na Central de Servicos, inclusive para avisos silenciosos.
 
 Enviar teste usa somente o token deste aparelho e desta conta. A resposta 202
 significa enfileirado; o aviso na tela nao afirma que a notificacao foi entregue.

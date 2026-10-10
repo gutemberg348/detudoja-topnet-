@@ -1,3 +1,5 @@
+import { normalizeSearchText, searchTextScore } from "shared/search";
+import { findMarketplaceSearchMatches } from "./marketplace-search.service.js";
 import { AppError } from "../../utils/errors.js";
 import { parsePositiveId } from "../../utils/ids.js";
 import { cityAddressWhere } from "../../utils/location.js";
@@ -6,131 +8,16 @@ import {
   resolvePaymentPolicy,
 } from "../earnings/order-earnings.config.js";
 import {
-  createCacheKey,
-  getOrSetJsonCache,
-} from "../cache/cache.service.js";
-import {
   marketplaceRepository,
   publicStoreWhere,
 } from "./marketplace.repository.js";
 import { encodeProductCursor, productPageOptions } from "./product-pagination.js";
 
+export { buildServiceSearchPatterns } from "./marketplace-search.service.js";
+
 const serviceCategoryNames = new Set(["servicos"]);
 
-function normalizeName(value = "") {
-  return String(value)
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\u200B-\u200D\uFEFF]/g, "")
-    .replace(/[^a-zA-Z0-9]+/g, " ")
-    .trim()
-    .replace(/\s+/g, " ")
-    .toLowerCase();
-}
-
-async function findMarketplaceSearchMatches(search) {
-  const normalizedSearch = normalizeName(search);
-
-  if (!normalizedSearch) {
-    return {
-      categoryIds: [],
-      productIds: [],
-      serviceTypeIds: [],
-      storeIds: [],
-    };
-  }
-
-  const primaryPatterns = buildSearchPatterns(normalizedSearch);
-  const primaryMatches = await queryMarketplaceSearchMatches(
-    primaryPatterns,
-    buildServiceSearchPatterns(normalizedSearch, primaryPatterns),
-  );
-
-  if (hasMarketplaceMatches(primaryMatches) || !normalizedSearch.includes(" ")) {
-    return primaryMatches;
-  }
-
-  const fallbackPatterns = buildSearchPatterns(normalizedSearch, { includeWords: true });
-  return queryMarketplaceSearchMatches(
-    fallbackPatterns,
-    buildServiceSearchPatterns(normalizedSearch, fallbackPatterns),
-  );
-}
-
-async function queryMarketplaceSearchMatches(patterns, servicePatterns = patterns) {
-  return getOrSetJsonCache({
-    key: createCacheKey("marketplace-search-matches", { patterns, servicePatterns }),
-    load: () => marketplaceRepository.querySearchMatches(patterns, servicePatterns),
-    ttlSeconds: 90,
-  });
-}
-
-export function buildServiceSearchPatterns(search, patterns) {
-  const aliases = /\b(?:moto taxi|mototaxi|taxi|taxista)\b/.test(search)
-    ? ["mototaxi", "moto taxi", "taxi", "taxista"]
-    : /\bmoto boy\b/.test(search)
-      ? ["motoboy"]
-      : [];
-  // Do not reintroduce the isolated word "moto" from the broad fallback search.
-  return aliases.length
-    ? aliases.map((alias) => `%${alias}%`)
-    : patterns;
-}
-
-function buildSearchPatterns(search, { includeWords = false } = {}) {
-  const words = normalizeName(search).split(" ").filter(Boolean);
-  const terms = new Set([
-    words.join(" "),
-    words.map(singularizeSearchWord).join(" "),
-  ]);
-
-  if (includeWords && words.length > 1) {
-    words
-      .filter((word) => word.length >= 3 && !searchStopWords.has(word))
-      .forEach((word) => {
-        terms.add(word);
-        terms.add(singularizeSearchWord(word));
-      });
-  }
-
-  return [...terms]
-    .filter((term) => term.length >= 2)
-    .map((term) => `%${term}%`);
-}
-
-function hasMarketplaceMatches(matches) {
-  return Object.values(matches).some((ids) => ids.length > 0);
-}
-
-const searchStopWords = new Set([
-  "a", "as", "com", "da", "das", "de", "do", "dos", "e", "em", "na",
-  "nas", "no", "nos", "o", "os", "para", "por", "loja", "lojas",
-  "produto", "produtos", "servico", "servicos",
-]);
-
-function singularizeSearchWord(word) {
-  if (word.length <= 3 || !word.endsWith("s")) {
-    return word;
-  }
-
-  if (word.endsWith("oes") || word.endsWith("aes")) {
-    return `${word.slice(0, -3)}ao`;
-  }
-
-  if (word.endsWith("ais")) {
-    return `${word.slice(0, -3)}al`;
-  }
-
-  if (word.endsWith("eis")) {
-    return `${word.slice(0, -3)}el`;
-  }
-
-  if (word.endsWith("is")) {
-    return `${word.slice(0, -2)}il`;
-  }
-
-  return word.slice(0, -1);
-}
+const normalizeName = normalizeSearchText;
 
 function isServiceStoreCategory(category) {
   return serviceCategoryNames.has(normalizeName(category?.nome));
@@ -291,7 +178,7 @@ async function marketplaceQuery(query = {}, baseAddress) {
       ? null
       : parsePositiveId(query.categoryId, "Categoria invalida");
 
-  const matches = search ? await findMarketplaceSearchMatches(search) : null;
+  const matches = search ? await findMarketplaceSearchMatches(search, baseAddress) : null;
 
   return {
     ...publicStoreWhere,
@@ -336,7 +223,7 @@ export async function listMarketplaceProducts(userId, query = {}) {
     query.categoryId === undefined || query.categoryId === null || query.categoryId === ""
       ? null
       : parsePositiveId(query.categoryId, "Categoria invalida");
-  const matches = search ? await findMarketplaceSearchMatches(search) : null;
+  const matches = search ? await findMarketplaceSearchMatches(search, baseAddress) : null;
 
   const [products, globalDistribution, paymentPolicy] = await Promise.all([
     marketplaceRepository.listProducts(baseAddress, {
@@ -371,17 +258,18 @@ export async function listMarketplaceSuggestions(userId, query = {}) {
   const limit = Math.min(Number(query.limit ?? 6) || 6, 20);
 
   const normalizedSearch = normalizeName(search);
-  if (normalizedSearch.length === 1) return { suggestions: [] };
-  const matches = normalizedSearch
-    ? await findMarketplaceSearchMatches(normalizedSearch)
+  const matches = normalizedSearch.length >= 2
+    ? await findMarketplaceSearchMatches(normalizedSearch, baseAddress)
     : null;
 
-  const { categories, stores, products, serviceTypes } =
-    await marketplaceRepository.listSuggestions(baseAddress, matches, limit);
+  let candidates = visibleSuggestionCandidates(await marketplaceRepository.listSuggestions(baseAddress, matches, Math.min(limit * 3, 60)));
+  const hasResults = Object.values(candidates).some((items) => items.length);
+  const discovery = Boolean(normalizedSearch && (!matches || !hasResults));
+  if (!hasResults && matches) candidates = visibleSuggestionCandidates(await marketplaceRepository.listSuggestions(baseAddress, null, limit));
+  const { categories, stores, products, serviceTypes } = candidates;
 
   const categorySuggestions = categories
     .filter((category) => !isServiceStoreCategory(category))
-    .slice(0, 3)
     .map((category) => ({
       description: "Categoria",
       iconUrl: category.icone_url,
@@ -391,7 +279,6 @@ export async function listMarketplaceSuggestions(userId, query = {}) {
     }));
   const storeSuggestions = stores
     .filter((store) => !isServiceStoreCategory(store.categoria))
-    .slice(0, 3)
     .map((store) => ({
       categoryId: store.categoria_id,
       description: store.categoria?.nome ?? "Loja",
@@ -426,10 +313,22 @@ export async function listMarketplaceSuggestions(userId, query = {}) {
     ? [serviceSuggestions, storeSuggestions, productSuggestions, categorySuggestions]
     : [storeSuggestions, productSuggestions, categorySuggestions, serviceSuggestions])
     .map((group) => rankSuggestions(group, normalizedSearch));
-  const suggestions = interleaveSuggestions(groups, limit)
-    .map(serializeSuggestion);
+  const combined = interleaveSuggestions(groups, limit * 4);
+  const suggestions = (normalizedSearch && !discovery ? rankSuggestions(combined, normalizedSearch) : combined)
+    .slice(0, limit).map(serializeSuggestion);
+  return { suggestions, searchInfo: {
+    ...(matches?.searchInfo ?? { query: normalizedSearch, suggestedTerms: [] }),
+    discovery,
+  } };
+}
 
-  return { suggestions };
+function visibleSuggestionCandidates({ categories, stores, products, serviceTypes }) {
+  return {
+    categories: categories.filter((category) => !isServiceStoreCategory(category)),
+    stores: stores.filter((store) => !isServiceStoreCategory(store.categoria)),
+    products: products.filter((product) => !isServiceStoreCategory(product.loja?.categoria)),
+    serviceTypes,
+  };
 }
 
 function rankSuggestions(suggestions, search) {
@@ -442,14 +341,8 @@ function rankSuggestions(suggestions, search) {
 }
 
 function suggestionScore(suggestion, search) {
-  const label = normalizeName(suggestion.label);
-  const description = normalizeName(suggestion.description);
-  if (label === search || (suggestion.type === "service" && label.replaceAll(" ", "") === search.replaceAll(" ", ""))) return 0;
-  if (label.startsWith(search)) return 1;
-  if (label.includes(search)) return 2;
-  if (description.startsWith(search)) return 3;
-  if (description.includes(search)) return 4;
-  return 5;
+  return 1 - Math.max(searchTextScore(suggestion.label, search),
+    searchTextScore(suggestion.description, search) * 0.8);
 }
 
 function interleaveSuggestions(groups, limit) {

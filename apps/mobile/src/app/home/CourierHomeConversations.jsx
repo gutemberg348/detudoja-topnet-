@@ -1,6 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { chatMessagePreview } from "../../utils/chat-preview";
+import { serviceHistorySummary } from "../../utils/service-history";
 import { colors, fonts, radius, shadowSoft, spacing, typography } from "../../utils/theme";
 
 const activeStatuses = new Set(["ABERTA", "ACORDADA", "AGUARDANDO_CONFIRMACAO"]);
@@ -67,10 +68,10 @@ export function CourierHomeConversations({ conversations = [], onOpen, onViewAll
                     <View style={[styles.serviceTag, active && styles.serviceTagActive]}>
                       <Text style={[styles.serviceTagText, active && styles.serviceTagTextActive]}>MOTOBOY</Text>
                     </View>
-                    <Text style={[styles.status, active && styles.statusActive]}>{statusLabels[conversation.status] ?? "Conversa"}</Text>
+                    <Text style={[styles.status, active && styles.statusActive]}>{conversation.historyGroup ? "Histórico" : statusLabels[conversation.status] ?? "Conversa"}</Text>
                   </View>
                   <Text numberOfLines={1} style={styles.rideTitle}>{title}</Text>
-                  <Text numberOfLines={1} style={styles.preview}>{chatMessagePreview(conversation.lastMessage, route || "Toque para abrir a conversa da corrida")}</Text>
+                  <Text numberOfLines={1} style={styles.preview}>{conversation.historyGroup ? serviceHistorySummary(conversation) : chatMessagePreview(conversation.lastMessage, route || "Toque para abrir a conversa da corrida")}</Text>
                 </View>
                 {unreadCount ? (
                   <View style={styles.unread}><Text style={styles.unreadText}>{unreadCount > 9 ? "9+" : unreadCount}</Text></View>

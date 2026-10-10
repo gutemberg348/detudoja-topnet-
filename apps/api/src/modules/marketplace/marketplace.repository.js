@@ -1,11 +1,12 @@
 import { prisma } from "../../config/prisma.js";
 import { commercialTier2UserWhere } from "../../utils/commercial-access.js";
-import { cityAddressWhere, requireUserMarketplaceLocation } from "../../utils/location.js";
+import { cityAddressWhere, normalizeLocation, requireUserMarketplaceLocation } from "../../utils/location.js";
 import {
   getOrderEarningsDistribution,
   getPaymentPolicy,
 } from "../earnings/order-earnings.config.js";
 import { availableServiceWhere } from "../service-chats/service-availability.js";
+import { localPublicStoreSql, localAvailableServiceSql } from "./marketplace-search.repository.js";
 import { productCursorWhere } from "./product-pagination.js";
 
 const publicStoreWhere = {
@@ -21,18 +22,23 @@ const publicStoreWhere = {
   visivel_no_app: true,
 };
 const publicSellerStatuses = ["ATIVO", "PENDENTE"];
-const plainCharacters = "aaaaaaeeeeiiiiooooouuuucnyy";
-const normalizedAccentCharacters = String.fromCharCode(
-  0x00e1, 0x00e0, 0x00e2, 0x00e3, 0x00e4, 0x00e5,
-  0x00e9, 0x00e8, 0x00ea, 0x00eb,
-  0x00ed, 0x00ec, 0x00ee, 0x00ef,
-  0x00f3, 0x00f2, 0x00f4, 0x00f5, 0x00f6,
-  0x00fa, 0x00f9, 0x00fb, 0x00fc,
-  0x00e7, 0x00f1, 0x00fd, 0x00ff,
-);
-
 function normalizedSql(column) {
-  return `regexp_replace(translate(lower(coalesce(${column}, '')), '${normalizedAccentCharacters}', '${plainCharacters}'), '[^a-z0-9]+', ' ', 'g')`;
+  return `marketplace_search_normalize(${column})`;
+}
+
+function nameSearchRankSql(column) {
+  const name = normalizedSql(column);
+  return `CASE WHEN ${name} = ANY(ARRAY(SELECT trim(both '%' FROM term) FROM unnest($1::text[]) term)) THEN 0
+    WHEN ${name} LIKE ANY(ARRAY(SELECT trim(leading '%' FROM term) FROM unnest($1::text[]) term)) THEN 1
+    WHEN ${name} LIKE ANY($1::text[]) THEN 2 ELSE 3 END`;
+}
+
+function allSearchTokensSql(columns) {
+  const text = normalizedSql(`concat_ws(' ', ${columns.join(", ")})`);
+  return `EXISTS (SELECT 1 FROM jsonb_array_elements($2::jsonb) terms
+    WHERE NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(terms) word
+      WHERE NOT (CASE WHEN word ~ '[0-9]' THEN word = ANY(regexp_split_to_array(${text}, ' '))
+        ELSE ${text} LIKE '%' || word || '%' END)))`;
 }
 
 function idsFromRows(rows) {
@@ -157,7 +163,7 @@ export const marketplaceRepository = {
         take: limit,
         where: {
           excluido_em: null,
-          ...(matches ? { id: { in: matches.categoryIds } } : {}),
+          ...(matches ? { id: { in: matches.categoryIds.slice(0, limit) } } : {}),
           lojas: {
             some: {
               ...publicStoreWhere,
@@ -174,7 +180,7 @@ export const marketplaceRepository = {
         where: {
           ...publicStoreWhere,
           endereco: { is: cityAddressWhere(baseAddress) },
-          ...(matches ? { id: { in: matches.storeIds } } : {}),
+          ...(matches ? { id: { in: matches.storeIds.slice(0, limit) } } : {}),
         },
       }),
       prisma.produtoLoja.findMany({
@@ -183,7 +189,7 @@ export const marketplaceRepository = {
         take: limit,
         where: {
           excluido_em: null,
-          ...(matches ? { id: { in: matches.productIds } } : {}),
+          ...(matches ? { id: { in: matches.productIds.slice(0, limit) } } : {}),
           loja: {
             ...publicStoreWhere,
             endereco: { is: cityAddressWhere(baseAddress) },
@@ -196,7 +202,7 @@ export const marketplaceRepository = {
         take: limit,
         where: {
           excluido_em: null,
-          ...(matches ? { id: { in: matches.serviceTypeIds } } : {}),
+          ...(matches ? { id: { in: matches.serviceTypeIds.slice(0, limit) } } : {}),
           slug: { not: "entregador" },
           status: "ATIVO",
           servicos_vendedor: {
@@ -226,22 +232,27 @@ export const marketplaceRepository = {
     return { categories, products, serviceTypes, stores };
   },
 
-  async querySearchMatches(patterns, servicePatterns = patterns) {
+  async querySearchMatches(patterns, servicePatterns = patterns, tokenGroups = [], address) {
+    const city = normalizeLocation(address.cidade ?? address.city);
+    const state = String(address.estado ?? address.state).trim().toUpperCase();
+    const rawCity = String(address.cidade ?? address.city).trim();
+    const localStores = localPublicStoreSql("$3", "$4", "$5");
     const [categories, stores, products, serviceTypes] = await Promise.all([
       prisma.$queryRawUnsafe(
-        `SELECT id FROM categorias_loja
-         WHERE excluido_em IS NULL
-           AND status::text = 'ATIVA'
-           AND ${normalizedSql("nome")} LIKE ANY($1::text[])`,
-        patterns,
+        `SELECT c.id, ${nameSearchRankSql("c.nome")} AS rank FROM categorias_loja c
+         WHERE c.excluido_em IS NULL
+           AND c.status::text = 'ATIVA'
+           AND EXISTS (SELECT 1 FROM lojas l WHERE l.categoria_id = c.id AND ${localStores})
+           AND (${normalizedSql("nome")} LIKE ANY($1::text[]) OR ${allSearchTokensSql(["c.nome"])} ) ORDER BY rank, c.id`,
+        patterns, JSON.stringify(tokenGroups), city, state, rawCity,
       ),
       prisma.$queryRawUnsafe(
-        `SELECT DISTINCT l.id
+        `SELECT DISTINCT l.id, ${nameSearchRankSql("l.nome")} AS rank
          FROM lojas l
          INNER JOIN categorias_loja c ON c.id = l.categoria_id
          LEFT JOIN segmentos_venda s ON s.id = l.segmento_venda_id
          LEFT JOIN produtos_loja p ON p.loja_id = l.id AND p.excluido_em IS NULL AND p.status::text = 'ATIVO'
-         WHERE l.excluido_em IS NULL AND l.status::text = 'ATIVA' AND l.visivel_no_app = true
+         WHERE ${localStores}
            AND (${normalizedSql("l.nome")} LIKE ANY($1::text[])
              OR ${normalizedSql("l.descricao")} LIKE ANY($1::text[])
              OR ${normalizedSql("c.nome")} LIKE ANY($1::text[])
@@ -249,33 +260,35 @@ export const marketplaceRepository = {
              OR ${normalizedSql("p.nome")} LIKE ANY($1::text[])
              OR ${normalizedSql("p.resumo_curto")} LIKE ANY($1::text[])
              OR ${normalizedSql("p.descricao")} LIKE ANY($1::text[])
-             OR ${normalizedSql("p.marca")} LIKE ANY($1::text[]))`,
-        patterns,
+             OR ${normalizedSql("p.marca")} LIKE ANY($1::text[])
+             OR ${allSearchTokensSql(["l.nome", "l.descricao", "c.nome", "s.nome", "p.nome", "p.resumo_curto", "p.descricao", "p.marca"])} ) ORDER BY rank, l.id`,
+        patterns, JSON.stringify(tokenGroups), city, state, rawCity,
       ),
       prisma.$queryRawUnsafe(
-        `SELECT DISTINCT p.id
+        `SELECT DISTINCT p.id, ${nameSearchRankSql("p.nome")} AS rank
          FROM produtos_loja p
          INNER JOIN lojas l ON l.id = p.loja_id
          INNER JOIN categorias_loja c ON c.id = l.categoria_id
          LEFT JOIN segmentos_venda s ON s.id = l.segmento_venda_id
          WHERE p.excluido_em IS NULL AND p.status::text = 'ATIVO'
-           AND l.excluido_em IS NULL AND l.status::text = 'ATIVA' AND l.visivel_no_app = true
+           AND ${localStores}
            AND (${normalizedSql("p.nome")} LIKE ANY($1::text[])
              OR ${normalizedSql("p.resumo_curto")} LIKE ANY($1::text[])
              OR ${normalizedSql("p.descricao")} LIKE ANY($1::text[])
              OR ${normalizedSql("p.marca")} LIKE ANY($1::text[])
              OR ${normalizedSql("l.nome")} LIKE ANY($1::text[])
              OR ${normalizedSql("c.nome")} LIKE ANY($1::text[])
-             OR ${normalizedSql("s.nome")} LIKE ANY($1::text[]))`,
-        patterns,
+             OR ${normalizedSql("s.nome")} LIKE ANY($1::text[])
+             OR ${allSearchTokensSql(["p.nome", "p.resumo_curto", "p.descricao", "p.marca", "l.nome", "c.nome", "s.nome"])} ) ORDER BY rank, p.id`,
+        patterns, JSON.stringify(tokenGroups), city, state, rawCity,
       ),
       prisma.$queryRawUnsafe(
-        `SELECT id FROM tipos_servico
-         WHERE excluido_em IS NULL AND status::text = 'ATIVO'
-           AND slug <> 'entregador'
+        `SELECT t.id, ${nameSearchRankSql("t.nome")} AS rank FROM tipos_servico t
+         WHERE ${localAvailableServiceSql("$3", "$4", "$5")}
            AND (${normalizedSql("nome")} LIKE ANY($1::text[])
-             OR ${normalizedSql("descricao")} LIKE ANY($1::text[]))`,
-        servicePatterns,
+             OR ${normalizedSql("descricao")} LIKE ANY($1::text[])
+             OR ${allSearchTokensSql(["nome", "descricao"])} ) ORDER BY rank, id`,
+        servicePatterns, JSON.stringify(servicePatterns.some((pattern) => /mototaxi|moto taxi|motoboy/.test(pattern)) ? [] : tokenGroups), city, state, rawCity,
       ),
     ]);
 

@@ -7,6 +7,7 @@ import { getSellerServices, getServiceConversations, heartbeatSellerServices } f
 import { getStoreConversations } from "../../services/store-chats.api";
 import { chatMessagePreview } from "../../utils/chat-preview";
 import { useLiveRefresh } from "../../hooks/useLiveRefresh";
+import { groupServiceConversations, serviceHistorySummary } from "../../utils/service-history";
 
 const finalOrderStatuses = new Set(["CANCELADO", "CONCLUIDO"]);
 
@@ -63,10 +64,10 @@ function serializeServiceConversation(conversation) {
   return {
     conversation,
     date: conversation.updatedAt ?? conversation.createdAt,
-    id: `service-${conversation.id}`,
+    id: conversation.historyGroup ? `service-history-${conversation.historyKey}` : `service-${conversation.id}`,
     imageUrl: requestedStore?.logoUrl ?? conversation.otherPerson?.photoUrl ?? null,
     kind: "service",
-    subtitle: chatMessagePreview(conversation.lastMessage, conversation.request?.description
+    subtitle: conversation.historyGroup ? serviceHistorySummary(conversation) : chatMessagePreview(conversation.lastMessage, conversation.request?.description
       ?? conversation.serviceType?.name
       ?? "Conversa de servico"),
     title: requestedStore?.name
@@ -230,7 +231,7 @@ export function useHomeConversations(accessToken) {
       ...ordersWithoutConversation,
       ...personalChats.map(serializePersonalConversation),
       ...stores,
-      ...serviceConversations.map(serializeServiceConversation),
+      ...groupServiceConversations(serviceConversations).map(serializeServiceConversation),
     ].sort((first, second) => new Date(second.date ?? 0) - new Date(first.date ?? 0));
   }, [orders, personalChats, serviceConversations, storeConversations]);
   // A Home e a lista principal de conversas. Nao limitamos a tres itens:
@@ -247,11 +248,11 @@ export function useHomeConversations(accessToken) {
     service.available
     && (service.requiresCourierProfile || service.operationalType === "ENTREGA_LOCAL")
   ));
-  const courierConversations = serviceConversations
+  const courierConversations = groupServiceConversations(serviceConversations
     .filter((conversation) => (
       conversation.isSeller
       && conversation.serviceType?.operationalType === "ENTREGA_LOCAL"
-    ))
+    )))
     .sort((first, second) => new Date(second.updatedAt ?? 0) - new Date(first.updatedAt ?? 0));
 
   return {

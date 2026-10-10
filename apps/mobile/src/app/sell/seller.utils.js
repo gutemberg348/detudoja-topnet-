@@ -1,6 +1,6 @@
-import { formatarDinheiro } from "../../utils/money";
-import { formatarDataHora } from "../../utils/date";
-import { activeOrderStatuses, productTimeUnits, statusCopy } from "./seller.constants";
+import { formatarDinheiro } from "../../utils/money.js";
+import { formatarDataHora } from "../../utils/date.js";
+import { activeOrderStatuses, productTimeUnits, statusCopy } from "./seller.constants.js";
 
 export function countNewStoreOrders(store, newOrderStatuses) {
   return (store?.orders ?? []).filter((order) => {

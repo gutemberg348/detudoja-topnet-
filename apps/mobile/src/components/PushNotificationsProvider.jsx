@@ -41,9 +41,10 @@ export function PushNotificationsProvider({ children }) {
       } finally { running = false; }
     };
     synchronize.current = sync;
-    // Permission prompts belong to the explicit Activate button.
-    void sync(false);
-    const state = AppState.addEventListener("change", value => { if (value === "active") void sync(false); });
+    // Opening or returning to the app requests permission only when missing
+    // and the operating system still allows the native prompt.
+    void sync(true);
+    const state = AppState.addEventListener("change", value => { if (value === "active") void sync(true); });
     const token = subscribePushTokenChanges(() => { void sync(false); });
     return () => { active = false; clearTimeout(timer); state.remove(); token.remove(); };
   }, [session?.user?.id]);

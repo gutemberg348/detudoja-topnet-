@@ -1,5 +1,57 @@
 # Front Mobile
 
+## Atualizacao 2026-10-09: busca inteligente
+
+Motor compartilhado em `shared/search`, candidatos locais com pg_trgm, cache e
+correcoes clicaveis. Busca tolera erros sem baixar o catalogo todo no celular.
+**Requer migration `20261009190000_marketplace_intelligent_search` antes da API nova e novo APK.**
+Detalhes, limites, testes e comandos: [busca-inteligente.md](busca-inteligente.md).
+
+
+## Busca, historico e nova chamada direta (2026-10-09)
+
+Busca em tela cheia tem apenas X externo para fechar; limpar continua na
+busca inline. Home, busca de conversas, caixa de atendimentos e lista de
+corridas agrupam ENCERRADA/CANCELADA por pessoa, papel e loja solicitante.
+ABERTA/ACORDADA/AGUARDANDO_CONFIRMACAO/EM_DISPUTA seguem separadas. Toque no
+grupo abre ServiceHistory com lista virtualizada; cada atendimento conserva
+mensagens, proposta, pagamento e avaliacao. Contagens nao lidas sao somadas.
+Chat encerrado de corrida direta tem Chamar novamente, com estado online,
+offline ou ocupado informado pela API. So permite quando disponivel; mostra
+espera e Cancelar nova chamada. Aceite abre a nova conversa; a antiga permanece
+salva. Retorno/foco e eventos atualizam a chamada e a disponibilidade.
+Gerar venda autonoma e cobranca da loja usam CurrencyInput: prefixo R$ e
+valor com centavos ao sair do campo (10 -> R$ 10,00), sem mudar a escala ao
+digitar. Valor enviado continua em centavos, com virgula brasileira e milhares.
+Validacao: 109 testes mobile, exports web/Android, navegador com mocks (busca, historico,
+chamar/cancelar, offline e venda em 320/390/412 px). Novo APK necessario.
+
+## Botoes Pagar e Receber (2026-10-07)
+
+Atalhos da Home tem fundo verde suave, borda verde, cantos arredondados e
+icone sobre circulo branco. Espacamento substitui os divisores laterais do
+saldo central; toque recebe destaque de fundo. Rotas e saldo preservados.
+Saldo central tem fundo verde, SALDO pequeno em caixa alta, valor branco em
+destaque e Ver carteira com seta abaixo. Valor total inclui disponivel,
+pendente e bloqueado. Toda a area abre Carteira
+para ver a separacao; os tres botoes se alinham pela altura e ha destaque ao tocar.
+
+## Saldo na Home (2026-10-06)
+
+Entre Pagar e Receber, a Home exibe summary.totalCents da carteira e abre
+Carteira ao tocar. Inclui saldo disponivel, pendente e bloqueado. Consulta com cache
+por usuario e atualiza ao focar, retornar ao app ou receber walletUpdated,
+sem polling periodico. Carregamento/erro nao aparecem como saldo zero.
+Atalhos laterais com icone acima do texto acomodam telas pequenas.
+
+## Perfil sem bloco de notificacoes (2026-10-06)
+
+Perfil remove NotificationReadinessCard. PushNotificationsProvider verifica ao
+abrir com sessao autenticada e retornar ao primeiro plano, solicitando permissao
+ausente quando o sistema permite. Permissao ja concedida nao repete o dialogo;
+falhas transitorias seguem tentando registrar o token. Central de Servicos
+mantem ajustes e teste. Mudanca apenas mobile; requer novo APK.
+
 ## Servico pago: saldo e liberacao visiveis (2026-10-06)
 
 A proposta exibe pagamento protegido, valor pendente, liberado, em analise ou

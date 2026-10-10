@@ -40,6 +40,7 @@ export const createCourierRequestSchema = z.object({
 });
 
 export const createCustomerCourierRequestSchema = z.object({
+  previousConversationId: z.coerce.number().int().positive().optional(),
   description: z.string().trim().max(1200).optional().default(""),
   destination: z.string().trim().max(300).optional().default(""),
   origin: z.string().trim().max(300).optional().default(""),

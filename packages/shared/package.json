@@ -7,6 +7,7 @@
     "./constants/roles": "./src/constants/roles.js",
     "./constants/statuses": "./src/constants/statuses.js",
     "./constants/wallet-types": "./src/constants/wallet-types.js",
-    "./utils/money": "./src/utils/money.js"
+    "./utils/money": "./src/utils/money.js",
+    "./search": "./src/search/search.js"
   }
 }

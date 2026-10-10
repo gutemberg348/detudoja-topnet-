@@ -28,6 +28,7 @@ import { StoreTeamScreen } from "../app/StoreTeamScreen";
 import { StorePermanentQrScreen } from "../app/StorePermanentQrScreen";
 import { ServiceProvidersScreen } from "../app/ServiceProvidersScreen";
 import { ServiceConversationScreen } from "../app/ServiceConversationScreen";
+import { ServiceHistoryScreen } from "../app/ServiceHistoryScreen";
 import { ServiceDeskScreen } from "../app/ServiceDeskScreen";
 import { ServiceInboxScreen } from "../app/ServiceInboxScreen";
 import { SupportScreen } from "../app/SupportScreen";
@@ -121,6 +122,11 @@ function Routes() {
         component={ResetPasswordScreen}
         name="ResetPassword"
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        component={ServiceHistoryScreen}
+        name="ServiceHistory"
+        options={backHeaderOptions("Histórico de serviços")}
       />
       <Stack.Screen
         component={ServiceConversationScreen}

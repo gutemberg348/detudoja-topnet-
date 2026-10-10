@@ -1,6 +1,19 @@
 # DeTudoJa - auditoria geral e apresentacao
 
-Ultima atualizacao: 2026-10-06
+Ultima atualizacao: 2026-10-09
+
+## Historico de servicos e motoboy recorrente (2026-10-09)
+
+Atendimentos finalizados e cancelados aparecem reunidos no historico de cada
+profissional; atendimentos em andamento continuam separados. Cada registro
+preserva mensagens, proposta e pagamento. No chat de corrida direta encerrada,
+o cliente ve disponibilidade e pode chamar novamente apenas aquele motoboy.
+Offline ou ocupado bloqueia o novo pedido; aceite cria outro atendimento,
+sem apagar o anterior. Chamadas respeitam cidade, KYC e disponibilidade.
+Busca tem um unico botao de fechar. Gerar venda mostra moeda em reais (10
+aparece como R$ 10,00), inclusive nas cobrancas da loja.
+Codigo e testes locais concluidos; publicar API e novo aplicativo. Entrega
+de notificacao no aparelho ainda precisa de conferencia apos publicacao.
 
 ## Conclusao de servicos recebidos fora do app (2026-10-05)
 

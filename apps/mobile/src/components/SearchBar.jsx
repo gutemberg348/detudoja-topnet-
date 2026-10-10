@@ -19,6 +19,9 @@ export function SearchBar({
   onSelectSuggestion,
   onSubmit,
   recentSuggestions = [],
+  searchInfo = null,
+  searchError = null,
+  onRetrySuggestions,
   placeholder = "Buscar produtos, serviços ou categorias",
   showVoice = false,
   suggestions = [],
@@ -28,7 +31,7 @@ export function SearchBar({
   const blurTimeoutRef = useRef(null);
   const inputRef = useRef(null);
   const { height: windowHeight } = useWindowDimensions();
-  const visibleSuggestions = focused && (loading || suggestions.length > 0 || recentSuggestions.length > 0);
+  const visibleSuggestions = focused && (loading || searchError || suggestions.length > 0 || recentSuggestions.length > 0);
   const rowHeight = expandedSuggestions ? 82 : 72;
   const maximumListHeight = expandedSuggestions
     ? Math.min(390, Math.max(280, windowHeight * 0.46))
@@ -118,13 +121,12 @@ export function SearchBar({
           style={[styles.input, (compact || inScreen) && styles.inputCompact]}
           value={value}
         />
-        {value ? (
+        {value && !inScreen ? (
           <Pressable
             accessibilityLabel="Limpar pesquisa"
             accessibilityRole="button"
             hitSlop={10}
             onPress={() => onChangeText("")}
-            style={inScreen && styles.screenClear}
           >
             <Ionicons color={colors.textWeak} name="close-circle" size={21} />
           </Pressable>
@@ -138,6 +140,7 @@ export function SearchBar({
   }
 
   function renderSuggestions(inScreen = false) {
+    const suggestedTerms = searchInfo?.suggestedTerms ?? [];
     return (
         <View
           style={inScreen ? styles.screenSuggestions : [styles.suggestions, compact && styles.suggestionsCompact, expandedSuggestions && styles.suggestionsInline]}
@@ -155,10 +158,33 @@ export function SearchBar({
               />
             </View>
           ) : null}
+          {value.trim() && suggestedTerms.length ? (
+            <View style={styles.corrections}>
+              <Text style={styles.correctionLabel}>Você quis dizer?</Text>
+              <View style={styles.correctionOptions}>
+                {suggestedTerms.map((term) => (
+                  <Pressable key={term} accessibilityRole="button" accessibilityLabel={`Pesquisar ${term}`}
+                    onPress={() => { clearBlurTimeout(); onChangeText(term); inputRef.current?.focus(); }}
+                    style={({ pressed }) => [styles.correctionChip, pressed && styles.suggestionPressed]}>
+                    <Ionicons name="search-outline" size={14} color={colors.primaryDark} />
+                    <Text style={styles.correctionTerm}>{term}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          ) : null}
+          {searchInfo?.discovery && value.trim().length >= 2 ? (
+            <Text style={styles.discoveryText}>Não encontramos esse termo. Explore estas opções na sua cidade:</Text>
+          ) : null}
+          {searchError ? (
+            <Pressable accessibilityRole="button" onPress={onRetrySuggestions} style={styles.corrections}>
+              <Text style={styles.correctionTerm}>Não foi possível atualizar as sugestões. Toque para tentar novamente.</Text>
+            </Pressable>
+          ) : null}
           {loading || suggestions.length ? (
             <View style={styles.suggestionsHeader}>
               <Text style={styles.suggestionsTitle}>
-                {value.trim() ? "Resultados rapidos" : initialSuggestionsTitle}
+                {value.trim() && !searchInfo?.discovery ? "Resultados rapidos" : initialSuggestionsTitle}
               </Text>
               {loading ? <ActivityIndicator color={colors.primaryDark} size="small" /> : null}
             </View>
@@ -205,7 +231,7 @@ export function SearchBar({
               );
             })}
           </SuggestionsList> : null}
-          {inScreen && !loading && !suggestions.length && (value.trim() || !recentSuggestions.length) ? (
+          {inScreen && !loading && !searchError && !suggestions.length && (value.trim() || !recentSuggestions.length) ? (
             <View style={styles.emptyState}>
               <Ionicons color={colors.textMuted} name="search-outline" size={32} />
               <Text style={styles.emptyTitle}>{value.trim().length >= 2 ? "Nenhum resultado por aqui" : "O que você está procurando?"}</Text>
@@ -407,6 +433,13 @@ function suggestionVisual(type) {
 }
 
 const styles = StyleSheet.create({
+  corrections: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: 8 },
+  correctionLabel: { color: colors.textMuted, fontSize: 12, fontFamily: fonts.medium },
+  correctionOptions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  correctionChip: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 18,
+    backgroundColor: colors.primaryLight, paddingHorizontal: 12, paddingVertical: 9, minHeight: 44 },
+  correctionTerm: { color: colors.primaryDark, fontSize: 13, fontFamily: fonts.medium, flexShrink: 1 },
+  discoveryText: { color: colors.textMuted, fontSize: 13, lineHeight: 19, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   emptyState: { alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.xl, paddingVertical: spacing.xxxl },
   emptyTitle: { color: colors.textPrimary, fontFamily: fonts.semiBold, fontSize: typography.body, textAlign: "center" },
   emptyText: { color: colors.textSecondary, fontFamily: fonts.regular, fontSize: typography.small, lineHeight: 20, textAlign: "center" },
@@ -415,7 +448,6 @@ const styles = StyleSheet.create({
   screenHeader: { backgroundColor: colors.background, borderBottomColor: colors.border, borderBottomWidth: 1 },
   screenHeaderContent: { alignItems: "center", alignSelf: "center", flexDirection: "row", gap: spacing.sm, maxWidth: 560, padding: spacing.lg, width: "100%" },
   screenField: { flex: 1, minWidth: 0 },
-  screenClear: { alignItems: "center", justifyContent: "center", height: 44, width: 32 },
   screenSearch: { backgroundColor: colors.cardMuted, minHeight: 54, paddingHorizontal: spacing.md, gap: spacing.sm },
   screenClose: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.border, borderRadius: radius.round, borderWidth: 1, height: 48, justifyContent: "center", width: 48 },
   screenScroll: { flex: 1 },

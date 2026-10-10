@@ -472,10 +472,11 @@ export function ServiceProvidersScreen({ navigation, route }) {
               <Ionicons color={colors.card} name={serviceIcon} size={27} />
             </Animated.View>
           </View>
-          <Text style={styles.waitingTitle}>Procurando {serviceNameLower}</Text>
+          <Text style={styles.waitingTitle}>{courierRequest?.isDirect ? "Aguardando este motoboy" : `Procurando ${serviceNameLower}`}</Text>
           <Text style={styles.waitingText}>
-            Estamos avisando os profissionais livres da sua cidade. Voce entra
-            no chat assim que alguem aceitar.
+            {courierRequest?.isDirect
+              ? `A chamada foi enviada somente para ${courierRequest.targetedCourier?.name ?? "este profissional"}. O chat abre quando ele aceitar.`
+              : "Estamos avisando os profissionais livres da sua cidade. Voce entra no chat assim que alguem aceitar."}
           </Text>
           <View style={styles.waitingTimeline}>
             <WaitingStage done icon="checkmark" label="Chamada enviada" />

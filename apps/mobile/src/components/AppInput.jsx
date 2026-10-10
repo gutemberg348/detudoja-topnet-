@@ -12,6 +12,7 @@ export function AppInput({
   label,
   onChangeText,
   placeholder,
+  prefix,
   secureTextEntry = false,
   value,
   ...inputProps
@@ -37,6 +38,7 @@ export function AppInput({
             />
           </View>
         ) : null}
+        {prefix ? <Text style={styles.prefix}>{prefix}</Text> : null}
         <TextInput
           autoCapitalize={autoCapitalize}
           keyboardType={keyboardType}
@@ -76,6 +78,7 @@ export function AppInput({
 }
 
 const styles = StyleSheet.create({
+  prefix: { color: colors.primaryDark, fontFamily: fonts.semiBold, fontSize: typography.body },
   error: {
     color: colors.danger,
     fontFamily: fonts.medium,

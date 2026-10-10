@@ -1,5 +1,4 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { NotificationReadinessCard } from "../components/NotificationReadinessCard";
 import { useFeedback } from "../components/FeedbackProvider";
 import * as ImagePicker from "expo-image-picker";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
@@ -543,8 +542,6 @@ export function ProfileScreen({ navigation }) {
         onPhotoPress={chooseProfilePhoto}
         profile={profile}
       />
-
-      <NotificationReadinessCard />
 
       <WorkProfilePanel
         invitations={workProfile.invitations ?? []}

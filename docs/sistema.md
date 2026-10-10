@@ -1,5 +1,32 @@
 # Sistema DeTudoJa
 
+## Atualizacao 2026-10-09: busca inteligente
+
+Motor compartilhado em `shared/search`, candidatos locais com pg_trgm, cache e
+correcoes clicaveis. Busca tolera erros sem baixar o catalogo todo no celular.
+**Requer migration `20261009190000_marketplace_intelligent_search` antes da API nova e novo APK.**
+Detalhes, limites, testes e comandos: [busca-inteligente.md](busca-inteligente.md).
+
+
+## Motoboy recorrente e historico (2026-10-09)
+
+POST /api/app/courier/customer-requests aceita previousConversationId opcional.
+O registro anterior precisa ser ENCERRADA/CANCELADA, do cliente autenticado,
+de ENTREGA_LOCAL e sem loja/pedido. previousCourierAvailability valida tipo,
+mesma cidade, servico ativo/online, perfil de motoboy ativo, KYC e permissao
+para chamadas de clientes; busy impede nova chamada. Verificacao e repetida
+sob lock de cliente/motoboy. Chamadas existentes de outro destino retornam 409.
+Pedido usa tipo PLATAFORMA com motoboy_direcionado_id preenchido; push/socket
+somente para o profissional selecionado. Listar/aceitar/recusar verifica o
+destino mesmo em PLATAFORMA; recusar cancela diretamente. Aceite cria outro
+atendimento, conservando mensagens, propostas e pagamentos do anterior.
+GET service-chats/:id expoe courierRecall (online/busy/available) aos clientes
+de corridas diretas encerradas. Nova chamada e historico nao exigem migration.
+Agrupamento de finalizados ocorre apenas na interface por pessoa, papel e loja;
+atendimentos abertos e disputas seguem individualizados, com historico separado.
+Testes reais no banco local isolado validam destinatario unico na fila push,
+concorrencia, acesso, offline, aceite e recusa. Nenhum envio a banco/provedor.
+
 ## Servicos diretos: conclusao e liberacao automatica (2026-10-06)
 
 completePaidService encerra conversa e proposta pagas com CAS e distribuicao

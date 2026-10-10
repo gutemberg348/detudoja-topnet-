@@ -7,6 +7,7 @@ import {
   createCustomerCourierRequest,
   createCourierRequest,
   listCourierRequests,
+  rejectCourierRequest,
 } from "../src/modules/courier/courier-dispatch.service.js";
 import {
   acceptServiceConversation,
@@ -24,6 +25,7 @@ import {
   registerSellerService,
 } from "../src/modules/service-chats/service-chats.service.js";
 import { expireUnattendedServices } from "../src/modules/service-chats/service-timeout.service.js";
+import { previousCourierAvailability } from "../src/modules/courier/courier-recall.js";
 import { payChargeWithWallet } from "../src/modules/charges/charge.service.js";
 import {
   creditUserWallet,
@@ -883,4 +885,64 @@ test("pagamento de servico entra em retencao na conclusao pelo prestador", async
   );
   const seller = await prisma.vendedor.findUniqueOrThrow({ where: { id: state.providerService.vendedor_id } });
   assert.equal(Number(seller.avaliacao_media), 4);
+});
+
+test("targeted recall reaches only the previous online courier and preserves the old chat", {
+  skip: !process.env.DATABASE_URL?.includes("/courier_recall_validation"),
+}, async () => {
+  const db = new URL(process.env.DATABASE_URL);
+  assert.ok(["localhost", "127.0.0.1"].includes(db.hostname) && db.pathname === "/courier_recall_validation",
+    "Run targeted recall validation in its isolated local database");
+  const fixtureSellerIds = [state.publicCourier.seller.id, state.secondCourier.seller.id];
+  await prisma.conversaServico.updateMany({ where: { vendedor_id: { in: fixtureSellerIds }, status: { in: ["ABERTA", "ACORDADA", "AGUARDANDO_CONFIRMACAO"] } }, data: { status: "CANCELADA" } });
+  await prisma.solicitacaoMotoboy.updateMany({ where: { solicitante_usuario_id: state.customer.id, status: "PENDENTE" }, data: { status: "CANCELADA" } });
+  const previous = await prisma.conversaServico.create({ data: {
+    cliente_usuario_id: state.customer.id, vendedor_id: state.publicCourier.seller.id,
+    servico_vendedor_id: state.publicCourier.service.id, segmento_venda_id: state.deliveryType.segmento_venda_id,
+    status: "ENCERRADA", encerrado_em: new Date(),
+  } });
+  const body = { serviceTypeId: state.deliveryType.id, previousConversationId: previous.id };
+  const publicId = state.publicCourier.seller.usuario_id;
+  const otherId = state.secondCourier.seller.usuario_id;
+  await prisma.dispositivoPush.createMany({ data: [publicId, otherId].map((usuario_id) => ({
+    usuario_id, plataforma: "android", token: `ExpoPushToken[recall-test-${usuario_id}]`,
+  })) });
+  try {
+    await assert.rejects(createCustomerCourierRequest(state.outsider.id, body), (error) => error.statusCode === 404);
+    await prisma.servicoVendedor.update({ where: { id: state.publicCourier.service.id }, data: { disponivel_agora: false } });
+    assert.equal((await getServiceConversation(state.customer.id, previous.id)).conversation.courierRecall.available, false);
+    await assert.rejects(createCustomerCourierRequest(state.customer.id, body), (error) => error.statusCode === 409);
+    await prisma.servicoVendedor.update({ where: { id: state.publicCourier.service.id }, data: { disponivel_agora: true } });
+    assert.equal((await getServiceConversation(state.customer.id, previous.id)).conversation.courierRecall.available, true);
+    const results = await Promise.all([createCustomerCourierRequest(state.customer.id, body), createCustomerCourierRequest(state.customer.id, body)]);
+    const call = results[0].request;
+    assert.equal(results[1].request.id, call.id);
+    assert.equal(call.isDirect, true);
+    assert.equal(call.targetedCourier.userId, publicId);
+    assert.ok((await listCourierRequests(publicId)).requests.some((item) => item.id === call.id));
+    assert.ok(!(await listCourierRequests(otherId)).requests.some((item) => item.id === call.id));
+    await assert.rejects(acceptCourierRequest(otherId, call.id), (error) => error.statusCode === 403);
+    await assert.rejects(rejectCourierRequest(otherId, call.id), (error) => error.statusCode === 403);
+    let jobs = [];
+    for (let attempt = 0; attempt < 30; attempt++) {
+      jobs = await prisma.notificacaoPush.findMany({ where: { conteudo: { path: ["data", "requestId"], equals: call.id } } });
+      if (jobs.length) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal(jobs.length, 1);
+    assert.equal(jobs[0].destinatario_usuario_id, publicId);
+    const accepted = await acceptCourierRequest(publicId, call.id);
+    assert.notEqual(accepted.conversation.id, previous.id);
+    assert.equal((await prisma.conversaServico.findUnique({ where: { id: previous.id } })).status, "ENCERRADA");
+    const busy = await previousCourierAvailability(state.customer.id, previous.id);
+    assert.equal(busy.busy, true);
+    assert.equal(busy.available, false);
+    await prisma.conversaServico.update({ where: { id: accepted.conversation.id }, data: { status: "CANCELADA" } });
+    const recalled = await createCustomerCourierRequest(state.customer.id, body);
+    await rejectCourierRequest(publicId, recalled.request.id);
+    assert.equal((await prisma.solicitacaoMotoboy.findUnique({ where: { id: recalled.request.id } })).status, "CANCELADA");
+  } finally {
+    await prisma.notificacaoPush.deleteMany({ where: { destinatario_usuario_id: { in: [publicId, otherId] } } });
+    await prisma.dispositivoPush.deleteMany({ where: { usuario_id: { in: [publicId, otherId] } } });
+  }
 });

@@ -1,12 +1,19 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useIsFocused } from "@react-navigation/native";
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { SearchBar } from "../components/SearchBar";
 import { useMarketplaceSuggestions } from "../hooks/useMarketplaceSuggestions";
+import { useCachedQuery } from "../hooks/useCachedQuery";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
+import { readQueryKey } from "../services/read-cache";
+import { realtimeEvents } from "../services/realtime";
+import { getWalletOverview } from "../services/wallet.api";
 import { useMarketplaceLocation, usePrefetchMarketplace } from "../hooks/useMarketplaceData";
 import { useAuthStore } from "../stores/useAuthStore";
-import { normalizeSearchText } from "../utils/search";
+import { normalizeSearchText, matchesSearchText } from "../utils/search";
+import { formatarDinheiro } from "../utils/money";
 import { colors, fonts, spacing, typography } from "../utils/theme";
 import { CourierHomeConversations } from "./home/CourierHomeConversations";
 import { RecentConversations } from "./home/RecentConversations";
@@ -14,11 +21,28 @@ import { useHomeConversations } from "./home/useHomeConversations";
 
 export function HomeScreen({ navigation }) {
   const { session } = useAuthStore();
+  const isFocused = useIsFocused();
+  const wallet = useCachedQuery({
+    key: session?.user?.id ? readQueryKey("home-wallet", session.user.id) : null,
+    enabled: isFocused && Boolean(session?.accessToken),
+    load: () => getWalletOverview(session.accessToken),
+    delayMs: 200,
+  });
+  useLiveRefresh({
+    accessToken: session?.accessToken,
+    scopeKey: String(session?.user?.id ?? ""),
+    events: [realtimeEvents.walletUpdated],
+    onRefresh: wallet.refresh,
+    intervalMs: 0,
+  });
+  const totalBalance = wallet.data?.summary?.totalCents;
+  const balanceLabel = totalBalance != null ? formatarDinheiro(totalBalance)
+    : wallet.error ? "Ver carteira" : "Carregando…";
   const [query, setQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
   const { location } = useMarketplaceLocation();
   usePrefetchMarketplace(location, { ready: !searchFocused });
-  const { isLoading: suggestionsLoading, suggestions } = useMarketplaceSuggestions(session?.accessToken, query, {
+  const { isLoading: suggestionsLoading, suggestions, searchInfo, error: suggestionsError, retry: retrySuggestions } = useMarketplaceSuggestions(session?.accessToken, query, {
     limit: 12,
     minimumCharacters: 2,
     scope: location ? `${location.city}|${location.state}` : "",
@@ -30,12 +54,13 @@ export function HomeScreen({ navigation }) {
   const chatSuggestions = useMemo(() => {
     const matches = (recent.searchableConversations ?? []).filter((conversation) => {
       if (!normalizedQuery) return true;
-      return normalizeSearchText([
+      return matchesSearchText([
         conversation.title,
         conversation.subtitle,
         conversation.conversation?.serviceType?.name,
+        ...(conversation.conversation?.historyServiceNames ?? []),
         conversation.conversation?.store?.name,
-      ].filter(Boolean).join(" ")).includes(normalizedQuery);
+      ].filter(Boolean).join(" "), normalizedQuery);
     });
 
     return matches.slice(0, 4).map((conversation) => ({
@@ -120,6 +145,10 @@ export function HomeScreen({ navigation }) {
   }
 
   function openConversation(conversation) {
+    if (conversation.conversation?.historyGroup) {
+      navigation.navigate("ServiceHistory", { conversation: conversation.conversation });
+      return;
+    }
     if (conversation.kind === "person") {
       navigation.navigate("PersonalConversation", {
         conversation: conversation.conversation,
@@ -169,20 +198,38 @@ export function HomeScreen({ navigation }) {
             recentSuggestions={recentConversationSuggestions}
             showVoice
             suggestions={combinedSuggestions}
+            searchInfo={searchInfo}
+            searchError={suggestionsError}
+            onRetrySuggestions={retrySuggestions}
             value={query}
           />
 
           <View style={styles.quickActions}>
             <HomeAction
-              iconBackground={colors.primarySoft}
+              iconBackground={colors.card}
               iconColor={colors.primaryDark}
               icon="trending-up-outline"
               label="Pagar"
               onPress={() => navigation.navigate("ChargeScan")}
             />
-            <View style={styles.quickActionDivider} />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Saldo total: ${balanceLabel}`}
+              accessibilityHint="Abre sua carteira com os valores disponíveis, pendentes e bloqueados"
+              onPress={() => navigation.navigate("Carteira")}
+              style={({ pressed }) => [styles.balanceAction, pressed && styles.balanceActionPressed]}
+            >
+              <Text style={styles.balanceLabel}>SALDO</Text>
+              <Text adjustsFontSizeToFit minimumFontScale={0.65} numberOfLines={1} style={styles.balanceValue}>
+                {balanceLabel}
+              </Text>
+              <View style={styles.balanceLink}>
+                <Text style={styles.balanceLinkText}>Ver carteira</Text>
+                <Ionicons color={colors.card} name="chevron-forward" size={12} />
+              </View>
+            </Pressable>
             <HomeAction
-              iconBackground={colors.primarySoft}
+              iconBackground={colors.card}
               iconColor={colors.primaryDark}
               icon="trending-down-outline"
               label="Receber"
@@ -193,7 +240,7 @@ export function HomeScreen({ navigation }) {
           {recent.courierOnline ? (
             <CourierHomeConversations
               conversations={recent.courierConversations}
-              onOpen={(conversation) => navigation.navigate("ServiceConversation", { conversation })}
+              onOpen={(conversation) => navigation.navigate(conversation.historyGroup ? "ServiceHistory" : "ServiceConversation", { conversation })}
               onViewAll={() => navigation.navigate("ServiceDesk")}
             />
           ) : null}
@@ -382,40 +429,88 @@ const styles = StyleSheet.create({
   },
   quickAction: {
     alignItems: "center",
+    backgroundColor: colors.primarySoft,
+    borderColor: "#B7DECC",
+    borderRadius: 16,
+    borderWidth: 1,
     flex: 1,
-    flexDirection: "row",
-    gap: spacing.sm,
-    height: 54,
+    flexDirection: "column",
+    gap: 3,
+    minHeight: 72,
     justifyContent: "center",
     minWidth: 0,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 6,
   },
-  quickActionDivider: {
-    backgroundColor: colors.primaryLight,
-    height: 30,
-    width: StyleSheet.hairlineWidth,
+  balanceAction: {
+    alignItems: "center",
+    alignSelf: "stretch",
+    backgroundColor: colors.primaryDark,
+    borderColor: colors.primaryDark,
+    borderWidth: 1,
+    flex: 1.5,
+    gap: 3,
+    justifyContent: "center",
+    minHeight: 72,
+    minWidth: 0,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  balanceActionPressed: {
+    backgroundColor: "#056448",
+    borderColor: "#056448",
+  },
+  balanceLabel: {
+    color: colors.primaryLight,
+    fontFamily: fonts.semiBold,
+    fontSize: 10,
+    letterSpacing: 1.1,
+    textAlign: "center",
+  },
+  balanceLink: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 2,
+  },
+  balanceLinkText: {
+    color: colors.card,
+    fontFamily: fonts.medium,
+    fontSize: 11,
+    textAlign: "center",
+  },
+  balanceValue: {
+    color: colors.card,
+    fontFamily: fonts.bold,
+    fontSize: 20,
+    textAlign: "center",
+    width: "100%",
   },
   quickActionIcon: {
     alignItems: "center",
     borderRadius: 999,
-    height: 34,
+    height: 30,
     justifyContent: "center",
-    width: 34,
+    width: 30,
   },
   quickActionLabel: {
-    color: colors.textPrimary,
+    color: colors.primaryDark,
     fontFamily: fonts.bold,
-    fontSize: typography.body,
+    fontSize: 14,
     lineHeight: 20,
+    textAlign: "center",
   },
   quickActionPressed: {
-    backgroundColor: colors.primarySoft,
-    opacity: 0.72,
+    backgroundColor: colors.primaryLight,
+    opacity: 0.85,
   },
   quickActions: {
-    alignItems: "center",
+    alignItems: "stretch",
     borderRadius: 8,
     flexDirection: "row",
+    gap: spacing.sm,
     maxWidth: 440,
     width: "100%",
   },

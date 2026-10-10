@@ -32,12 +32,14 @@ import { FixedServicePriceModal } from "./service/FixedServicePriceModal";
 import { RegisterServiceModal } from "./service/RegisterServiceModal";
 import { formatarDinheiro } from "../utils/money";
 import { serviceModalityDescription, serviceOperationSummary } from "../utils/service-operations";
+import { groupServiceConversations, serviceHistorySummary } from "../utils/service-history";
 
 function serviceIcon(iconName) {
   return serviceIconName(iconName);
 }
 
 function conversationStatus(conversation) {
+  if (conversation.historyGroup) return "Histórico";
   if (conversation.status === "ACORDADA") return "Em atendimento";
   if (conversation.status === "AGUARDANDO_CONFIRMACAO") return "Aguardando cliente";
   if (conversation.status === "ENCERRADA") return "Encerrado";
@@ -88,9 +90,9 @@ export function ServiceDeskScreen({ navigation }) {
   const mainAvailabilityOnline = mainAvailabilityServices.some((service) => service.available);
   const activeMainServices = mainAvailabilityServices.filter((service) => service.available);
   const courierConversations = useMemo(
-    () => conversations.filter((conversation) => (
+    () => groupServiceConversations(conversations.filter((conversation) => (
       conversation.serviceType?.operationalType === "ENTREGA_LOCAL"
-    )),
+    ))),
     [conversations],
   );
   const courierCalls = useMemo(
@@ -596,7 +598,7 @@ export function ServiceDeskScreen({ navigation }) {
                       <ServiceCallCard
                         conversation={conversation}
                         key={conversation.id}
-                        onPress={() => navigation.navigate("ServiceConversation", { conversation })}
+                        onPress={() => navigation.navigate(conversation.historyGroup ? "ServiceHistory" : "ServiceConversation", { conversation })}
                       />
                     ))}
                   </View>
@@ -831,7 +833,7 @@ function ServiceCallCard({ conversation, onPress }) {
           <Text style={styles.callStatus}>{conversationStatus(conversation)}</Text>
         </View>
         <Text numberOfLines={1} style={styles.callService}>
-          {isDelivery ? "CORRIDA DE LOJA" : conversation.serviceType?.name ?? conversation.segment?.name ?? "Servico"}
+          {conversation.historyGroup ? serviceHistorySummary(conversation) : isDelivery ? (store ? "CORRIDA DE LOJA" : "CORRIDA LOCAL") : conversation.serviceType?.name ?? conversation.segment?.name ?? "Servico"}
         </Text>
         {isDelivery ? (
           <View style={styles.callRoute}>
@@ -852,7 +854,7 @@ function ServiceCallCard({ conversation, onPress }) {
 }
 
 function CourierRequestCard({ loading, onAccept, request }) {
-  const isDirect = request.type === "EQUIPE";
+  const isDirect = request.isDirect || request.type === "EQUIPE";
   return (
     <View style={[styles.requestCard, isDirect && styles.requestCardDirect]}>
       <View style={styles.requestTopline}>
@@ -860,9 +862,9 @@ function CourierRequestCard({ loading, onAccept, request }) {
         <View style={styles.copy}>
           <View style={styles.requestNameLine}>
             <Text numberOfLines={1} style={styles.requestName}>{request.store?.name ?? "Cliente solicitante"}</Text>
-            {isDirect ? <View style={styles.directPill}><Text style={styles.directPillText}>SUA EQUIPE</Text></View> : null}
+            {isDirect ? <View style={styles.directPill}><Text style={styles.directPillText}>{request.store ? "SUA EQUIPE" : "SÓ PARA VOCÊ"}</Text></View> : null}
           </View>
-          <Text style={styles.requestCaption}>{isDirect ? "Chamada direta da loja" : "Chamada da plataforma"}</Text>
+          <Text style={styles.requestCaption}>{isDirect ? (request.store ? "Chamada direta da loja" : "Cliente chamou você novamente") : "Chamada da plataforma"}</Text>
         </View>
       </View>
       <View style={styles.routeBox}>

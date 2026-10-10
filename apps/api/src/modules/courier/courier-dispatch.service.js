@@ -15,6 +15,7 @@ import {
   isCourierSellerBusy,
 } from "./courier-availability.js";
 import { courierRepository, createCourierRepository } from "./courier.repository.js";
+import { assertSameCourierRequest, previousCourierAvailability } from "./courier-recall.js";
 import { sendExpoPushToUsers } from "../notifications/notifications.service.js";
 
 const courierRequestLifetimeMs = env.courier.requestTimeoutMinutes * 60 * 1000;
@@ -77,7 +78,7 @@ function serializeRequest(request) {
     destination: routeIsSharedInChat ? "A combinar no chat" : request.destino,
     expiresAt: request.expira_em.toISOString(),
     id: request.id,
-    isDirect: request.tipo_chamada === "EQUIPE",
+    isDirect: Boolean(request.motoboy_direcionado_id),
     order: request.pedido_loja ? { code: request.pedido_loja.codigo, id: request.pedido_loja.id } : null,
     origin: routeIsSharedInChat ? "A combinar no chat" : request.origem,
     requesterUserId: request.solicitante_usuario_id,
@@ -404,11 +405,16 @@ export async function getCustomerCourierRequestState(userId, serviceTypeId = nul
 export async function createCustomerCourierRequest(userId, data) {
   const address = await courierRepository.getUserBaseAddress(userId);
   const type = await deliveryType(data.serviceTypeId);
+  const target = data.previousConversationId
+    ? await previousCourierAvailability(userId, parseId(data.previousConversationId, "Atendimento anterior invalido"), type.id)
+    : null;
   await expireCourierRequests({ loja_id: null, solicitante_usuario_id: userId });
   const existing = (await activeCustomerRequests(userId, type.id))[0];
+  assertSameCourierRequest(existing, target);
   if (existing) return { request: serializeRequest(existing) };
 
-  const candidates = await onlineCandidates(address, type.id);
+  if (target && !target.available) throw new AppError(target.busy ? "Este motoboy esta em outra corrida agora" : "Este motoboy esta offline ou indisponivel para chamadas", 409);
+  const candidates = target ? [target.service] : await onlineCandidates(address, type.id);
   const targetUserIds = candidates
     .map((service) => service.vendedor.usuario_id)
     .filter((candidateUserId) => candidateUserId !== userId);
@@ -418,7 +424,14 @@ export async function createCustomerCourierRequest(userId, data) {
     const repository = createCourierRepository(database);
     await repository.lockCustomerDispatch(userId);
     const lockedExisting = (await activeCustomerRequests(userId, type.id, repository))[0];
+    assertSameCourierRequest(lockedExisting, target);
     if (lockedExisting) return { created: false, request: lockedExisting };
+
+    if (target) {
+      await repository.lockCourier(target.courierId);
+      const current = await previousCourierAvailability(userId, data.previousConversationId, type.id, repository);
+      if (!current.available) throw new AppError("Este motoboy nao esta disponivel agora", 409);
+    }
 
     const request = await repository.createCourierRequest({
       include: requestInclude,
@@ -427,6 +440,7 @@ export async function createCustomerCourierRequest(userId, data) {
         destino: "A combinar no chat",
         expira_em: new Date(Date.now() + courierRequestLifetimeMs),
         origem: "A combinar no chat",
+        motoboy_direcionado_id: target?.courierId ?? null,
         solicitante_usuario_id: userId,
         tipo_chamada: "PLATAFORMA",
         tipo_servico_id: type.id,
@@ -438,7 +452,7 @@ export async function createCustomerCourierRequest(userId, data) {
   if (result.created) {
     emitCourierRequestCreated({ request, targetUserIds });
     void sendExpoPushToUsers({
-      body: `Uma chamada de ${type.nome} na sua cidade esta aguardando o primeiro aceite.`,
+      body: target ? `Um cliente anterior chamou voce novamente para ${type.nome}. Abra para aceitar ou recusar.` : `Uma chamada de ${type.nome} na sua cidade esta aguardando o primeiro aceite.`,
       channelId: "courier-calls",
       expiresAt: request.expiresAt,
       data: { expiresAt: request.expiresAt, requestId: request.id, screen: "ServiceDesk", type: "courier_request" },
@@ -481,6 +495,7 @@ export async function listCourierRequests(userId) {
       recusas: { none: { motoboy_id: courier.id } },
       OR: [
         { motoboy_direcionado_id: courier.id, tipo_chamada: "EQUIPE" },
+        ...(canReceivePlatformCalls(courier) ? [{ motoboy_direcionado_id: courier.id, tipo_chamada: "PLATAFORMA", loja_id: null }] : []),
         {
           tipo_chamada: "PLATAFORMA",
           motoboy_direcionado_id: null,
@@ -598,7 +613,7 @@ export async function acceptCourierRequest(userId, requestId) {
     { city: courier.cidade_base, state: courier.estado_base },
     original.loja?.endereco ?? original.solicitante.enderecos[0],
   )) throw new AppError("Esta corrida pertence a outra cidade", 403);
-  if (original.tipo_chamada === "EQUIPE" && original.motoboy_direcionado_id !== courier.id) throw new AppError("Esta chamada pertence a outro profissional", 403);
+  if (original.motoboy_direcionado_id && original.motoboy_direcionado_id !== courier.id) throw new AppError("Esta chamada pertence a outro profissional", 403);
   if (original.tipo_chamada === "PLATAFORMA") {
     if (!canReceivePlatformCalls(courier, original.loja_id)) throw new AppError("Sua disponibilidade esta limitada as lojas credenciadas", 409);
   }
@@ -649,7 +664,7 @@ export async function acceptCourierRequest(userId, requestId) {
     data: { screen: "ServiceConversation", conversationId: result.conversa_servico_id, reason: "courier-request-accepted" },
     userIds: [original.solicitante_usuario_id],
   });
-  const candidates = original.tipo_chamada === "PLATAFORMA"
+  const candidates = original.tipo_chamada === "PLATAFORMA" && !original.motoboy_direcionado_id
     ? await onlineCandidates(
         original.loja?.endereco ?? original.solicitante.enderecos[0],
         original.tipo_servico_id,
@@ -665,7 +680,7 @@ export async function acceptCourierRequest(userId, requestId) {
   });
   emitCourierRequestUpdated({
     request: serializeRequest(result),
-    targetUserIds: candidates.map((item) => item.vendedor.usuario_id),
+    targetUserIds: [original.motoboy_direcionado?.vendedor?.usuario_id, ...candidates.map((item) => item.vendedor.usuario_id)].filter(Boolean),
   });
   return { conversation: response.conversation, request: serializeRequest(result) };
 }
@@ -680,7 +695,7 @@ export async function cancelCourierRequest(userId, requestId) {
     throw new AppError("Chamada nao encontrada", 404);
   }
   if (original.status !== "PENDENTE") throw new AppError("Esta chamada nao pode mais ser cancelada", 409);
-  const candidates = original.tipo_chamada === "PLATAFORMA"
+  const candidates = original.tipo_chamada === "PLATAFORMA" && !original.motoboy_direcionado_id
     ? await onlineCandidates(
         original.loja?.endereco ?? original.solicitante.enderecos[0],
         original.tipo_servico_id,
@@ -736,14 +751,14 @@ export async function rejectCourierRequest(userId, requestId) {
   if (original.solicitante_usuario_id === userId) {
     throw new AppError("Voce nao pode recusar a propria chamada", 400);
   }
-  if (original.tipo_chamada === "EQUIPE" && original.motoboy_direcionado_id !== courier.id) {
+  if (original.motoboy_direcionado_id && original.motoboy_direcionado_id !== courier.id) {
     throw new AppError("Esta chamada pertence a outro profissional", 403);
   }
   if (original.tipo_chamada === "PLATAFORMA" && !canReceivePlatformCalls(courier, original.loja_id)) {
     throw new AppError("Esta chamada nao esta disponivel para seu perfil", 403);
   }
 
-  if (original.tipo_chamada === "EQUIPE") {
+  if (original.motoboy_direcionado_id) {
     const updated = await courierRepository.transaction(async (database) => {
       const repository = createCourierRepository(database);
       const claimed = await repository.updateCourierRequests({

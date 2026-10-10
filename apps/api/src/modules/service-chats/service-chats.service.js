@@ -26,6 +26,7 @@ import {
 import { settlePaidAutonomousChargeEarnings } from "../earnings/order-earnings.service.js";
 import { isCourierConversation, lockCourierConversation } from "./courier-completion.js";
 import { servicePaymentStatus } from "./service-payment-status.js";
+import { previousCourierAvailability } from "../courier/courier-recall.js";
 import { cancelUnpaidServiceInTransaction, completeServiceOutsideAppInTransaction, isServiceCompletedOutsideApp, lockServiceProposalChanges } from "./service-closure.js";
 import { sendExpoPushToUsers } from "../notifications/notifications.service.js";
 import {
@@ -1160,8 +1161,19 @@ export async function getServiceConversation(userId, conversationId, page = {}) 
   if (hasUnreadMessages || needsSellerView) {
     notifyConversation(updatedConversation, "read");
   }
+  const serialized = serializeConversation(updatedConversation, userId, { includeMessages: true });
+  if (!isSeller && isCourierConversation(updatedConversation)
+    && ["ENCERRADA", "CANCELADA"].includes(updatedConversation.status)) {
+    try {
+      const status = await previousCourierAvailability(userId, conversation.id);
+      serialized.courierRecall = { available: status.available, online: status.online, busy: status.busy };
+    } catch (error) {
+      if (![404, 428].includes(error.statusCode)) throw error;
+      serialized.courierRecall = { available: false, online: false, busy: false };
+    }
+  }
   return {
-    conversation: serializeConversation(updatedConversation, userId, { includeMessages: true }),
+    conversation: serialized,
     messagePage: {
       hasMore,
       nextCursor: hasMore ? pageMessages[0]?.id ?? null : null,

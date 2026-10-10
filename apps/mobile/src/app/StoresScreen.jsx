@@ -32,7 +32,7 @@ import { getServiceTypes } from "../services/service-chats.api";
 import { updateCurrentUser } from "../services/users.api";
 import { readCache } from "../services/read-cache";
 import { useAuthStore } from "../stores/useAuthStore";
-import { matchesSearchText, normalizeSearchText, serviceSearchScore } from "../utils/search";
+import { matchesSearchText, normalizeSearchText, serviceSearchScore, isServiceSearch } from "../utils/search";
 import { serviceIconName } from "../utils/service-icons";
 import {
   colors,
@@ -106,7 +106,7 @@ export function StoresScreen({ navigation, route }) {
       (resultMode === "stores" && storesQuery.hasData) || (resultMode === "products" && productsQuery.hasData)
     ),
   });
-  const { isLoading: suggestionsLoading, suggestions } = useMarketplaceSuggestions(session?.accessToken, search, {
+  const { isLoading: suggestionsLoading, suggestions, searchInfo, error: suggestionsError, retry: retrySuggestions } = useMarketplaceSuggestions(session?.accessToken, search, {
     enabled: focused && Boolean(marketplaceLocation) && searchFocused,
     limit: 12,
     minimumCharacters: 2,
@@ -138,7 +138,7 @@ export function StoresScreen({ navigation, route }) {
   const matchingServiceTypes = useMemo(() => {
     const term = normalizeSearch(search);
 
-    if (resultMode === "services" && !term) {
+    if ((resultMode === "services" && !term) || isServiceSearch(term)) {
       return serviceTypes;
     }
 
@@ -388,6 +388,9 @@ export function StoresScreen({ navigation, route }) {
             placeholder="Buscar lojas, produtos ou servicos"
             showVoice
             suggestions={suggestions}
+            searchInfo={searchInfo}
+            searchError={suggestionsError}
+            onRetrySuggestions={retrySuggestions}
             value={search}
           />
         </View>

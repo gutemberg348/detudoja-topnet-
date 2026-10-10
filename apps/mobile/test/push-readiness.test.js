@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { persistPushRegistration, pushRegistrationFailure, withPushTimeout } from "../src/utils/push-registration.js";
 
-function device({ configured = true, granted = true, tokenError, serverError } = {}) {
+function device({ configured = true, granted = true, canAskAgain = true, tokenError, serverError } = {}) {
   const calls = { permission: 0, token: 0, register: 0 };
   const source = readFileSync(new URL("../src/services/push-notifications.js", import.meta.url), "utf8")
     .replace(/^import .*;\r?\n/gm, "")
@@ -19,8 +19,8 @@ function device({ configured = true, granted = true, tokenError, serverError } =
     fakeNotifications: {
       setNotificationHandler() {}, setNotificationChannelAsync: async () => {},
       AndroidImportance: { HIGH: 4, MAX: 5, DEFAULT: 3 }, IosAuthorizationStatus: { PROVISIONAL: 3 },
-      getPermissionsAsync: async () => ({ granted, canAskAgain: true }),
-      requestPermissionsAsync: async () => { calls.permission++; return { granted: true }; },
+      getPermissionsAsync: async () => ({ granted, canAskAgain }),
+      requestPermissionsAsync: async () => { calls.permission++; granted = true; return { granted: true }; },
       getExpoPushTokenAsync: async () => { calls.token++; if (tokenError) throw tokenError; return { data: "test-token" }; },
       getNotificationChannelsAsync: async () => [],
     },
@@ -63,4 +63,18 @@ test("permissao negada permanece separada de configuracao e falha transitoria", 
   assert.equal(h.calls.token, 0);
   assert.equal(pushRegistrationFailure(new Error("InvalidCredentials")).status, "configuration");
   assert.equal(pushRegistrationFailure(new Error("unknown SDK error")).status, "error");
+});
+
+test("abrir e retornar pede permissao ausente uma vez e registra o aparelho automaticamente", async () => {
+  const h = device({ granted: false });
+  assert.equal((await h.register({ requestPermission: true })).status, "ready");
+  assert.equal((await h.register({ requestPermission: true })).status, "ready");
+  assert.equal(h.calls.permission, 1);
+  assert.equal(h.calls.register, 2);
+});
+
+test("permissao bloqueada pelo sistema nao repete o dialogo nem gera token", async () => {
+  const h = device({ granted: false, canAskAgain: false });
+  assert.deepEqual(await h.register({ requestPermission: true }), { status: "denied", canAskAgain: false });
+  assert.deepEqual(h.calls, { permission: 0, token: 0, register: 0 });
 });

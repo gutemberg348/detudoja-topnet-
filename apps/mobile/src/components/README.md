@@ -2,8 +2,9 @@
 
 Componentes mobile reutilizaveis entram aqui.
 
-- `PushNotificationsProvider.jsx`: prepara push no login/retorno, tenta novamente em falhas temporarias e acompanha troca do token; solicitacao de permissao por acao explicita.
-- `NotificationReadinessCard.jsx`: mostra permissao/cadastro/pendencia em Perfil e Servicos, com ativacao, ajustes e teste do proprio aparelho.
+- `PushNotificationsProvider.jsx`: prepara push no login/retorno, solicita permissao ausente quando o sistema permite, tenta novamente em falhas temporarias e acompanha troca do token.
+- `NotificationReadinessCard.jsx`: mostra permissao/cadastro/pendencia na Central de Servicos, com ativacao, ajustes e teste do proprio aparelho.
+- `CurrencyInput.jsx`: campo decimal com prefixo R$ e formatacao brasileira ao perder foco; digitar 10 continua significando dez reais.
 
 - `BrandLogo.jsx`: centraliza a marca oficial para onboarding, login, splash e cabecalhos autenticados.
 - `BackHeader.jsx`: padrao de voltar do app, com botao pill verde claro, chevron verde e texto `Voltar`.

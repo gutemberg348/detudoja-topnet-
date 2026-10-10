@@ -32,6 +32,8 @@ import { ServiceCashbackNotice } from "../components/ServiceCashbackNotice";
 import { StatePanel } from "../components/StatePanel";
 import { ShareAddressModal } from "./service/ShareAddressModal";
 import { useConversationRealtime } from "../hooks/useConversationRealtime";
+import { createCustomerCourierRequest, cancelCourierRequest, getCustomerCourierRequests } from "../services/courier.api";
+import { finishedServiceStatuses } from "../utils/service-history";
 import { mergeConversationSnapshot } from "../utils/live-refresh";
 import { useChatTimeline } from "../hooks/useChatTimeline";
 import { useChatTyping } from "../hooks/useChatTyping";
@@ -106,6 +108,7 @@ export function ServiceConversationScreen({ navigation, route }) {
   const [shareAddressOpen, setShareAddressOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [recallRequest, setRecallRequest] = useState(null);
   const [messagePage, setMessagePage] = useState({ hasMore: true, nextCursor: null });
   const timeline = useChatTimeline({
     latestMessageId: conversation?.messages?.at(-1)?.id,
@@ -158,6 +161,8 @@ export function ServiceConversationScreen({ navigation, route }) {
   );
   const canCancelService = !isCourierRide && conversation?.status === "ACORDADA"
     && canCancelServiceConversation(conversation);
+  const finished = finishedServiceStatuses.has(conversation?.status);
+  const canRecallCourier = finished && isCustomerMotoboyRide && !conversation?.isSeller;
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!session?.accessToken || !initial?.id) return;
@@ -173,6 +178,16 @@ export function ServiceConversationScreen({ navigation, route }) {
           reloadPendingRef.current = false;
           const response = await getServiceConversation(session.accessToken, initial.id);
           setConversation((current) => mergeConversationSnapshot(current, response.conversation));
+          if (response.conversation.courierRecall) {
+            const calls = await getCustomerCourierRequests(session.accessToken, response.conversation.serviceType.id);
+            const currentCall = (calls.requests ?? []).find((item) => Number(item.targetedCourier?.userId ?? item.acceptedCourier?.userId) === Number(response.conversation.seller.userId));
+            setRecallRequest(currentCall?.status === "PENDENTE" ? currentCall : null);
+            if (currentCall?.status === "ACEITA" && currentCall.conversationId) {
+              const next = await getServiceConversation(session.accessToken, currentCall.conversationId);
+              navigation.replace("ServiceConversation", { conversation: next.conversation });
+              return;
+            }
+          }
           setMessagePage((current) => current.nextCursor ? current : (response.messagePage ?? { hasMore: false, nextCursor: null }));
         } while (reloadPendingRef.current);
       } catch (requestError) {
@@ -188,7 +203,7 @@ export function ServiceConversationScreen({ navigation, route }) {
     } finally {
       if (loadPromiseRef.current === request) loadPromiseRef.current = null;
     }
-  }, [initial?.id, session?.accessToken]);
+  }, [initial?.id, navigation, session?.accessToken]);
 
   const loadOlder = useCallback(async () => {
     if (!session?.accessToken || !conversation?.id || loadingOlder || !messagePage.hasMore || !messagePage.nextCursor) return;
@@ -277,17 +292,60 @@ export function ServiceConversationScreen({ navigation, route }) {
         ? { ...current, request: { ...current.request, order: { ...current.request.order, status: payload.status } } }
         : current);
     };
+    const onCourierUpdate = (payload = {}) => {
+      if (canRecallCourier && Number(payload.request?.targetedCourier?.userId) === Number(conversation.seller?.userId)) {
+        void load({ silent: true });
+      }
+    };
+    const onAvailability = (payload = {}) => {
+      if (canRecallCourier && Number(payload.sellerId) === Number(conversation.seller?.id)) void load({ silent: true });
+    };
+    socket?.on(realtimeEvents.courierRequestUpdated, onCourierUpdate);
+    socket?.on(realtimeEvents.serviceAvailabilityUpdated, onAvailability);
     socket?.on(realtimeEvents.serviceChatMessageCreated, onMessage);
     socket?.on(realtimeEvents.orderStatusUpdated, onOrderStatus);
     socket?.on(realtimeEvents.chatTyping, onTyping);
     socket?.on(realtimeEvents.serviceChatUpdated, onUpdated);
     return () => {
+      socket?.off(realtimeEvents.courierRequestUpdated, onCourierUpdate);
+      socket?.off(realtimeEvents.serviceAvailabilityUpdated, onAvailability);
       socket?.off(realtimeEvents.serviceChatMessageCreated, onMessage);
       socket?.off(realtimeEvents.orderStatusUpdated, onOrderStatus);
       socket?.off(realtimeEvents.chatTyping, onTyping);
       socket?.off(realtimeEvents.serviceChatUpdated, onUpdated);
     };
-  }, [conversation?.id, conversation?.request?.order?.id, session?.accessToken, session?.user?.id, typing.receiveTyping]);
+  }, [conversation?.id, conversation?.request?.order?.id, conversation?.seller?.id, conversation?.seller?.userId, canRecallCourier, load, session?.accessToken, session?.user?.id, typing.receiveTyping]);
+
+  async function callCourierAgain() {
+    if (actionLoading || !canRecallCourier || !conversation.courierRecall?.available || recallRequest) return;
+    setActionLoading("recall");
+    setError("");
+    try {
+      const result = await createCustomerCourierRequest(session.accessToken, {
+        previousConversationId: conversation.id,
+        serviceTypeId: conversation.serviceType.id,
+        description: "Quero chamar você novamente. Combinamos os detalhes no chat.",
+      });
+      setRecallRequest(result.request);
+      notify("Chamada enviada", `Somente ${conversation.otherPerson.name} receberá este chamado. Aguarde o aceite.`, "success");
+      await load({ silent: true });
+    } catch (failure) {
+      setError(failure.message || "Não foi possível chamar este motoboy.");
+      await load({ silent: true });
+    } finally { setActionLoading(""); }
+  }
+
+  async function cancelRecall() {
+    if (actionLoading || !recallRequest) return;
+    setActionLoading("cancel-recall");
+    try {
+      await cancelCourierRequest(session.accessToken, recallRequest.id);
+      setRecallRequest(null);
+      notify("Chamada cancelada", "O atendimento anterior continua salvo no histórico.", "info");
+      await load({ silent: true });
+    } catch (failure) { setError(failure.message || "Não foi possível cancelar a chamada."); }
+    finally { setActionLoading(""); }
+  }
 
   async function send(payload = null) {
     if ((!draft.trim() && !payload?.attachment) || sending || !session?.accessToken) return;
@@ -553,7 +611,7 @@ export function ServiceConversationScreen({ navigation, route }) {
             {conversation.otherPerson?.name ?? "Conversa"}
           </Text>
           <View style={styles.statusLine}>
-            <View style={styles.statusDot} />
+            <View style={[styles.statusDot, finished && { backgroundColor: colors.textMuted }]} />
             <Text style={styles.statusText}>
               {isCustomerMotoboyRide && conversation.status === "AGUARDANDO_CONFIRMACAO"
                 ? "Aguardando pagamento"
@@ -576,6 +634,31 @@ export function ServiceConversationScreen({ navigation, route }) {
         ) : null}
       </View>
 
+      {canRecallCourier ? (
+        <View style={styles.recallCard}>
+          <View style={styles.recallHeading}>
+            <Ionicons color={colors.primaryDark} name="bicycle-outline" size={20} />
+            <Text style={styles.recallTitle}>Chamar este motoboy novamente</Text>
+            <View style={[styles.statusDot, { backgroundColor: conversation.courierRecall?.available ? colors.success : colors.textMuted }]} />
+          </View>
+          <Text style={styles.proposalHint}>
+            {recallRequest ? "Chamada enviada só para este profissional. Aguardando o aceite."
+              : !conversation.courierRecall ? "Conferindo disponibilidade…"
+              : conversation.courierRecall.busy ? "Online · Em outra corrida agora"
+              : conversation.courierRecall.available ? "Online · Disponível para receber seu chamado"
+              : "Offline · Indisponível para novos chamados agora"}
+          </Text>
+          <AppButton
+            disabled={Boolean(actionLoading) || (!recallRequest && !conversation.courierRecall?.available)}
+            icon={recallRequest ? "close-outline" : "radio-outline"}
+            loading={actionLoading === "recall" || actionLoading === "cancel-recall"}
+            onPress={recallRequest ? cancelRecall : callCourierAgain}
+            title={recallRequest ? "Cancelar nova chamada" : "Chamar novamente"}
+            variant={recallRequest ? "outline" : "primary"}
+          />
+        </View>
+      ) : null}
+
       {isCourierRide ? (
         <View style={styles.deliveryContext}>
           <View style={styles.deliveryContextHeader}>
@@ -586,14 +669,14 @@ export function ServiceConversationScreen({ navigation, route }) {
               <Text style={styles.deliveryContextEyebrow}>
                 {conversation.request?.store ? "CORRIDA DA LOJA" : "CORRIDA LOCAL"}
               </Text>
-              <Text numberOfLines={1} style={styles.deliveryContextStore}>{conversation.request?.store?.name ?? "Corrida em atendimento"}</Text>
+              <Text numberOfLines={1} style={styles.deliveryContextStore}>{conversation.request?.store?.name ?? (finished ? "Atendimento anterior" : "Corrida em atendimento")}</Text>
               {conversation.request.description ? (
                 <Text numberOfLines={1} style={styles.deliveryDescription}>
                   {conversation.request.description}
                 </Text>
               ) : null}
             </View>
-            <View style={styles.deliveryLive}><View style={styles.deliveryLiveDot} /><Text style={styles.deliveryLiveText}>Ativa</Text></View>
+            <View style={styles.deliveryLive}><View style={[styles.deliveryLiveDot, finished && { backgroundColor: colors.textMuted }]} /><Text style={styles.deliveryLiveText}>{conversation.status === "CANCELADA" ? "Cancelada" : finished ? "Finalizada" : "Ativa"}</Text></View>
           </View>
           {conversation.request?.origin || conversation.request?.destination ? (
             <View style={styles.deliveryRouteCompact}>
@@ -714,7 +797,8 @@ export function ServiceConversationScreen({ navigation, route }) {
         <View style={styles.contextStrip}>
           <Ionicons color={colors.primaryDark} name="shield-checkmark-outline" size={18} />
           <Text style={styles.contextText}>
-            {conversation.isSeller || !["ABERTA", "ACORDADA"].includes(conversation.status)
+            {finished ? "Este atendimento está salvo no histórico. Consulte aqui as mensagens e os detalhes."
+              : conversation.isSeller || !["ABERTA", "ACORDADA"].includes(conversation.status)
               ? "Combine os detalhes e envie uma proposta quando o valor estiver definido."
               : "Combine o serviço e pague pelo app para ganhar cashback nos serviços elegíveis."}
           </Text>
@@ -786,9 +870,9 @@ export function ServiceConversationScreen({ navigation, route }) {
               <View style={styles.emptyChatIcon}>
                 <Ionicons color={colors.primaryDark} name="chatbubbles-outline" size={25} />
               </View>
-              <Text style={styles.emptyChatTitle}>Comece pelos detalhes</Text>
+              <Text style={styles.emptyChatTitle}>{finished ? "Histórico do atendimento" : "Comece pelos detalhes"}</Text>
               <Text style={styles.emptyChatText}>
-                Informe local, horario, o que precisa ser feito e envie fotos quando ajudar.
+                {finished ? "Este atendimento foi encerrado sem mensagens na conversa." : "Informe local, horario, o que precisa ser feito e envie fotos quando ajudar."}
               </Text>
             </View>
           )}
@@ -1481,6 +1565,10 @@ function parseMoneyToCents(value) {
 }
 
 const styles = StyleSheet.create({
+  recallCard: { backgroundColor: colors.primarySoft, borderColor: colors.border, borderWidth: 1,
+    padding: spacing.md, gap: spacing.sm },
+  recallHeading: { flexDirection: "row", gap: spacing.sm, alignItems: "center" },
+  recallTitle: { flex: 1, color: colors.primaryDark, fontFamily: fonts.semiBold, fontSize: 13 },
   deliveryProofCard: { backgroundColor: "#F0FDF4", borderBottomColor: colors.primaryLight, borderBottomWidth: 1, gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   deliveryProofCopy: { flex: 1, gap: 3 },
   deliveryProofHeader: { alignItems: "center", flexDirection: "row", gap: spacing.sm },

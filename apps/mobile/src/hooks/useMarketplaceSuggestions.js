@@ -20,7 +20,7 @@ export function useMarketplaceSuggestions(
   const { session } = useAuthStore();
   const search = normalizeSearchText(query);
   const canQuery = enabled && Boolean(accessToken && session?.user?.id)
-    && ((showInitial && !search) || search.length >= minimumCharacters);
+    && (showInitial || search.length >= minimumCharacters);
   const results = useCachedQuery({
     key: canQuery ? readQueryKey("marketplace-suggestions", session.user.id, scope, search, limit) : null,
     enabled: canQuery,
@@ -35,5 +35,11 @@ export function useMarketplaceSuggestions(
     refreshOnFocus: false,
     onRefresh: results.refresh,
   });
-  return { isLoading: results.isLoading, suggestions: results.data?.suggestions ?? [] };
+  return {
+    isLoading: results.isLoading,
+    suggestions: results.data?.suggestions ?? [],
+    searchInfo: results.data?.searchInfo ?? null,
+    error: results.error,
+    retry: () => results.refresh().catch(() => {}),
+  };
 }

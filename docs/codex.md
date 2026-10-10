@@ -1,6 +1,61 @@
 # Codex Handoff - DeTudoJa
 
-Ultima atualizacao: 2026-10-06
+## Atualizacao 2026-10-09: busca inteligente
+
+Motor compartilhado em `shared/search`, candidatos locais com pg_trgm, cache e
+correcoes clicaveis. Busca tolera erros sem baixar o catalogo todo no celular.
+**Requer migration `20261009190000_marketplace_intelligent_search` antes da API nova e novo APK.**
+Detalhes, limites, testes e comandos: [busca-inteligente.md](busca-inteligente.md).
+
+
+Ultima atualizacao: 2026-10-09
+
+## Atualizacao 2026-10-09: historico e motoboy recorrente
+
+- SearchBar fullscreen remove limpar interno: apenas X externo. Inline conserva
+  limpar. groupServiceConversations agrupa ENCERRADA/CANCELADA por pessoa/papel/
+  loja e soma nao lidas; ativos e disputas ficam individuais. Home, busca,
+  ServiceInbox e corridas na Central usam grupos. ServiceHistory lista registros
+  individuais; nenhuma conversa ou transacao e mesclada/apagada no banco.
+- GET service-chats/:id inclui courierRecall para cliente de corrida direta
+  encerrada/cancelada: online, busy, available. Chamar novamente envia
+  previousConversationId em POST courier/customer-requests. API valida cliente,
+  tipo anterior, cidade, perfil/KYC, disponibilidade e escopo de chamadas.
+  Grava motoboy_direcionado_id com tipo PLATAFORMA; nao transmite a outros.
+  Revalida sob locks de cliente/motoboy e reaproveita chamadas equivalentes.
+  Outro motoboy nao lista, aceita ou recusa o pedido. Recusa direta cancela;
+  aceite abre nova conversa, preservando historico. Sem schema/migration.
+- CurrencyInput usa prefixo R$ e normalizacao decimal (10 = 1000 centavos);
+  formata centavos/milhares ao perder foco, para venda autonoma e da loja.
+- Validacao: 109 mobile; 14 testes completos de courier-flows no banco local
+  isolado courier_recall_validation; fila push comprovada com um destinatario
+  usando tokens ficticios e sem envio externo. Navegador com APIs simuladas
+  cobre busca, historico, chamada/cancelamento, offline e valores em tres larguras.
+  Exports web/Android passaram. Requer rebuild da API e novo APK. Entrega em
+  aparelho fisico pendente.
+
+## Atualizacao 2026-10-07: botoes da Home
+
+Pagar/Receber ganharam fundo, borda, raio de 16 e destaque ao pressionar.
+Icones em circulos brancos e espacamento lateral em vez de divisores, com
+saldo entre os botoes. Apenas visual mobile; instalar novo APK.
+Saldo tem fundo verde, SALDO pequeno em caixa alta, valor total branco e Ver carteira com seta,
+mantendo toda a area clicavel para Carteira e alturas alinhadas na linha.
+
+## Atualizacao 2026-10-06: saldo disponivel entre Pagar e Receber
+
+HomeScreen mostra summary.totalCents via getWalletOverview, cache por
+usuario e useLiveRefresh (foco/retorno/socket, intervalMs=0). Toque abre Carteira.
+Disponivel, pendente e bloqueado entram na soma; carregamento e erro tem texto proprio.
+Alteracao mobile apenas, requer novo APK.
+
+## Atualizacao 2026-10-06: notificacoes ao abrir e Perfil limpo
+
+ProfileScreen remove NotificationReadinessCard. Provider chama sync(true) no
+login/abertura autenticada e no retorno ao primeiro plano; o servico nativo
+so pede permissao ausente com canAskAgain. Token/retry continuam sem prompt.
+Central de Servicos conserva ajustes/teste. Sem API/schema/deploy necessario;
+instalar novo APK. Testes cobrem retorno apos permitir e bloqueio definitivo.
 
 Este arquivo e o resumo principal para qualquer novo Codex continuar o projeto
 sem precisar reconstruir todo o contexto pela conversa. Sempre que uma regra,

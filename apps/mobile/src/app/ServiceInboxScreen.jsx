@@ -9,6 +9,7 @@ import { getRealtimeSocket, realtimeEvents } from "../services/realtime";
 import { getServiceConversations } from "../services/service-chats.api";
 import { useAuthStore } from "../stores/useAuthStore";
 import { chatMessagePreview } from "../utils/chat-preview";
+import { groupServiceConversations, serviceHistorySummary } from "../utils/service-history";
 import { colors, fonts, radius, spacing, typography } from "../utils/theme";
 
 const statusCopy = {
@@ -26,7 +27,7 @@ export function ServiceInboxScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [pendingCourierRequests, setPendingCourierRequests] = useState([]);
   const customerConversations = useMemo(
-    () => conversations.filter((conversation) => !conversation.isSeller),
+    () => groupServiceConversations(conversations.filter((conversation) => !conversation.isSeller)),
     [conversations],
   );
 
@@ -103,9 +104,9 @@ export function ServiceInboxScreen({ navigation }) {
             >
               <View style={styles.pendingIcon}><Ionicons color={colors.card} name="radio-outline" size={21} /></View>
               <View style={styles.copy}>
-                <Text style={styles.pendingEyebrow}>PROCURANDO MOTOBOY</Text>
+                <Text style={styles.pendingEyebrow}>{request.isDirect ? "CHAMADA DIRETA" : "PROCURANDO MOTOBOY"}</Text>
                 <Text style={styles.title}>Chamada em andamento</Text>
-                <Text numberOfLines={1} style={styles.message}>Toque para acompanhar ou cancelar.</Text>
+                <Text numberOfLines={1} style={styles.message}>{request.isDirect ? `Só para ${request.targetedCourier?.name ?? "este motoboy"}. Toque para acompanhar.` : "Toque para acompanhar ou cancelar."}</Text>
               </View>
               <Ionicons color={colors.primaryDark} name="chevron-forward" size={18} />
             </Pressable>
@@ -113,7 +114,7 @@ export function ServiceInboxScreen({ navigation }) {
           {customerConversations.map((conversation) => (
             <Pressable
               key={conversation.id}
-              onPress={() => navigation.navigate("ServiceConversation", { conversation })}
+              onPress={() => navigation.navigate(conversation.historyGroup ? "ServiceHistory" : "ServiceConversation", { conversation })}
               style={({ pressed }) => [
                 styles.card,
                 conversation.unreadCount > 0 && styles.cardUnread,
@@ -131,7 +132,7 @@ export function ServiceInboxScreen({ navigation }) {
                   {conversation.otherPerson?.name ?? "Prestador"}
                 </Text>
                 <Text numberOfLines={1} style={styles.message}>
-                  {chatMessagePreview(conversation.lastMessage)}
+                  {conversation.historyGroup ? serviceHistorySummary(conversation) : chatMessagePreview(conversation.lastMessage)}
                 </Text>
               </View>
               <View style={styles.end}>
@@ -140,7 +141,7 @@ export function ServiceInboxScreen({ navigation }) {
                     <Text style={styles.badgeText}>{conversation.unreadCount}</Text>
                   </View>
                 ) : null}
-                <Text style={styles.status}>{statusCopy[conversation.status] ?? conversation.status}</Text>
+                <Text style={styles.status}>{conversation.historyGroup ? "Histórico" : statusCopy[conversation.status] ?? conversation.status}</Text>
                 <Ionicons color={colors.textMuted} name="chevron-forward" size={17} />
               </View>
             </Pressable>

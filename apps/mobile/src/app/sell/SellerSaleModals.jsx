@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { AppButton } from "../../components/AppButton";
 import { AppInput } from "../../components/AppInput";
+import { CurrencyInput } from "../../components/CurrencyInput";
 import { colors } from "../../utils/theme";
 import { sellerStyles as styles } from "./seller.styles";
 
@@ -49,14 +50,12 @@ export function SaleModal({ error, form, isSaving, onChange, onClose, onSubmit, 
               placeholder="Ex.: Corte masculino"
               value={form.title}
             />
-            <AppInput
+            <CurrencyInput
               icon="cash-outline"
-              keyboardType="decimal-pad"
               label="Valor"
               onChangeText={(value) =>
                 onChange((current) => ({ ...current, amount: value }))
               }
-              placeholder="Ex.: 49,90"
               value={form.amount}
             />
             <QrExpirationHint />
@@ -216,13 +215,11 @@ export function StoreChargeModal({
               <Ionicons color={colors.primaryDark} name="storefront-outline" size={19} />
               <Text style={styles.documentHintText}>A cobranca sera recebida por {store?.name ?? "sua loja"}.</Text>
             </View>
-            <AppInput
+            <CurrencyInput
               autoFocus
               icon="cash-outline"
-              keyboardType="decimal-pad"
               label="Quanto cobrar?"
               onChangeText={(value) => onChange((current) => ({ ...current, amount: value }))}
-              placeholder="Ex.: 49,90"
               value={form.amount}
             />
             <Pressable

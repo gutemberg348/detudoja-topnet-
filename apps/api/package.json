@@ -56,6 +56,7 @@
     "qrcode": "^1.5.4",
     "rate-limit-redis": "^4.2.0",
     "sharp": "^0.35.4",
+    "shared": "1.0.0",
     "socket.io": "^4.8.3",
     "socket.io-parser": "4.2.7",
     "tesseract.js": "^7.0.0",

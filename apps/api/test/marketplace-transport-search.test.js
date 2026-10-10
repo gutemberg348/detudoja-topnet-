@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { marketplaceRepository } from "../src/modules/marketplace/marketplace.repository.js";
+import { marketplaceSearchRepository } from "../src/modules/marketplace/marketplace-search.repository.js";
 import { buildServiceSearchPatterns, listMarketplaceSuggestions } from "../src/modules/marketplace/marketplace.service.js";
 
 test("moto taxi procura passageiros sem incluir motoboy de entregas", async () => {
@@ -10,7 +11,9 @@ test("moto taxi procura passageiros sem incluir motoboy de entregas", async () =
     querySearchMatches: marketplaceRepository.querySearchMatches,
   };
   let searchedPatterns;
+  const originalCandidates = marketplaceSearchRepository.candidateLabels;
   try {
+    marketplaceSearchRepository.candidateLabels = async () => [];
     marketplaceRepository.getBaseAddress = async () => ({ city: "Patos", state: "PB" });
     marketplaceRepository.querySearchMatches = async (patterns, servicePatterns) => {
       searchedPatterns = { patterns, servicePatterns };
@@ -31,6 +34,7 @@ test("moto taxi procura passageiros sem incluir motoboy de entregas", async () =
     assert.ok(searchedPatterns.servicePatterns.includes("%mototaxi%"));
     assert.equal(searchedPatterns.servicePatterns.includes("%motoboy%"), false);
   } finally {
+    marketplaceSearchRepository.candidateLabels = originalCandidates;
     Object.assign(marketplaceRepository, original);
   }
 });
