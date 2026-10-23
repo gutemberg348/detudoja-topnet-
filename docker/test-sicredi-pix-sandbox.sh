@@ -14,22 +14,24 @@ case "${1:-diagnostico}" in
 esac
 
 cert_dir="${SICREDI_PIX_TEST_CERT_DIR:-/etc/detudoja/certificados}"
-for filename in sicredi-multipag.cer sicredi-multipag.key sicredi-multipag-chain.cer; do
-  if [[ ! -f "$cert_dir/$filename" ]]; then
-    printf 'Arquivo ausente: %s/%s\n' "$cert_dir" "$filename" >&2
+certificate_file="${SICREDI_PIX_TEST_CERT_FILE:-$cert_dir/sicredi-multipag.cer}"
+key_file="${SICREDI_PIX_TEST_KEY_FILE:-$cert_dir/sicredi-multipag.key}"
+chain_file="${SICREDI_PIX_TEST_CHAIN_FILE:-$cert_dir/sicredi-multipag-chain.cer}"
+for filename in "$certificate_file" "$key_file" "$chain_file"; do
+  if [[ ! -f "$filename" ]]; then
+    printf 'Arquivo ausente: %s\n' "$filename" >&2
     exit 1
   fi
 done
-cert_dir="$(realpath -e -- "$cert_dir")"
-env_args=()
-if [[ -f apps/api/.env ]]; then env_args+=(--env-file "$repo_dir/apps/api/.env"); fi
+certificate_file="$(realpath -e -- "$certificate_file")"
+key_file="$(realpath -e -- "$key_file")"
+chain_file="$(realpath -e -- "$chain_file")"
 test_env="${SICREDI_PIX_TEST_ENV_FILE:-/etc/detudoja/sicredi-pix-sandbox.env}"
-if [[ -f "$test_env" ]]; then
-  env_args+=(--env-file "$(realpath -e -- "$test_env")")
-elif [[ -n "${SICREDI_PIX_TEST_ENV_FILE:-}" ]]; then
-  printf 'Arquivo de teste informado nao existe: %s\n' "$test_env" >&2
+if [[ ! -f "$test_env" ]]; then
+  printf 'Crie %s a partir de docker/sicredi-pix-sandbox.env.example e preencha o novo par Pix.\n' "$test_env" >&2
   exit 1
 fi
+test_env="$(realpath -e -- "$test_env")"
 
 api_image="${SICREDI_PIX_TEST_IMAGE:-}"
 if [[ -z "$api_image" ]]; then
@@ -42,11 +44,13 @@ fi
 
 docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
   --user 0:0 --entrypoint node \
-  "${env_args[@]}" \
-  --env SICREDI_PIX_TEST_CERT_PATH=/run/sicredi/sicredi-multipag.cer \
-  --env SICREDI_PIX_TEST_KEY_PATH=/run/sicredi/sicredi-multipag.key \
-  --env SICREDI_PIX_TEST_CHAIN_PATH=/run/sicredi/sicredi-multipag-chain.cer \
-  --mount "type=bind,source=$cert_dir,target=/run/sicredi,readonly" \
+  --env-file "$test_env" \
+  --env SICREDI_PIX_TEST_CERT_PATH=/run/sicredi/client.cer \
+  --env SICREDI_PIX_TEST_KEY_PATH=/run/sicredi/client.key \
+  --env SICREDI_PIX_TEST_CHAIN_PATH=/run/sicredi/chain.cer \
+  --mount "type=bind,source=$certificate_file,target=/run/sicredi/client.cer,readonly" \
+  --mount "type=bind,source=$key_file,target=/run/sicredi/client.key,readonly" \
+  --mount "type=bind,source=$chain_file,target=/run/sicredi/chain.cer,readonly" \
   --mount "type=bind,source=$repo_dir/apps/api/scripts/sicredi-pix-sandbox.js,target=/app/apps/api/scripts/sicredi-pix-sandbox.js,readonly" \
   --mount "type=bind,source=$repo_dir/apps/api/src/modules/payments/sicredi,target=/app/apps/api/src/modules/payments/sicredi,readonly" \
   --mount "type=bind,source=$repo_dir/apps/api/src/utils/errors.js,target=/app/apps/api/src/utils/errors.js,readonly" \

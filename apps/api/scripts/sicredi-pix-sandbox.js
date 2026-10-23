@@ -3,7 +3,9 @@ import { pathToFileURL } from "node:url";
 import { createSicrediOAuthClient } from "../src/modules/payments/sicredi/sicredi.oauth.js";
 import { readSicrediMtls, sicrediErrorDiagnostics } from "../src/modules/payments/sicredi/sicredi.transport.js";
 
-// Published in Sicredi's 2022 integration guide, pp. 8-9. Deliberately fixed:
+// Sandbox URLs published in Sicredi's 2022 guide, pp. 8-9. The supplied
+// v1.9.5 guide (19/12/2025), pp. 8-13, confirms mTLS + Basic OAuth and /api/v2.
+// It does not provide a replacement sandbox base URL. Deliberately fixed:
 // this standalone probe must never follow the application's production URLs.
 export const SANDBOX = Object.freeze({
   apiUrl: "https://api-pix-h.sicredi.com.br/api/v2",
@@ -11,25 +13,24 @@ export const SANDBOX = Object.freeze({
 });
 
 export function testConfig(source = process.env) {
-  const prefix = ["SICREDI_PIX_TEST", "SICREDI_PIX", "SICREDI_MULTIPAG"]
-    .find((name) => source[`${name}_CLIENT_ID`]?.trim() || source[`${name}_CLIENT_SECRET`]?.trim());
-  if (!prefix || !source[`${prefix}_CLIENT_ID`]?.trim() || !source[`${prefix}_CLIENT_SECRET`]?.trim()) {
-    throw new Error("Configure um par completo CLIENT_ID/CLIENT_SECRET (SICREDI_PIX_TEST, SICREDI_PIX ou SICREDI_MULTIPAG). Pares nao sao misturados.");
+  const prefix = "SICREDI_PIX_TEST";
+  if (source.SICREDI_PIX_TEST_ENV?.trim() !== "sandbox") {
+    throw new Error("Defina SICREDI_PIX_TEST_ENV=sandbox no arquivo separado de teste. Credenciais de producao nao devem ser usadas aqui.");
   }
-  if (prefix !== "SICREDI_PIX_TEST" && source[`${prefix}_ENV`] && source[`${prefix}_ENV`] !== "sandbox") {
-    throw new Error(`As credenciais ${prefix} estao marcadas fora do sandbox. Use um par de teste separado.`);
+  if (!source[`${prefix}_CLIENT_ID`]?.trim() || !source[`${prefix}_CLIENT_SECRET`]?.trim()) {
+    throw new Error("Preencha SICREDI_PIX_TEST_CLIENT_ID e SICREDI_PIX_TEST_CLIENT_SECRET com o novo par da API Pix de homologacao. Credenciais Multipag e da aplicacao nao sao reutilizadas.");
   }
   return {
     ...SANDBOX,
     credentialSource: prefix,
     clientId: source[`${prefix}_CLIENT_ID`].trim(),
     clientSecret: source[`${prefix}_CLIENT_SECRET`].trim(),
-    pixKey: (source.SICREDI_PIX_TEST_RECEIVING_KEY || source.SICREDI_PIX_RECEIVING_KEY || "").trim(),
+    pixKey: (source.SICREDI_PIX_TEST_RECEIVING_KEY || "").trim(),
     mtls: {
       certPath: source.SICREDI_PIX_TEST_CERT_PATH,
       keyPath: source.SICREDI_PIX_TEST_KEY_PATH,
       chainPath: source.SICREDI_PIX_TEST_CHAIN_PATH,
-      passphrase: source.SICREDI_PIX_TEST_CERT_PASSPHRASE || source.SICREDI_PIX_CERT_PASSPHRASE || source.SICREDI_MULTIPAG_CERT_PASSPHRASE,
+      passphrase: source.SICREDI_PIX_TEST_CERT_PASSPHRASE,
     },
   };
 }
@@ -38,11 +39,14 @@ export function parseCommand(args) {
   const [mode = "diagnostico", value] = args;
   if (!new Set(["diagnostico", "autenticar", "criar", "consultar"]).has(mode)
     || args.length > 2 || (mode === "diagnostico" && value !== undefined)) {
-    throw new Error("Uso: diagnostico | autenticar [cob.read|cob.write] | criar [TXID] | consultar TXID");
+    throw new Error('Uso: diagnostico | autenticar ["cob.read cob.write pix.read"] | criar [TXID] | consultar TXID');
   }
   if (mode === "autenticar") {
-    if (value && !["cob.read", "cob.write"].includes(value)) throw new Error("Escopo permitido: cob.read ou cob.write.");
-    return { mode, scope: value || "cob.write" };
+    const scopes = [...new Set((value ?? "cob.write").trim().split(/[+\s]+/))];
+    if (!scopes.length || scopes.some((scope) => !["cob.read", "cob.write", "pix.read", "webhook.read"].includes(scope))) {
+      throw new Error("Escopos permitidos: cob.read, cob.write, pix.read e webhook.read. Separe por espaco dentro de aspas.");
+    }
+    return { mode, scope: scopes.join(" ") };
   }
   if (mode === "criar" || mode === "consultar") {
     const txid = value || (mode === "criar" ? `DTJTEST${randomBytes(12).toString("hex")}` : "");
@@ -121,6 +125,11 @@ export async function runSandbox(command, config, {
       txid: charge.txid, status: charge.status, valor: charge.valor?.original,
       resultado: stage === "criacao" ? "criada" : "consultada (nenhum PUT realizado)",
     });
+    log("[pix-sandbox] Recebimentos informados nesta cobranca", {
+      quantidade: Array.isArray(charge.pix) ? charge.pix.length : 0,
+      recebimentos: Array.isArray(charge.pix) ? charge.pix.map((pix) => ({ valor: pix.valor, horario: pix.horario })) : [],
+    });
+    log("[pix-sandbox] Teste isolado: nenhum saldo, cashback ou pedido do aplicativo foi alterado.");
     if (typeof charge.pixCopiaECola === "string" && charge.pixCopiaECola.length) {
       log("[pix-sandbox] Pix copia e cola retornado pelo banco:", charge.pixCopiaECola);
     } else {

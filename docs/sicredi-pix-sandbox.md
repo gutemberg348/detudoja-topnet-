@@ -1,6 +1,7 @@
 # Teste isolado de cobranca Pix Sicredi na VPS
 
-Atualizado em 2026-10-02. Scripts prontos e testes locais aprovados; autenticacao
+Atualizado em 2026-10-23, revisado com o Guia Tecnico Integracoes API Pix Sicredi
+v1.9.5 (19/12/2025), enviado pelo usuario. Scripts prontos; autenticacao
 e criacao no Sicredi ainda dependem da execucao na VPS. Nenhuma chamada bancaria
 foi realizada no desenvolvimento destes scripts.
 
@@ -23,6 +24,19 @@ produtivo. Por ser uma referencia anterior, a disponibilidade atual e a
 compatibilidade das credenciais serao verificadas pela resposta do banco na VPS.
 O teste ignora as URLs e flags de gateway da aplicacao e nao segue redirects.
 
+O guia recebido, de 51 paginas, confirma Basic Auth + client_credentials + scopes
+separados por espaco (p. 11), mTLS (p. 9), /api/v2 (pp. 10/12), e copia e cola
+retornado pelo banco (p. 13). A p. 12 possui um exemplo isolado com /api/v3,
+divergente da base /api/v2 declarada: mantemos /api/v2, sem troca automatica.
+A p. 11 chama expires_in de milissegundos, mas a p. 12 explica 3600 segundos;
+o cliente usa segundos, conforme OAuth e o exemplo. O guia novo nao traz outra
+base de homologacao; os hosts acima continuam baseados no guia oficial anterior.
+
+O usuario confirmou que o novo par e de homologacao. Nao se reaproveitam mais
+credenciais Multipag ou variaveis de pagamento da aplicacao. O certificado da
+VPS pode ser usado se o novo par Pix estiver vinculado a ele no Sicredi; conferir
+o par localmente nao comprova esse vinculo (ver thumbprint, p. 42 do guia).
+
 ## Arquivos para subir
 
 - `docker/test-sicredi-pix-sandbox.sh`
@@ -35,12 +49,39 @@ Eles sao montados do checkout, evitando depender da versao dentro da imagem.
 
 ## Primeiro teste: certificado e autenticacao
 
+Apos commit/push destes arquivos, atualize o checkout da VPS e prepare o arquivo
+privado. Nao e necessario rebuild da API nem migracao:
+
 ```bash
 cd /var/www/brasil/detudoja-topnet-
+git pull --ff-only
+test -f /etc/detudoja/sicredi-pix-sandbox.env || \
+  install -m 600 docker/sicredi-pix-sandbox.env.example /etc/detudoja/sicredi-pix-sandbox.env
+chmod 600 /etc/detudoja/sicredi-pix-sandbox.env
+nano /etc/detudoja/sicredi-pix-sandbox.env
+```
 
+Preencha assim (valores sem aspas, sem `export` ou comentarios depois do valor):
+
+```dotenv
+SICREDI_PIX_TEST_ENV=sandbox
+SICREDI_PIX_TEST_CLIENT_ID=COLE_O_NOVO_CLIENT_ID_PIX
+SICREDI_PIX_TEST_CLIENT_SECRET=COLE_O_NOVO_CLIENT_SECRET_PIX
+SICREDI_PIX_TEST_RECEIVING_KEY=
+```
+
+Se o arquivo ja existia, adicione ENV=sandbox e substitua o par antigo. A chave
+recebedora pode ficar vazia para diagnosticar e autenticar. Para criar a cobranca,
+use a chave de homologacao fornecida pelo Sicredi (p. 8); nao invente uma chave.
+Se a chave privada tiver senha, preencha SICREDI_PIX_TEST_CERT_PASSPHRASE.
+
+```bash
 bash docker/test-sicredi-pix-sandbox.sh diagnostico
 bash docker/test-sicredi-pix-sandbox.sh autenticar cob.write
 bash docker/test-sicredi-pix-sandbox.sh autenticar cob.read
+bash docker/test-sicredi-pix-sandbox.sh autenticar pix.read
+# Tambem aceita o conjunto de escopos mostrado no guia:
+bash docker/test-sicredi-pix-sandbox.sh autenticar "cob.read cob.write pix.read"
 ```
 
 Os certificados sao lidos automaticamente de:
@@ -57,16 +98,10 @@ nenhum token, client ID, secret ou conteudo da chave privada e impresso.
 Sucesso informa o escopo solicitado, mas a permissao efetiva para criar uma
 cobranca so fica comprovada com a operacao posterior.
 
-O par de credenciais e escolhido nesta ordem:
-
-1. `SICREDI_PIX_TEST_CLIENT_ID` / `SICREDI_PIX_TEST_CLIENT_SECRET`.
-2. `SICREDI_PIX_CLIENT_ID` / `SICREDI_PIX_CLIENT_SECRET`.
-3. `SICREDI_MULTIPAG_CLIENT_ID` / `SICREDI_MULTIPAG_CLIENT_SECRET`.
-
-O terceiro caso permite testar o par que ja esta no servidor. Isso nao presume
-que o banco aceite credenciais Multipag para a API Pix. O log mostra somente
-qual prefixo foi usado; um par incompleto causa erro, sem misturar ID e secret
-de origens distintas. Credenciais marcadas como `production` sao recusadas.
+O wrapper carrega somente o arquivo separado de teste; nao carrega apps/api/.env.
+SICREDI_PIX_TEST_ENV=sandbox e o par SICREDI_PIX_TEST_CLIENT_* sao obrigatorios.
+Os endpoints sao fixos de homologacao, mesmo se houver URLs de producao no arquivo.
+Nenhum destes testes cadastra webhook, faz devolucao ou envia Pix para terceiros.
 
 ## Criar uma cobranca de R$ 1,00
 
@@ -80,10 +115,8 @@ test -f /etc/detudoja/sicredi-pix-sandbox.env || \
 nano /etc/detudoja/sicredi-pix-sandbox.env
 ```
 
-Preencha `SICREDI_PIX_TEST_RECEIVING_KEY`. Se quiser usar outro par de teste,
-preencha tambem as duas variaveis `SICREDI_PIX_TEST_CLIENT_*` desse arquivo.
-O arquivo separado e carregado automaticamente por ultimo, apenas no container
-temporario. Se ja houver `SICREDI_PIX_RECEIVING_KEY` no `.env`, ela pode ser usada.
+Preencha `SICREDI_PIX_TEST_RECEIVING_KEY` no mesmo arquivo preparado acima.
+O arquivo separado e carregado apenas no container temporario.
 
 ```bash
 bash docker/test-sicredi-pix-sandbox.sh criar
@@ -96,6 +129,9 @@ O valor e fixo em R$ 1,00, com expiracao de uma hora. Uma resposta valida mostra
 TXID, status, valor e `pixCopiaECola` quando retornado pelo banco. A imagem QR
 nao e renderizada pelo terminal. Se o banco nao retornar copia e cola, isso e
 informado explicitamente.
+Na consulta, tambem mostra quantidade, valores e horarios de recebimentos presentes
+na cobranca, sem dados do pagador. ATIVA nao significa paga. Uma resposta CONCLUIDA
+e os recebimentos devem ser analisados; nada e creditado na carteira do aplicativo.
 
 ## Consultar o resultado
 
@@ -131,11 +167,23 @@ credenciais indicada no log, sem copiar segredos do arquivo de ambiente.
 Variaveis opcionais de shell: `SICREDI_PIX_TEST_ENV_FILE` (arquivo separado),
 `SICREDI_PIX_TEST_CERT_DIR` (diretorio dos tres certificados com os mesmos nomes)
 e `SICREDI_PIX_TEST_IMAGE` (imagem Docker local da API).
+Para certificados com outros nomes ou pastas, defina os caminhos completos no shell:
+
+```bash
+export SICREDI_PIX_TEST_CERT_FILE=/etc/detudoja/certificados/seu-certificado.cer
+export SICREDI_PIX_TEST_KEY_FILE=/etc/detudoja/certificados/sua-chave.key
+export SICREDI_PIX_TEST_CHAIN_FILE=/etc/detudoja/certificados/sua-cadeia.cer
+```
+
+O wrapper monta apenas esses tres arquivos, sempre somente leitura.
 
 ```bash
 node --test apps/api/test/sicredi-pix-sandbox.test.js apps/api/test/sicredi-clients.test.js
 bash -n docker/test-sicredi-pix-sandbox.sh
 ```
 
-Validacao local: 20/20 testes aprovados e sintaxe Bash valida. Os testes usam
+Validacao em 23/10/2026: 22/22 testes aprovados, sintaxe Bash e diff conferidos.
+Os testes locais cobrem isolamento de credenciais/ambiente, OAuth com Basic e
+formulario, scopes combinados, consulta antes da criacao, erro incerto sem retry,
+redacao de segredos e resumo dos recebimentos. Os testes usam
 respostas simuladas e nao comprovam a liberacao das credenciais no Sicredi.
