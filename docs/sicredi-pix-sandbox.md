@@ -164,6 +164,60 @@ credenciais indicada no log, sem copiar segredos do arquivo de ambiente.
 
 ## Opcoes do wrapper e validacao local
 
+### Comparar o erro 500 com curl independente (26/10/2026)
+
+Atualizacao de 27/10: o mesmo script tambem permite autenticacao em producao
+com selecao explicita e arquivo separado; veja [teste de producao](sicredi-pix-production-test.md).
+Os comandos abaixo continuam em sandbox por padrao.
+
+O novo `docker/test-sicredi-pix-curl.js` executa somente POST /oauth/token na
+homologacao usando Node.js 20+ e curl instalados na VPS. Nao depende de
+Docker nem do transporte HTTP da API, nao cria cobranca e nao modifica a API. Le o mesmo arquivo
+`/etc/detudoja/sicredi-pix-sandbox.env` e os mesmos tres certificados; aceita os
+mesmos overrides de caminho do wrapper. Nao importa `apps/api/.env`.
+
+```bash
+node docker/test-sicredi-pix-curl.js
+```
+
+Se persistir a falha, compare uma opcao por vez:
+
+```bash
+node docker/test-sicredi-pix-curl.js --ipv4
+node docker/test-sicredi-pix-curl.js --tls12
+```
+
+O padrao usa cob.read; `--scope cob.write` e `--scope pix.read` sao opcionais.
+O teste valida correspondencia/validade local, informa fingerprint e horario UTC,
+e mostra HTTP real, IP remoto, codigo curl, verificacao TLS e referencia do gateway.
+Credenciais sao transmitidas ao curl via stdin, sem shell ou argumentos sensiveis;
+token e resposta bruta nao sao impressos. Apenas o certificado publico com cadeia
+e escrito numa pasta temporaria privada, removida ao terminar. Verificacao TLS
+permanece ligada; nao segue redirects, nao repete POST, ignora curlrc e proxy
+ambiental para comparar uma conexao direta como a do cliente Node.
+
+- HTTP 200 e tokenObtido=true: curl autenticou; comparar resultado contemporaneo
+  do script Node antes de atribuir a causa ao cliente (a indisponibilidade pode ter passado).
+- HTTP 500 nos dois clientes: falha reproduzida fora da aplicacao; nao comprova
+  vinculo das credenciais, nem permite descobrir sozinho a causa interna do banco.
+- So IPv4/TLS 1.2 funciona: evidencia para investigar rota/negociacao, nao trocar
+  endpoint ou desabilitar SSL. Repetir a comparacao antes de mudar a integracao.
+- HTTP 400/401/403: conferir ambiente, escopo e vinculo certificado/credenciais.
+- HTTP 000: consultar curlExit/falhaTransporte (DNS, timeout, TLS etc.).
+
+O PDF v1.9.5, p. 45, recomenda Postman como verificacao independente de um 500.
+Este curl oferece outra comparacao na mesma VPS, onde os certificados ja estao;
+nao substitui a collection oficial se o suporte a exigir. Referencia das opcoes:
+[manual do curl](https://curl.se/docs/manpage.html).
+
+Teste local sem acesso ao banco:
+
+```bash
+node --test apps/api/test/sicredi-pix-curl.test.js
+```
+
+### Caminhos opcionais
+
 Variaveis opcionais de shell: `SICREDI_PIX_TEST_ENV_FILE` (arquivo separado),
 `SICREDI_PIX_TEST_CERT_DIR` (diretorio dos tres certificados com os mesmos nomes)
 e `SICREDI_PIX_TEST_IMAGE` (imagem Docker local da API).
