@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseProductionCommand, PRODUCTION, productionConfig, runProduction } from '../scripts/sicredi-pix-production.js';
+import { createSicrediOAuthClient } from '../src/modules/payments/sicredi/sicredi.oauth.js';
 
 const txid = 'DTJPROD123456789012345678901234';
 const charge = { txid, status: 'ATIVA', valor: { original: '1.00' }, pixCopiaECola: 'bank-provided-brcode' };
@@ -68,11 +69,38 @@ test('absent charge creates exactly one real one-real charge with fixed amount a
   assert.equal(m.calls[0].scope, 'cob.read');
   assert.equal(m.calls[1].scope, 'cob.write');
   assert.equal(m.calls[1].path, `/cob/${txid}`);
-  assert.deepEqual(m.calls[1].body.valor, { original: '1.00', modalidadeAlteracao: '0' });
+  assert.deepEqual(m.calls[1].body.valor, { original: '1.00', modalidadeAlteracao: 0 });
   assert.equal(m.calls[1].body.calendario.expiracao, 3600);
   assert.equal(m.calls[1].body.chave, config.pixKey);
   assert.match(JSON.stringify(m.logs), /bank-provided-brcode/);
   assert.doesNotMatch(JSON.stringify(m.logs), /private-secret|private-receiving-key|test-client/);
+  assert.equal(m.destroyed, 1);
+});
+
+test('production HTTP payload respects Pix numeric types after OAuth serialization', async () => {
+  const calls = [];
+  const m = mock();
+  await runProduction({ mode: 'criar', txid }, config, {
+    ...m.dependencies,
+    oauthFactory: (settings, dependencies) => createSicrediOAuthClient(settings, {
+      ...dependencies,
+      httpRequest: async (url, options) => {
+        calls.push(options.method);
+        if (url.pathname === '/oauth/token') return { statusCode: 200, data: { access_token: 'fake-token', expires_in: 300 } };
+        assert.equal(url.pathname, `/api/v2/cob/${txid}`);
+        if (options.method === 'GET') return { statusCode: 404, data: { title: 'Nao encontrada' } };
+        assert.equal(options.method, 'PUT');
+        assert.equal(options.headers['Content-Type'], 'application/json');
+        const body = JSON.parse(options.body);
+        assert.equal(body.valor.original, '1.00');
+        assert.equal(body.valor.modalidadeAlteracao, 0);
+        assert.equal(body.calendario.expiracao, 3600);
+        assert.equal(body.chave, config.pixKey);
+        return { statusCode: 201, data: charge };
+      },
+    }),
+  });
+  assert.deepEqual(calls, ['POST', 'GET', 'POST', 'PUT']);
   assert.equal(m.destroyed, 1);
 });
 

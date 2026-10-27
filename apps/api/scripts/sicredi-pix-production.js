@@ -72,7 +72,7 @@ export async function runProduction(command, config, { oauthFactory = createSicr
       log('[pix-producao] Criando cobranca REAL de R$ 1,00, com expiracao de 1 hora.');
       charge = await scoped('cob.write').request(`/cob/${txid}`, {
         method: 'PUT', body: {
-          calendario: { expiracao: 3600 }, valor: { original: '1.00', modalidadeAlteracao: '0' },
+          calendario: { expiracao: 3600 }, valor: { original: '1.00', modalidadeAlteracao: 0 },
           chave: config.pixKey, solicitacaoPagador: 'Teste de integracao Pix - R$ 1,00',
         },
       });

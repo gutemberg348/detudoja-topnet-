@@ -33,7 +33,7 @@ test("Pix recebimento monta cobranca com valor travado e txid estavel", async ()
   assert.equal(mock.calls[0].options.method, "PUT");
   assert.equal(mock.calls[0].path, `/cob/${id}`);
   assert.deepEqual(mock.calls[0].options.body.valor, {
-    modalidadeAlteracao: "0",
+    modalidadeAlteracao: 0,
     original: "118.69",
   });
   await client.getCharge(id);
@@ -141,6 +141,26 @@ test("diagnostico aceita arrays de mensagens, validacoes aninhadas e campos em p
   for (const value of ["dataPagamento", "Data anterior", "Campo obrigatorio", "Formato invalido", "Pagamento invalido"]) assert.ok(text.includes(value));
   assert.equal(text.includes("sensivel"), false);
   assert.match(JSON.stringify(sicrediErrorDiagnostics(["Erro de validacao"])), /Erro de validacao/);
+});
+
+test("violacoes Pix preservam propriedade e razao sem expor valores sensiveis", () => {
+  const response = decodeSicrediResponse(JSON.stringify({
+    title: "Requisicao Invalida",
+    violacoes: [{
+      propriedade: "valor.modalidadeAlteracao",
+      razao: "Deve ser inteiro; segredoXYZ teste@example.com Bearer abc.123.sig 11111111000111",
+      rejectedValue: "PRIVATE-VALUE",
+    }],
+    request: { razao: "PRIVATE-REQUEST" },
+  }), 400, "application/json");
+  assert.throws(() => assertSicrediSuccess(response, "a operacao", { sensitiveValues: ["segredoXYZ"] }), (error) => {
+    const text = JSON.stringify(error.providerDiagnostics);
+    assert.match(text, /valor\.modalidadeAlteracao/);
+    assert.match(text, /Deve ser inteiro/);
+    for (const value of ["segredoXYZ", "teste@example.com", "abc.123.sig", "11111111000111", "PRIVATE-VALUE", "PRIVATE-REQUEST"]) assert.equal(text.includes(value), false, value);
+    assert.equal(error.providerStatusCode, 400);
+    return true;
+  });
 });
 
 test("resposta 400 texto ou HTML conserva diagnostico sanitizado e metadados", () => {

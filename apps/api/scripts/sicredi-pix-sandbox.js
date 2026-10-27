@@ -114,7 +114,7 @@ export async function runSandbox(command, config, {
           calendario: { expiracao: 3600 },
           chave: config.pixKey,
           solicitacaoPagador: "Teste isolado Pix sandbox",
-          valor: { original: "1.00", modalidadeAlteracao: "0" },
+          valor: { original: "1.00", modalidadeAlteracao: 0 },
         },
       });
     }

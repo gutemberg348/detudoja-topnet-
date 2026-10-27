@@ -83,7 +83,7 @@ test("creation uses one PUT for absent TXID and displays bank-provided copia e c
   assert.deepEqual(m.calls.map((c) => c.method), ["GET", "PUT"]);
   assert.equal(m.calls[1].path, `/cob/${txid}`);
   assert.equal(m.calls[1].settings.scope, "cob.write");
-  assert.deepEqual(m.calls[1].body.valor, { original: "1.00", modalidadeAlteracao: "0" });
+  assert.deepEqual(m.calls[1].body.valor, { original: "1.00", modalidadeAlteracao: 0 });
   assert.equal(m.calls[1].body.calendario.expiracao, 3600);
   assert.equal(m.calls[1].body.chave, config.pixKey);
   assert.match(JSON.stringify(m.logs), /sandbox-brcode/);

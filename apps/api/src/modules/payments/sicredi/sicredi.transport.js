@@ -123,7 +123,7 @@ export function sicrediErrorDiagnostics(data, sensitiveValues = []) {
       .replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 400);
   }
   const entries = [];
-  const scalarFields = new Set(["response", "code", "codigo", "error", "message", "mensagem", "error_description", "detail", "title", "description", "descricao", "defaultMessage", "field", "campo", "reason", "motivo", "errorMessage", "mensagemErro", "codigoErro", "mensagens", "messages", "erros", "errors", "details", "errorCode"]);
+  const scalarFields = new Set(["response", "code", "codigo", "error", "message", "mensagem", "error_description", "detail", "title", "description", "descricao", "defaultMessage", "field", "campo", "reason", "motivo", "razao", "propriedade", "errorMessage", "mensagemErro", "codigoErro", "mensagens", "messages", "erros", "errors", "details", "errorCode"]);
   function visit(node, depth = 0, field = "response") {
     if (node == null || depth > 6 || entries.length >= 10) return;
     if (typeof node === "string" || typeof node === "number") {

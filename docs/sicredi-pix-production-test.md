@@ -105,3 +105,14 @@ O script usa os modulos Node do checkout, sem dotenv, curl, instalacao npm,
 Docker, rebuild ou acesso a banco. O teste de autenticacao curl continua disponivel
 para comparacao independente. Certificado, validade e chave sao conferidos antes
 das chamadas. TLS permanece verificado e nenhum redirect e seguido.
+
+## Diagnostico de HTTP 400 na criacao
+
+O campo `valor.modalidadeAlteracao` exige o inteiro `0`, enquanto `valor.original`
+continua como texto decimal (`"1.00"`), conforme o schema CobValor da
+[API Pix do Banco Central](https://github.com/bacen/pix-api/blob/master/openapi.yaml).
+Os scripts de teste e o cliente Pix foram corrigidos para esse tipo. O diagnostico
+tambem exibe `violacoes[].propriedade` e `violacoes[].razao`, com dados sensiveis
+ocultados, para identificar outros campos eventualmente rejeitados pelo banco.
+Depois de atualizar o checkout, repita `criar MESMO_TXID`: a consulta previa evita
+sobrescrever uma cobranca existente. A correcao local precisa ser validada na VPS.

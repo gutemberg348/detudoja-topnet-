@@ -51,7 +51,7 @@ export function createSicrediPixClient(config, { oauthFactory = createSicrediOAu
           calendario: { expiracao: expiration },
           chave: key,
           ...(description ? { solicitacaoPagador: String(description).slice(0, 140) } : {}),
-          valor: { modalidadeAlteracao: "0", original: money(amountCents) },
+          valor: { modalidadeAlteracao: 0, original: money(amountCents) },
         },
         method: "PUT",
       });
