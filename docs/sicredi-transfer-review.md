@@ -10,8 +10,23 @@ cobranca da API Pix nao comprova permissao de envio pelo Multipag.
 O guia Multipag V15 fornecido pelo Sicredi, secoes 6.4.1 e 6.4.4 (pp. 34-47),
 documenta POST /v1/pagamentos/pix/chave e consulta pelo mesmo idTransacao,
 com escopos multipag.pix.pagar/consultar. O payload do cliente corresponde aos
-campos apresentados no guia. Recebimento/consulta Pix e saida Multipag usam
-credenciais separadas. Devolucao de Pix recebido nao substitui saque/repasse.
+campos apresentados no guia. Recebimento Pix e saida Multipag exigem autorizacao
+nos respectivos produtos. Nao presumir que o par OAuth e diferente ou que pode
+ser reutilizado sem testar. Devolucao de Pix recebido nao substitui saque/repasse.
+
+Para verificar se o MESMO par da API Pix de producao tambem autentica no Multipag,
+sem copiar credenciais, alterar o app ou enviar pagamentos:
+
+```bash
+node docker/test-multipag-with-pix-production.js
+```
+
+Le /etc/detudoja/sicredi-pix-production.env e reutiliza os certificados da VPS.
+Faz somente dois pedidos de token no endpoint Multipag de producao, com os
+escopos consultar e pagar. `tokenObtido: true` e `scopeConfirmado: true` confirmam
+autenticacao com o escopo; nao comprovam envio ou liquidacao. HTTP 401/403 exige
+conferir a autorizacao desse par/certificado com o Sicredi; nao prova sozinho
+qual configuracao esta faltando. Os tokens nao sao exibidos ou gravados.
 
 ## Problemas corrigidos
 
