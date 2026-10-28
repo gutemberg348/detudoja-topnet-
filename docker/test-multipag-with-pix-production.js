@@ -37,7 +37,7 @@ export async function probeMultipagCredentials(config, { httpRequest = sicrediHt
         log('[multipag-prod-probe]', result);
       } catch (error) {
         results.push({ scope, tokenObtido: false });
-        log('[multipag-prod-probe] Falha', { scope, ...errorSummary(error, config) });
+        log('[multipag-prod-probe] Falha', JSON.stringify({ scope, ...errorSummary(error, config) }, null, 2));
       }
     }
     log('[multipag-prod-probe] Tokens descartados sem exibir. Token aceito nao comprova envio/liquidacao. Escopo nao informado na resposta aparece como null.');

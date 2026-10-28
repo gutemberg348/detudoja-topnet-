@@ -31,12 +31,21 @@ test('authentication refusal is sanitized and never retried for the same scope',
   const logs = [];
   const result = await probeMultipagCredentials(config, {
     agentLoader: async () => ({ destroy() {} }), log: (...args) => logs.push(args),
-    httpRequest: async () => { calls++; return { statusCode: 401, data: { error: 'invalid_client', message: 'fixture-id fixture-secret' } }; },
+    httpRequest: async () => { calls++; return { statusCode: 401, data: { error: 'invalid_client', error_description: 'Client authentication failed fixture-id fixture-secret' } }; },
   });
   assert.equal(calls, 2);
   assert.ok(result.every((r) => !r.tokenObtido));
   assert.doesNotMatch(JSON.stringify(logs), /fixture-id|fixture-secret/);
   assert.match(JSON.stringify(logs), /401/);
+  const failures = logs.filter(([label]) => label.endsWith('Falha'));
+  assert.equal(failures.length, 2);
+  for (const [, output] of failures) {
+    assert.equal(typeof output, 'string');
+    const details = JSON.parse(output);
+    assert.equal(details.status, 401);
+    assert.match(output, /Client authentication failed/);
+    assert.doesNotMatch(output, /\[Array\]/);
+  }
 });
 
 test('sandbox is refused before certificates/network and absent scope is not claimed as confirmed', async () => {
