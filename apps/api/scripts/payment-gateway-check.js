@@ -1,12 +1,18 @@
 import "dotenv/config";
-import { gatewayAvailability, selectPaymentGateway, gatewayEnvironment, sicrediEndpointsMatchEnvironment } from "../src/modules/payments/payment-gateway.js";
+import { configuredPaymentGateway, gatewayAvailability, selectPaymentGateway, gatewayEnvironment, sicrediEndpointsMatchEnvironment } from "../src/modules/payments/payment-gateway.js";
 import { sicrediPixConfigFromEnv } from "../src/modules/payments/sicredi/sicredi.pix.client.js";
 import { sicrediMultipagConfigFromEnv } from "../src/modules/payments/sicredi/sicredi.multipag.client.js";
 import { readSicrediMtls } from "../src/modules/payments/sicredi/sicredi.transport.js";
 
-// Read-only local diagnostics. Never prints secrets or invokes any bank API.
+const args = process.argv.slice(2);
+if (args.some((arg) => !["--receive", "--ledger"].includes(arg))) {
+  console.error("Uso: check:gateways [--receive] [--ledger]");
+  process.exit(1);
+}
+// Read-only diagnostics. --ledger also checks the database, never bank APIs.
 console.log("[gateways] Ambiente:", gatewayEnvironment());
-for (const capability of ["receive", "transfer"]) {
+console.log("[gateways] Selecao manual:", configuredPaymentGateway(), "Fallback automatico: desabilitado.");
+for (const capability of args.includes("--receive") ? ["receive"] : ["receive", "transfer"]) {
   const available = gatewayAvailability(capability);
   let selected = "INDISPONIVEL";
   try { selected = selectPaymentGateway(capability); } catch { process.exitCode = 1; }
@@ -44,5 +50,16 @@ for (const capability of ["receive", "transfer"]) {
       process.exitCode = 1;
     }
   }
+}
+if (args.includes("--ledger")) {
+  const { prisma } = await import("../src/config/prisma.js");
+  const { assertSandboxLedgerIsolation } = await import("../src/modules/payments/sandbox-approval.js");
+  try {
+    await assertSandboxLedgerIsolation(prisma);
+    console.log("[gateways] Base conferida: isolamento de simulacoes Sandbox aprovado.");
+  } catch {
+    console.error("[gateways] Base nao liberada. Verifique conexao/migrations e simulacoes Sandbox. Nao inicie producao nesta base enquanto a verificacao falhar.");
+    process.exitCode = 1;
+  } finally { await prisma.$disconnect(); }
 }
 console.log("[gateways] Nao houve autenticacao, cobranca ou transferencia bancaria. Configurado nao significa homologado.");

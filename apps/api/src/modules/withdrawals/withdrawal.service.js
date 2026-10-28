@@ -13,7 +13,7 @@ import {
   withdrawalRepository,
 } from "./withdrawal.repository.js";
 
-import { isPixGatewayEnabled, selectPaymentGateway, gatewayEnvironment } from "../payments/payment-gateway.js";
+import { isPixGatewayEnabled, configuredPaymentGateway, gatewayEnvironment, isStoredTransferGatewayEnabled, assertTransferEnvironment } from "../payments/payment-gateway.js";
 import { createSicrediTransfer, getSicrediTransfer } from "../payments/sicredi/sicredi.transfer.service.js";
 
 const withdrawalInclude = {
@@ -33,7 +33,6 @@ const transferTypeByPixType = {
   TELEFONE: "PHONE",
 };
 
-const finalStatuses = new Set(["PAGO", "RECUSADO", "CANCELADO", "FALHOU"]);
 const withdrawalStatuses = new Set([
   "SOLICITADO",
   "EM_ANALISE",
@@ -189,6 +188,7 @@ function asaasDate(date) {
 }
 
 async function releaseReservedWithdrawal(withdrawalId, {
+  allowedStatuses = ["PROCESSANDO", "EM_RECONCILIACAO"],
   notifyUser = false,
   reason,
   status,
@@ -201,7 +201,7 @@ async function releaseReservedWithdrawal(withdrawalId, {
       where: { id: withdrawalId },
     });
 
-    if (!withdrawal || finalStatuses.has(withdrawal.status)) return null;
+    if (!withdrawal || !allowedStatuses.includes(withdrawal.status)) return null;
 
     const sources = withdrawalWalletSources(withdrawal);
     if (!sources.length) throw new AppError("Origens financeiras do saque nao encontradas", 409);
@@ -424,6 +424,9 @@ export async function requestWithdrawal(userId, data) {
   let outcome;
   try {
     outcome = await withdrawalRepository.transaction(async (database) => {
+      // Serialize this user's reservations, including requests from different
+      // wallets, so concurrent requests cannot both pass the daily limit.
+      await database.$queryRaw`SELECT id FROM usuarios WHERE id = ${userId} FOR UPDATE`;
       const repository = createWithdrawalRepository(database);
       const duplicate = await repository.findWithdrawal({
         include: withdrawalInclude,
@@ -508,7 +511,7 @@ export async function requestWithdrawal(userId, data) {
         data: {
           carteira_id: sources[0].wallet.id,
           chave_idempotencia: data.idempotencyKey,
-          gateway: isPixGatewayEnabled("transfer") ? selectPaymentGateway("transfer") : "ASAAS",
+          gateway: configuredPaymentGateway(),
           gateway_ambiente: gatewayEnvironment(),
           chave_pix_destino: account.chave_pix,
           conta_bancaria_id: account.id,
@@ -585,6 +588,7 @@ export async function cancelWithdrawal(userId, withdrawalId) {
     throw new AppError("Este saque nao pode mais ser cancelado pelo aplicativo", 409);
   }
   const released = await releaseReservedWithdrawal(withdrawal.id, {
+    allowedStatuses: ["SOLICITADO", "EM_ANALISE"],
     reason: "Cancelado pelo usuario antes do envio.",
     status: "CANCELADO",
   });
@@ -605,8 +609,10 @@ export async function listAdminWithdrawals(query = {}) {
 }
 
 export async function approveWithdrawal(adminId, withdrawalId) {
-  if (!isPixGatewayEnabled("transfer")) throw new AppError("Gateway Pix indisponivel para enviar o saque", 503);
   const id = parseWithdrawalId(withdrawalId);
+  const selected = await withdrawalRepository.findWithdrawalUnique({ where: { id } });
+  if (!selected) throw new AppError("Saque nao encontrado", 404);
+  if (!isStoredTransferGatewayEnabled(selected)) throw new AppError("Gateway do saque indisponivel para envio", 503);
   const claimed = await withdrawalRepository.updateWithdrawals({
     data: { aprovado_em: new Date(), aprovado_por_admin_id: adminId, status: "APROVADO" },
     where: { id, status: { in: ["SOLICITADO", "EM_ANALISE"] } },
@@ -625,6 +631,7 @@ export async function rejectWithdrawal(adminId, withdrawalId, reason) {
   }
 
   const released = await releaseReservedWithdrawal(id, {
+    allowedStatuses: ["SOLICITADO", "EM_ANALISE", "APROVADO"],
     reason,
     status: "RECUSADO",
     updateData: { recusado_por_admin_id: adminId },
@@ -635,8 +642,9 @@ export async function rejectWithdrawal(adminId, withdrawalId, reason) {
   return { withdrawal: serializeWithdrawal(complete) };
 }
 
-export async function submitApprovedWithdrawal(withdrawalId, { sendTransfer = createSicrediTransfer } = {}) {
-  if (!isPixGatewayEnabled("transfer")) return null;
+export async function submitApprovedWithdrawal(withdrawalId, { sendTransfer = createSicrediTransfer, gatewayEnabled = isStoredTransferGatewayEnabled } = {}) {
+  const selected = await withdrawalRepository.findWithdrawalUnique({ where: { id: withdrawalId } });
+  if (!selected || selected.status !== "APROVADO" || !gatewayEnabled(selected)) return null;
   const claimed = await withdrawalRepository.updateWithdrawals({
     data: { status: "PROCESSANDO", tentativas: { increment: 1 } },
     where: { id: withdrawalId, status: "APROVADO" },
@@ -718,6 +726,7 @@ export async function reconcileWithdrawal(withdrawalId, { lookupTransfer = getSi
     where: { id: withdrawal.id },
   });
   try {
+    assertTransferEnvironment(withdrawal);
     const transfer = withdrawal.gateway === "SICREDI" ? await lookupTransfer(withdrawal) : withdrawal.gateway_saque_id
       ? await getAsaasTransfer(withdrawal.gateway_saque_id)
       : await findUnknownTransfer(withdrawal);

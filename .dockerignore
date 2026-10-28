@@ -13,5 +13,6 @@ storage/uploads/*
 !storage/uploads/curated/**
 .env
 **/.env
+**/.env.sicredi-*
 npm-debug.log*
 txt.txt

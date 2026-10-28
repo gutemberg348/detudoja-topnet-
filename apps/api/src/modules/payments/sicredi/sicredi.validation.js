@@ -1,4 +1,5 @@
 import { AppError } from "../../../utils/errors.js";
+import { sicrediPixKeyForTransfer } from "./sicredi.multipag.client.js";
 
 export function sicrediCents(value) {
   const text = String(value ?? "");
@@ -30,7 +31,13 @@ export function normalizeSicrediTransfer(record, response) {
   const amount = record.valor_liquido_centavos ?? record.valor_centavos;
   if (response?.idTransacao !== record.referencia_externa
     || sicrediCents(response?.valorPagamento) !== Number(amount)
-    || (response.documentoBeneficiario && response.documentoBeneficiario.replace(/\D/g, "") !== record.documento_titular.replace(/\D/g, ""))) mismatch();
+    || (response.documentoBeneficiario != null && String(response.documentoBeneficiario).replace(/\D/g, "") !== String(record.documento_titular ?? "").replace(/\D/g, ""))) mismatch();
+  if (response.chavePix != null) {
+    try {
+      const type = record.tipo_chave_pix ?? record.tipo_chave;
+      if (sicrediPixKeyForTransfer(type, response.chavePix) !== sicrediPixKeyForTransfer(type, record.chave_pix_destino)) mismatch();
+    } catch { mismatch(); }
+  }
   return {
     id: record.referencia_externa,
     externalReference: record.referencia_externa,

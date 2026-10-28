@@ -15,7 +15,7 @@ import {
   payoutRepository,
 } from "./payout.repository.js";
 
-import { isPixGatewayEnabled, selectPaymentGateway, gatewayEnvironment } from "../payments/payment-gateway.js";
+import { configuredPaymentGateway, gatewayEnvironment, isStoredTransferGatewayEnabled, assertTransferEnvironment } from "../payments/payment-gateway.js";
 import { createSicrediTransfer, getSicrediTransfer } from "../payments/sicredi/sicredi.transfer.service.js";
 
 const payoutInclude = {
@@ -334,12 +334,21 @@ async function confirmPayout(payoutId, transfer = {}) {
   return confirmed;
 }
 
-export async function submitPendingPayout(payoutId, { sendTransfer = createSicrediTransfer } = {}) {
+export async function submitPendingPayout(payoutId, { sendTransfer = createSicrediTransfer, gatewayEnabled = isStoredTransferGatewayEnabled } = {}) {
+  const selected = await payoutRepository.findPayout({ where: { id: payoutId } });
+  if (!selected || selected.status !== "PENDENTE") return null;
+  const canSend = gatewayEnabled(selected);
   const claimed = await payoutRepository.updatePayouts({
     data: { status: "PROCESSANDO", tentativas: { increment: 1 } },
     where: { id: payoutId, status: "PENDENTE" },
   });
   if (claimed.count !== 1) return null;
+
+  // Only the winner of the PENDENTE claim may send OR restore the reservation.
+  if (!canSend) {
+    await restoreFailedPayout(payoutId, "Gateway do repasse indisponivel; valor devolvido ao saldo");
+    return null;
+  }
 
   const payout = await payoutRepository.findPayout({ include: payoutInclude, where: { id: payoutId } });
   let dispatched = false;
@@ -416,6 +425,7 @@ export async function reconcilePayout(payoutId, { lookupTransfer = getSicrediTra
   });
 
   try {
+    assertTransferEnvironment(payout);
     const transfer = payout.gateway === "SICREDI" ? await lookupTransfer(payout) : payout.gateway_transferencia_id
       ? await getAsaasTransfer(payout.gateway_transferencia_id)
       : await findUnknownPayoutTransfer(payout);
@@ -507,7 +517,7 @@ export async function reserveImmediatePixPayout(database, transactionId) {
       data: {
         // Wallet-only purchases remain possible with payouts disabled. The
         // queue will return the reservation to the sales wallet without sending.
-        gateway: isPixGatewayEnabled("transfer") ? selectPaymentGateway("transfer") : "ASAAS",
+        gateway: configuredPaymentGateway(),
         gateway_ambiente: gatewayEnvironment(),
         chave_pix_destino: account.chave_pix,
         conta_bancaria_id: account.id,
@@ -553,11 +563,6 @@ export async function queueImmediatePixPayout(transactionId) {
 
   if (!payout) return null;
   emitWalletUpdated({ transactionId, userIds: [payout.usuario_id] });
-  if (!isPixGatewayEnabled("transfer")) {
-    await payoutRepository.updatePayouts({ data: { status: "PROCESSANDO" }, where: { id: payout.id, status: "PENDENTE" } });
-    await restoreFailedPayout(payout.id, "Gateway Pix nao esta habilitado");
-    return payout;
-  }
   await submitPendingPayout(payout.id);
   return payout;
 }

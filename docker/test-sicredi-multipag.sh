@@ -68,6 +68,7 @@ docker_args=(
   --env SICREDI_MULTIPAG_PFX_PATH=
   --mount "type=bind,source=$certificate_file,target=/run/sicredi/client.cer,readonly"
   --mount "type=bind,source=$key_file,target=/run/sicredi/client.key,readonly"
+  --mount "type=bind,source=$repo_dir/apps/api/scripts/sicredi-multipag-smoke.js,target=/app/apps/api/scripts/sicredi-multipag-smoke.js,readonly"
 )
 if [[ -n "$chain_input" ]]; then
   docker_args+=(

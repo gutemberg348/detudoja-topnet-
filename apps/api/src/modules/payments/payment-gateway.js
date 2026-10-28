@@ -54,17 +54,24 @@ export function gatewayAvailability(capability, source = runtimeConfiguration())
   };
 }
 
-export function selectPaymentGateway(capability = "receive", source = runtimeConfiguration()) {
+export function configuredPaymentGateway(source = runtimeConfiguration()) {
   const primary = source.PAYMENTS_PRIMARY_GATEWAY || "SICREDI";
-  const fallback = source.PAYMENTS_FALLBACK_GATEWAY || "ASAAS";
-  if (!["SICREDI", "ASAAS"].includes(primary) || !["SICREDI", "ASAAS", "NONE"].includes(fallback)
-    || !["sandbox", "production"].includes(environmentFor(source)) || !["receive", "transfer"].includes(capability)) {
+  if (!["SICREDI", "ASAAS"].includes(primary)) {
     throw new AppError("Configuracao de gateways Pix invalida", 503);
   }
+  return primary;
+}
+
+export function selectPaymentGateway(capability = "receive", source = runtimeConfiguration()) {
+  const primary = configuredPaymentGateway(source);
+  if (!["sandbox", "production"].includes(environmentFor(source)) || !["receive", "transfer"].includes(capability)) {
+    throw new AppError("Configuracao de gateways Pix invalida", 503);
+  }
+  // Legacy PAYMENTS_FALLBACK_GATEWAY is deliberately ignored. Only an explicit
+  // change to PRIMARY selects another bank, even before the first request.
   const available = gatewayAvailability(capability, source);
   if (available[primary]) return primary;
-  if (available[fallback]) return fallback;
-  throw new AppError("Nenhum gateway Pix configurado para esta operacao e ambiente", 503);
+  throw new AppError("Gateway Pix selecionado indisponivel para esta operacao e ambiente", 503);
 }
 
 export function isPixGatewayEnabled(capability = "receive") {
@@ -73,6 +80,29 @@ export function isPixGatewayEnabled(capability = "receive") {
 
 export function gatewayEnvironment() {
   return environmentFor(runtimeConfiguration());
+}
+
+// Existing operations belong to their persisted bank, regardless of PRIMARY.
+// Enabled flags gate new sends only; reconciliation must still be possible.
+export function assertTransferEnvironment(record, source = runtimeConfiguration()) {
+  const environment = environmentFor(source);
+  if (!isExternalPixGateway(record?.gateway) || !["sandbox", "production"].includes(environment)
+    || record.gateway_ambiente !== environment) {
+    throw new AppError("Transferencia pertence a outro gateway ou ambiente; revisao necessaria", 409);
+  }
+  const matches = record.gateway === "SICREDI"
+    ? (source.SICREDI_MULTIPAG_ENV || "sandbox") === environment
+      && sicrediEndpointsMatchEnvironment(sicrediMultipagConfigFromEnv(source), environment, "transfer")
+      && (environment !== "sandbox" || source.SICREDI_APP_SANDBOX_ENABLED === "true")
+    : (/sandbox/i.test(source.ASAAS_API_URL || "https://api-sandbox.asaas.com/v3") ? "sandbox" : "production") === environment;
+  if (!matches) throw new AppError("Transferencia pertence a outro ambiente; revisao necessaria", 409);
+}
+
+export function isStoredTransferGatewayEnabled(record, source = runtimeConfiguration()) {
+  try {
+    assertTransferEnvironment(record, source);
+    return gatewayAvailability("transfer", source)[record.gateway] === true;
+  } catch { return false; }
 }
 
 export function assertSicrediEnvironment(record, capability) {

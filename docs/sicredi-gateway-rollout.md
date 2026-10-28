@@ -1,4 +1,8 @@
-# Sicredi principal, Asaas como fallback
+# Sicredi principal, Asaas com troca manual
+
+Para ativar o recebimento validado em producao, siga
+[ativacao Sicredi em producao](sicredi-production-activation.md). A selecao agora
+e exclusivamente manual: nao ha fallback, mesmo antes do primeiro envio.
 
 ## Aprovar pelo admin e usar saldo no app durante os testes
 
@@ -65,14 +69,14 @@ automatica foi adicionada nem executada.
 
 Esta funcionalidade nao prova homologacao/liquidacao no Sicredi. Para gerar QR
 Sicredi de verdade ainda faltam as credenciais/URLs da API Pix se somente
-Multipag estiver configurado. Asaas Sandbox pode seguir como fallback de
+Multipag estiver configurado. Asaas Sandbox pode ser selecionado manualmente para
 recebimento; o botao de teste suporta ambos, sempre respeitando o gateway salvo.
 
 Teste de banco descartavel: `test/sandbox-approval-ledger.test.js`, opt-in
 `SICREDI_DB_TESTS=true`, `DATABASE_URL` local com banco `sicredi_validation*`.
 
-O aplicativo agora tem roteamento por operacao: Sicredi e o principal quando
-habilitado/configurado, Asaas e a alternativa **antes do primeiro envio**.
+O aplicativo tem roteamento por operacao: Sicredi e o principal selecionado,
+Asaas e uma alternativa apenas mediante troca manual de PRIMARY.
 A migration `20260929190000_sicredi_gateway` adiciona o gateway, ambiente e
 dados de conciliacao. Aplicar na VPS antes de iniciar a nova API.
 Nao houve ativacao automatica de credenciais nem alteracao de arquivos .env reais.
@@ -96,10 +100,10 @@ recebimentos utilizam os escopos cob.read/cob.write/pix.read/pix.write e a
 chave recebedora. [Multipag](https://developers.sicredi.com.br/public/docs/getting-started-multipag)
 utiliza multipag.pix.pagar/consultar para saidas.
 
-## Seguranca do fallback
+## Selecao manual e conciliacao
 
 - A selecao considera habilitacao, configuracao e ambiente; nao e um teste de disponibilidade da rede.
-- Quando Sicredi nao esta habilitado/configurado para aquele fluxo, novas operacoes podem usar Asaas.
+- Quando Sicredi nao esta habilitado/configurado para aquele fluxo, novas operacoes nao sao enviadas ao Asaas.
 - Depois de persistir o gateway, nunca se troca de banco por timeout, 401, 404, 429, 5xx ou reinicio.
 - Respostas incertas mantem reservas e entram em conciliacao pelo mesmo identificador.
 - Um HTTP 404 apos o envio **nao prova** que o Pix nao foi efetivado.
@@ -117,7 +121,7 @@ Nao copie segredos para Git ou chat. Mantenha o Asaas configurado para o
 
 ```dotenv
 PAYMENTS_PRIMARY_GATEWAY=SICREDI
-PAYMENTS_FALLBACK_GATEWAY=ASAAS
+PAYMENTS_FALLBACK_GATEWAY=NONE
 PAYMENTS_ENVIRONMENT=sandbox
 SICREDI_APP_SANDBOX_ENABLED=true
 
@@ -137,7 +141,8 @@ SICREDI_PIX_ENABLED=false
 # Se os certificados forem os mesmos, os paths Multipag sao reutilizados.
 ```
 
-Com PIX_ENABLED=false, checkout/QR/depositos usam Asaas se disponivel.
+Com PIX_ENABLED=false e PRIMARY=SICREDI, novos Pix ficam indisponiveis.
+Asaas so e usado apos selecao explicita de PRIMARY=ASAAS.
 Para receber pelo Sicredi, configurar TODOS os campos Pix e habilitar.
 URLs de homologacao devem vir de documentacao do Sicredi; o codigo nao inventa essas URLs.
 O [guia oficial Pix](https://developer.sicredi.com.br/api-portal/sites/default/files/Guia_tecnico_integracoes_APIPix_Sicredi_v1.9.5.pdf)
@@ -186,7 +191,7 @@ O check e local: imprime provedor escolhido e verifica leitura/matching de
 certificado/chave, sem exibir segredos, autenticar, cobrar ou enviar dinheiro.
 Para Pix de recebimento indisponivel, mostra apenas os **nomes** das variaveis
 ausentes e se ambiente/URLs/flags batem. Se mostrar `selected: 'ASAAS'`, novos
-checkout, QR e depositos ainda usarao o fallback; pagamentos ja criados nunca
+checkout, QR e depositos usarao o Asaas selecionado manualmente; pagamentos ja criados nunca
 sao trocados de gateway. O painel financeiro tambem exibe essa escolha.
 Se houver erro, corrigir antes do up. Ele nao confirma escopos nem homologacao.
 
