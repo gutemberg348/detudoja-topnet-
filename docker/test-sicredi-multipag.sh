@@ -10,6 +10,8 @@ key_input="${2:-/etc/detudoja/certificados/sicredi-multipag.key}"
 target_environment="${3:-sandbox}"
 chain_input="${4:-}"
 scope_mode="${5:-consultar}"
+# Opcional: credenciais isoladas de teste, sem alterar o .env da aplicacao.
+credentials_input="${SICREDI_MULTIPAG_TEST_ENV_FILE:-$repo_dir/apps/api/.env}"
 
 if [[ -z "$certificate_input" || $# -gt 5 ]]; then
   printf 'Uso: bash docker/test-sicredi-multipag.sh CERTIFICADO_CER [CHAVE_KEY] [sandbox|production] [CADEIA_CER] [consultar|pagar]\n' >&2
@@ -34,10 +36,25 @@ if [[ -n "$chain_input" && ! -f "$chain_input" ]]; then
   printf 'Arquivo da cadeia Sicredi nao encontrado no servidor.\n' >&2
   exit 1
 fi
-if [[ ! -f apps/api/.env ]]; then
-  printf 'Configure SICREDI_MULTIPAG_CLIENT_ID e SICREDI_MULTIPAG_CLIENT_SECRET em apps/api/.env na VPS.\n' >&2
+if [[ ! -f "$credentials_input" ]]; then
+  printf 'Arquivo de credenciais ausente. Configure SICREDI_MULTIPAG_CLIENT_ID/SECRET no arquivo escolhido por SICREDI_MULTIPAG_TEST_ENV_FILE (padrao apps/api/.env).\n' >&2
   exit 1
 fi
+credentials_file="$(realpath -e -- "$credentials_input")"
+
+# Exibir somente nomes/linhas; nunca valores. Duplicatas poderiam selecionar
+# silenciosamente um par antigo no --env-file do Docker.
+awk '
+  /^[[:space:]]*SICREDI_MULTIPAG_CLIENT_(ID|SECRET)[[:space:]]*=/ {
+    key=$0; sub(/=.*/, "", key); gsub(/[[:space:]]/, "", key);
+    if (seen[key]++) {
+      printf "Configuracao duplicada: %s, linha %d. Mantenha uma unica definicao.\n", key, NR > "/dev/stderr";
+      invalid=1;
+    }
+  }
+  END { exit invalid ? 1 : 0 }
+' "$credentials_file"
+printf '[sicredi-multipag] Arquivo de credenciais: %s (variaveis SICREDI_MULTIPAG_CLIENT_ID/SECRET).\n' "$credentials_file"
 
 certificate_file="$(realpath -e -- "$certificate_input")"
 key_file="$(realpath -e -- "$key_input")"
@@ -60,7 +77,7 @@ fi
 docker_args=(
   --rm --read-only --cap-drop ALL --security-opt no-new-privileges
   --user 0:0
-  --env-file "$repo_dir/apps/api/.env"
+  --env-file "$credentials_file"
   --env "SICREDI_MULTIPAG_ENV=$target_environment"
   --env "SICREDI_MULTIPAG_SCOPE=$target_scope"
   --env SICREDI_MULTIPAG_CERT_PATH=/run/sicredi/client.cer

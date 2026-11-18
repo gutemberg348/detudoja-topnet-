@@ -3,6 +3,24 @@ import { createPrivateKey, X509Certificate } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import https from "node:https";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+
+export function safeMultipagAuthDiagnostics(payload, sensitiveValues = []) {
+  const secrets = [...sensitiveValues, payload?.access_token, payload?.refresh_token]
+    .filter((value) => typeof value === "string" && value.length)
+    .flatMap((value) => [value, encodeURIComponent(value)])
+    .sort((a, b) => b.length - a.length);
+  const clean = (value, limit) => {
+    if (typeof value !== "string") return null;
+    let text = value;
+    for (const secret of secrets) text = text.split(secret).join("[oculto]");
+    return text.replace(/[\r\n\t]/g, " ").slice(0, limit);
+  };
+  return {
+    error: clean(payload?.error, 80) || "Sem access_token; confira credenciais, escopo e certificado",
+    errorDescription: clean(payload?.error_description, 600),
+  };
+}
 
 const tokenUrls = {
   production: "https://mtls-api-parceiro.sicredi.com.br/thirdparty/auth/token",
@@ -122,7 +140,7 @@ function requestToken({ clientId, clientSecret, mtls, scope, tokenUrl }) {
       });
     });
     request.on("error", reject);
-    request.on("timeout", () => request.destroy(new Error("Timeout ao conectar no sandbox Sicredi")));
+    request.on("timeout", () => request.destroy(new Error("Timeout ao conectar no Multipag Sicredi")));
     request.end(form);
   });
 }
@@ -132,6 +150,12 @@ async function main() {
   const scope = consultationScope();
   const clientId = required("SICREDI_MULTIPAG_CLIENT_ID");
   const clientSecret = required("SICREDI_MULTIPAG_CLIENT_SECRET");
+  console.log("[sicredi-multipag] Configuracao (valores privados ocultos).", {
+    environment: targetEnvironment,
+    tokenUrl: tokenUrls[targetEnvironment],
+    scope,
+    credentialSource: "SICREDI_MULTIPAG_CLIENT_ID / SICREDI_MULTIPAG_CLIENT_SECRET",
+  });
   const mtls = await loadMtlsCredentials();
   const result = await requestToken({
     clientId,
@@ -142,13 +166,13 @@ async function main() {
   });
 
   if (result.statusCode < 200 || result.statusCode >= 300 || !result.payload.access_token) {
-    console.error("[sicredi-multipag] Falha na autenticacao.", {
+    console.error("[sicredi-multipag] Falha na autenticacao.", JSON.stringify({
       environment: targetEnvironment,
-      error: typeof result.payload.error === "string"
-        ? result.payload.error.slice(0, 80)
-        : "Sem access_token; confira credenciais, escopo e certificado",
+      ...safeMultipagAuthDiagnostics(result.payload, [clientId, clientSecret,
+        Buffer.from(`${clientId}:${clientSecret}`).toString("base64"),
+        process.env.SICREDI_MULTIPAG_CERT_PASSPHRASE]),
       statusCode: result.statusCode,
-    });
+    }, null, 2));
     process.exitCode = 1;
     return;
   }
@@ -171,7 +195,13 @@ async function main() {
   });
 }
 
-main().catch((error) => {
-  console.error(`[sicredi-multipag] ${error.message}`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  main().catch((error) => {
+    const { errorDescription } = safeMultipagAuthDiagnostics({ error_description: error.message }, [
+      process.env.SICREDI_MULTIPAG_CLIENT_ID, process.env.SICREDI_MULTIPAG_CLIENT_SECRET,
+      process.env.SICREDI_MULTIPAG_CERT_PASSPHRASE,
+    ]);
+    console.error(`[sicredi-multipag] ${errorDescription}`);
+    process.exitCode = 1;
+  });
+}
