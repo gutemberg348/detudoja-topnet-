@@ -13,7 +13,7 @@ const stateDirectory = '/etc/detudoja';
 const amountCents = 100;
 const cert = '/etc/detudoja/certificados/sicredi-multipag';
 
-function destination() {
+export function destination() {
   const values = {};
   for (const line of readFileSync(new URL('.env', import.meta.url), 'utf8').split(/\r?\n/)) {
     if (!line.trim() || line.trimStart().startsWith('#')) continue;
@@ -31,7 +31,7 @@ function destination() {
   return { payer: {cooperativa, conta, documento}, cpf, type, key: normalized, amountCents };
 }
 
-function bank(payer, sending) {
+export function bank(payer, sending) {
   const raw = readFileSync(new URL('../.env', import.meta.url), 'utf8');
   const config = { ...sicrediMultipagConfigFromEnv({ SICREDI_MULTIPAG_ENV: 'production' }),
     ...readMultipagPair(raw), ...payer, transferEnabled: sending,
@@ -47,19 +47,23 @@ export function attemptFile(directory, attempt) {
   throw Error('Use o comando sem complemento para o primeiro Pix ou acrescente segundo para o segundo Pix.');
 }
 
-// Reserva cada tentativa antes do POST, inclusive se a resposta do banco se perder.
-export async function sendOnce(file, order, client) {
+export function saveExclusive(file, order) {
   const fd = openSync(file, 'wx', 0o600);
   try { writeFileSync(fd, JSON.stringify(order)); fsyncSync(fd); } finally { closeSync(fd); }
   if (process.platform !== 'win32') {
     const dir = openSync(dirname(file), 'r');
     try { fsyncSync(dir); } finally { closeSync(dir); }
   }
+}
+
+// Reserva cada tentativa antes do POST, inclusive se a resposta do banco se perder.
+export async function sendOnce(file, order, client) {
+  saveExclusive(file, order);
   return client.createPixTransfer({ amountCents: order.amountCents, date: order.date, destinationDocument: order.cpf,
     destinationKey: order.key, destinationKeyType: order.type, transactionId: order.id });
 }
 
-function report(order, response) {
+export function report(order, response) {
   const checked = normalizeSicrediTransfer({ referencia_externa: order.id, valor_centavos: order.amountCents,
     documento_titular: order.cpf, chave_pix_destino: order.key, tipo_chave: order.type }, response);
   console.log({ idTransacao: order.id, statusSicredi: response.status, status: checked.status, valor: checked.value });
