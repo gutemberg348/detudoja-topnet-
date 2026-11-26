@@ -3,7 +3,28 @@ import test from 'node:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sendOnce } from '../../../testes/multipag/pix-pf/teste.mjs';
+import { attemptFile, sendOnce } from '../../../testes/multipag/pix-pf/teste.mjs';
+
+test('segundo Pix pode ser enviado com o primeiro pendente e cada comando mantém sua referência', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'multipag-pf-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const first = join(dir, 'multipag-teste-pf.json');
+  const second = attemptFile(dir, 'segundo');
+  assert.equal(attemptFile(dir), first);
+  assert.throws(() => attemptFile(dir, 'segudno'));
+  const sent = [];
+  const client = { async createPixTransfer(payload) {
+    sent.push(payload.transactionId);
+    return { status: 'PENDENTE' };
+  } };
+  const order = { id: 'PF1', amountCents: 100 };
+  await sendOnce(first, order, client);
+  await sendOnce(second, { ...order, id: 'PF2' }, client);
+  await assert.rejects(sendOnce(second, { ...order, id: 'PF3' }, client), { code: 'EEXIST' });
+  assert.deepEqual(sent, ['PF1', 'PF2']);
+  assert.equal(JSON.parse(readFileSync(first, 'utf8')).id, 'PF1');
+  assert.equal(JSON.parse(readFileSync(second, 'utf8')).id, 'PF2');
+});
 
 test('envio concorrente e repetição após timeout conservam uma única referência e um POST', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'multipag-pf-'));

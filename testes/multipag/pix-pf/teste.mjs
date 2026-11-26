@@ -9,7 +9,7 @@ import { createSicrediOAuthClient } from '../../../apps/api/src/modules/payments
 import { normalizeSicrediTransfer } from '../../../apps/api/src/modules/payments/sicredi/sicredi.validation.js';
 import { isValidCpf } from '../../../apps/api/src/utils/cpf.js';
 
-const state = '/etc/detudoja/multipag-teste-pf.json';
+const stateDirectory = '/etc/detudoja';
 const amountCents = 100;
 const cert = '/etc/detudoja/certificados/sicredi-multipag';
 
@@ -41,7 +41,13 @@ function bank(payer, sending) {
   return { oauth, client: createSicrediMultipagClient(config, { oauthFactory: () => oauth }) };
 }
 
-// Uma única tentativa nesta VPS. Persistir a referência antes de qualquer POST financeiro.
+export function attemptFile(directory, attempt) {
+  if (attempt === undefined) return resolve(directory, 'multipag-teste-pf.json');
+  if (attempt === 'segundo') return resolve(directory, 'multipag-teste-pf-segundo.json');
+  throw Error('Use o comando sem complemento para o primeiro Pix ou acrescente segundo para o segundo Pix.');
+}
+
+// Reserva cada tentativa antes do POST, inclusive se a resposta do banco se perder.
 export async function sendOnce(file, order, client) {
   const fd = openSync(file, 'wx', 0o600);
   try { writeFileSync(fd, JSON.stringify(order)); fsyncSync(fd); } finally { closeSync(fd); }
@@ -56,19 +62,29 @@ export async function sendOnce(file, order, client) {
 function report(order, response) {
   const checked = normalizeSicrediTransfer({ referencia_externa: order.id, valor_centavos: order.amountCents,
     documento_titular: order.cpf, chave_pix_destino: order.key, tipo_chave: order.type }, response);
-  console.log({ idTransacao: order.id, status: checked.status, valor: checked.value });
+  console.log({ idTransacao: order.id, statusSicredi: response.status, status: checked.status, valor: checked.value });
   if (checked.status === 'PENDING') console.log('Acompanhe com consultar. Confira eventuais aprovações pendentes no Sicredi.');
 }
 
-async function main(mode = 'preparar') {
+async function main(mode = 'preparar', attempt, ...extra) {
+  if (extra.length) throw Error('Use preparar, enviar ou consultar, seguido opcionalmente de segundo.');
+  const state = attemptFile(stateDirectory, attempt);
+  const query = attempt ? 'consultar segundo' : 'consultar';
   if (mode === 'consultar') {
-    if (!existsSync(state)) throw Error('Ainda não existe uma tentativa salva nesta VPS.');
+    if (!existsSync(state)) throw Error('Este Pix ainda não tem referência salva nesta VPS.');
     const order = JSON.parse(readFileSync(state, 'utf8'));
     report(order, await bank(order.payer, false).client.getPixTransfer(order.id));
     return;
   }
   if (!['preparar','enviar'].includes(mode)) throw Error('Use preparar, enviar ou consultar.');
-  if (existsSync(state)) throw Error('Já existe uma tentativa salva. Use consultar para acompanhar.');
+  if (existsSync(state)) throw Error(`Este Pix já tem uma tentativa salva. Use ${query} para acompanhar.`);
+  if (attempt === 'segundo') {
+    const first = attemptFile(stateDirectory);
+    if (!existsSync(first)) throw Error('Para o primeiro Pix, use o comando sem segundo.');
+    const original = JSON.parse(readFileSync(first, 'utf8'));
+    console.log('Primeiro Pix registrado com a referência', original.id);
+    console.log('O segundo Pix é um novo pagamento. Se os dois forem liquidados, o total será R$ 2,00.');
+  }
   const order = destination();
   const date = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   console.log('Pix real de R$ 1,00', { data: date, cooperativa: order.payer.cooperativa, conta: order.payer.conta,
@@ -80,21 +96,21 @@ async function main(mode = 'preparar') {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw Error('Abra um terminal interativo para confirmar o Pix.');
   const prompt = createInterface({input: process.stdin, output: process.stdout});
   try {
-    if (await prompt.question('Para transferir R$ 1,00 à chave acima, digite ENVIAR 1,00: ') !== 'ENVIAR 1,00') {
+    const confirmation = attempt ? 'ENVIAR OUTRO 1,00' : 'ENVIAR 1,00';
+    if (await prompt.question(`Para transferir R$ 1,00 à chave acima, digite ${confirmation}: `) !== confirmation) {
       console.log('Cancelado.'); return;
     }
   } finally { prompt.close(); }
   order.date = date;
   order.id = 'PF' + randomUUID().replaceAll('-', '');
-  console.log('Referência para consulta:', order.id);
+  console.log(`Para acompanhar esta tentativa, use ${query}.`);
   report(order, await sendOnce(state, order, client));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  main(process.argv[2]).catch(error => {
+  main(...process.argv.slice(2)).catch(error => {
     console.error(error.providerStatusCode ? `Sicredi: HTTP ${error.providerStatusCode} na etapa ${error.providerStage}.` :
       error.code === 'EEXIST' ? 'Outra tentativa já foi registrada.' : error.message);
-    if (existsSync(state)) console.error('Preserve o registro e use consultar com a mesma referência.');
     process.exitCode = 1;
   });
 }
